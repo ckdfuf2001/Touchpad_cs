@@ -223,7 +223,7 @@ public static class SelfTest
             ShowFakeArrow = true,
             LongPressMs = 500,
             MultiTapMs = 600,
-            HoldCancelDip = 100,
+            HoldCancelDip = 10,
         };
         _pad = new PadWindow(settings);
         // real startup path also does this - layout must be set or HitTest
@@ -417,33 +417,31 @@ public static class SelfTest
         // ---- 7. REGRESSION: a drag that then parks must stay silent. Once
         // the press is a drag, NOTHING may fire until release - the old
         // edge-triggered 120px test let the timer live and a right-click
-        // landed in the middle of the move. This subsumes the "incremental
-        // drag" and "fast drag" cases: both are the same rule, and keeping
-        // three copies of it only meant three places to go stale.
+        // landed in the middle of the move. Two rates, because the real
+        // complaint was about the SLOW one: at the old threshold of 100
+        // DIP/150ms a measured 0.13 DIP/ms positioning move (19) read as
+        // "still" and every attempt ended in a right-click.
+        // Task.Delay cannot honour 12ms (the Windows timer granularity is
+        // 15.6ms), so these rates sit far from the boundary on purpose -
+        // otherwise the cases measure the scheduler instead of the rule.
+        foreach (var (label, step, gap) in new[]
+        {
+            ("slow 0.13 DIP/ms = 19", 4, 30),
+            ("fast 1.6 DIP/ms = 240", 40, 25),
+        })
         {
             int n = Mark();
             await Settle();
             var d = new FakeTouch(id++);
             Down(d, px, py);
-            // 40 DIP / 25ms = 1.6 DIP/ms = 240 DIP per 150ms window, i.e. 2.4x
-            // the drag threshold. The rates here are deliberately far from the
-            // boundary: Task.Delay cannot honour 12ms (the Windows timer
-            // granularity is 15.6ms), so a "just above threshold" drag
-            // silently became a slow move and these tests measured the
-            // scheduler instead of the rule.
-            for (int i = 1; i <= 4; i++)
-            {
-                Move(d, px + 40 * i, py); await Task.Delay(25);
-            }
+            for (int i = 1; i <= 4; i++) { Move(d, px + step * i, py); await Task.Delay(gap); }
             await Task.Delay(700); // park: the rate check passes here
             Up(d);
             await Task.Delay(400);
             await Drain();
             var c = Since(n);
             // A travelled press owns itself until release - nothing at all.
-            // (The rate is what decides: a SLOW move is a hold on this panel,
-            // see case 9; only a real drag rate silences the long-press.)
-            Check(c.Count == 0, "drag then park = completely silent",
+            Check(c.Count == 0, $"drag then park ({label}) = completely silent",
                 $"ev={c.Count}");
         }
 
@@ -533,11 +531,11 @@ public static class SelfTest
             for (int i = 1; i <= 3; i++) { Move(d, px + 15 * i, py); await Task.Delay(16); }
             double early = Math.Abs(FakeX() - aimX) + Math.Abs(FakeY() - aimY);
             double x = px;
-            for (int i = 0; i < 20; i++)   // ~300ms more of 0.25 DIP/ms creep
+            for (int i = 0; i < 12; i++)   // 1 DIP / 40ms = 0.025 DIP/ms drift
             {
-                x += 4;
+                x += 1;
                 Move(d, x, py);
-                await Task.Delay(16);
+                await Task.Delay(40);
             }
             double creepX = FakeX(), creepY = FakeY();
             Up(d);
@@ -558,31 +556,30 @@ public static class SelfTest
         }
 
         // ---- 12. REGRESSION (real panel): a "still" finger on this digitizer
-        // reports a constant ~0.4 DIP/ms creep - measured 0-4px per event at
-        // 60Hz, ~65 DIP per 150ms, and 130-215 DIP accumulated inside one
-        // hold. Every DISTANCE-based rule cancelled the hold within 150ms
-        // (logged: "long canceled (net 40px)" 114ms after the press, on
-        // every attempt). A RATE rule must let it through. This is the other
-        // half of case 7: creep holds, a real drag does not.
+        // drifts ~0.4 DIP per SECOND - log-measured at 1-12 DIP of NET travel
+        // over half a second to three seconds, i.e. ~0.06 DIP per 150ms
+        // window. An earlier note claimed 0.4 DIP/ms (65 per 150ms), which
+        // forced the threshold up to 100 and made ordinary slow movement read
+        // as "still". A drifting finger must still count as a HOLD. This is
+        // the other half of case 7: drift holds, real movement does not.
         {
             int n = Mark();
             await Settle();
             var d = new FakeTouch(id++);
             Down(d, px, py);
-            // creep: ~4 DIP per event, 16ms apart = 0.25 DIP/ms
             double x = px;
-            for (int i = 0; i < 34; i++)   // ~550ms of creeping
+            for (int i = 0; i < 20; i++)   // ~800ms of drift at 0.025 DIP/ms
             {
-                x += 4;
+                x += 1;
                 Move(d, x, py);
-                await Task.Delay(16);
+                await Task.Delay(40);
             }
             Up(d);
             await Task.Delay(400);
             await Drain();
             var c = Since(n);
             Check(Dns(c, "right") == 1,
-                "creeping finger still counts as a HOLD (right click)",
+                "drifting finger still counts as a HOLD (right click)",
                 $"r={Dns(c, "right")} ev={c.Count}");
         }
         // ---- 13. no button left pressed. The real invariant is OUR stream

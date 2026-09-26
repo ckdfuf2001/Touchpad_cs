@@ -415,26 +415,31 @@ public partial class PadWindow : Window
         Math.Abs(p.X - f.Start.X) + Math.Abs(p.Y - f.Start.Y);
 
     /// <summary>
-    /// Is this press a DRAG rather than a hold? Measured on the real panel,
-    /// and this is the whole trick:
+    /// Is this press a DRAG rather than a hold? Measured on the real panel by
+    /// replaying the debug log (DIP of NET travel per 150ms window):
+    ///   resting finger   ~0.06  (0.4 DIP per SECOND of drift)
+    ///   slow deliberate  ~19    (0.13 DIP/ms - fine positioning)
+    ///   real drag        104-150 (0.7-1.0 DIP/ms)
     ///
-    ///   resting finger  ~0.43 DIP/ms  (a steady creep - 65 DIP per 150ms)
-    ///   real drag       ~2.5  DIP/ms  (375 DIP per 150ms)
+    /// The rate is measured as NET displacement between the oldest and newest
+    /// sample in the window, so tremor cancels itself out - that is the whole
+    /// reason a still finger reads as still. An earlier note here claimed the
+    /// resting creep was ~0.4 DIP/ms (65 per 150ms), which is 1000x the
+    /// measured value and put the default threshold (100) ABOVE ordinary slow
+    /// movement: every press that was not a hard flick was classified as
+    /// "still" and ended in a right-click.
     ///
-    /// Any rule based on DISTANCE FROM THE PRESS POINT cannot work here: the
-    /// creep integrates past every sane radius within ~150ms (logged: 40-72
-    /// DIP, cancelling every hold 114ms after the press), and a radius large
-    /// enough to absorb a 500ms creep (~215 DIP) is most of the pad, so short
-    /// drags would fire right-clicks instead. The PEAK RATE over a short
-    /// window separates them with a 5.8x margin and ignores how far the creep
-    /// has drifted in total. Once the peak trips, the press is a drag for
-    /// good - see Finger.PeakRate.
+    /// Any rule based on DISTANCE FROM THE PRESS POINT cannot work: it
+    /// integrates the drift and cancels every hold. The PEAK RATE over a
+    /// short window ignores how far the finger has drifted in total, and
+    /// once the peak trips, the press is a drag for good - see
+    /// Finger.PeakRate.
     /// </summary>
     private bool HoldIsDragging(Finger f)
     {
         if (f.PeakRate > _s.HoldCancelDip) return true;
-        // Safety net for a big, slow move: a 500ms creep cannot exceed ~215
-        // DIP, so a corner-to-corner travel is certainly deliberate.
+        // Safety net for a big, slow move: a resting finger drifts ~0.4 DIP/s,
+        // so a corner-to-corner travel is certainly deliberate.
         return Math.Abs(f.Last.X - f.OriginX) + Math.Abs(f.Last.Y - f.OriginY)
             > DragNetDip;
     }
@@ -467,7 +472,12 @@ public partial class PadWindow : Window
 
     private const int HoldWindowMs = 150;
     /// <summary>Net travel that is certainly a drag (see HoldIsDragging).</summary>
-    private const double DragNetDip = 300;
+    /// <summary>
+    /// Net travel from the press point that is certainly deliberate, whatever
+    /// the rate says. A resting finger drifts ~0.4 DIP/s, so even a 3s hold
+    /// stays around 1 DIP; anything past this is the user pointing somewhere.
+    /// </summary>
+    private const double DragNetDip = 60;
 
     /// <summary>
     /// Travel RATE over the last <paramref name="ms"/>, expressed in DIP per
@@ -572,10 +582,14 @@ public partial class PadWindow : Window
         if (_longAction is "right_click" or "middle_click")
         {
             _pendingMenuAction = _longAction;
-            DebugLog.Write($"GESTURE long-press -> {_longAction} (deferred to lift)");
+            DebugLog.Write($"GESTURE long-press -> {_longAction} (deferred to lift,"
+                + $" peak {RecentTravel(f):0}DIP/{HoldWindowMs}ms"
+                + $" of {_s.HoldCancelDip:0} threshold)");
             return;
         }
-        DebugLog.Write($"GESTURE long-press -> {_longAction}");
+        DebugLog.Write($"GESTURE long-press -> {_longAction}"
+            + $" (peak {RecentTravel(f):0}DIP/{HoldWindowMs}ms"
+            + $" of {_s.HoldCancelDip:0} threshold)");
         FirePressAction(_longAction, id);
     }
 

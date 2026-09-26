@@ -57,23 +57,29 @@ public sealed class AppSettings
     public bool ShowFakeArrow { get; set; } = true;
     public int LongPressMs { get; set; } = 500;
     /// <summary>
-    /// Hold vs drag threshold: travel in DIP within the last 150ms above
+    /// Hold vs drag threshold: NET travel in DIP within the last 150ms above
     /// which a press counts as a drag and its long-press dies. It MUST be a
-    /// rate, not a distance from the press point: this panel reports a
-    /// steady ~0.4 DIP/ms creep for a resting finger (65 DIP/150ms) while a
-    /// real drag reaches ~2.5 DIP/ms (375 DIP/150ms). A distance rule
-    /// integrates the creep and cancels every hold within ~150ms.
+    /// rate, not a distance from the press point.
+    ///
+    /// Measured on this panel (log analysis of real presses, DIP per 150ms):
+    ///   resting finger   ~0.06   (0.4 DIP per SECOND of drift)
+    ///   slow deliberate  ~19     (0.13 DIP/ms - fine positioning)
+    ///   real drag        104-150 (0.7-1.0 DIP/ms)
+    /// The old default of 100 sat above the SLOW movement, so anything short
+    /// of a real flick was read as "still" and every attempt ended in a
+    /// right-click ("only a big move avoids the long press"). The default
+    /// belongs in the log between the drift and the slow movement: 10 leaves
+    /// ~165x over the noise floor and still catches the slowest move.
     /// </summary>
-    public double HoldCancelDip { get; set; } = 100;
+    public double HoldCancelDip { get; set; } = 10;
     /// <summary>
     /// Pointer gain while a hold is pending, 1.0 = off (immediate movement,
-    /// the default). Below 1.0 the panel's resting creep (~0.4 DIP/ms, which
-    /// drags the cursor hundreds of px mid-hold) is softened, blending back
+    /// the default). Below 1.0 a drifting finger is softened, blending back
     /// to full gain as the stroke becomes a real drag.
-    /// NOTE: do not "fix" the creep by pinning the pointer instead - normal
-    /// movement on this panel is the same speed as the creep (0.33-0.81
-    /// DIP/ms measured), so any pin threshold either never releases (the pad
-    /// feels dead for 500ms) or releases on the creep anyway.
+    /// NOTE: do not "fix" the drift by pinning the pointer instead - normal
+    /// movement on this panel is faster than the drift, so any pin threshold
+    /// either never releases (the pad feels dead for 500ms) or releases on
+    /// the drift anyway.
     /// </summary>
     public double HoldDamp { get; set; } = 1.0;
     /// <summary>
