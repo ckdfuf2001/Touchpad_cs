@@ -396,6 +396,63 @@ public static class SelfTest
             Check(Math.Abs(cx - mx) <= 2 && Math.Abs(cy - my) <= 2,
                 "real cursor back after the drag", $"now=({cx},{cy}) want=({mx},{my})");
         }
+        // ---- 5. the same after a DOUBLE tap: the third press must still be
+        // able to grab. Reported as "no drag after a double-click". Both
+        // timings matter: inside the 600ms chain window the press is a
+        // chained one, and a human needs longer than that between the double
+        // and the next press - where the press used to be a PLAIN one, which
+        // never arms a grab at all (it only moves the pointer and the
+        // release emits nothing).
+        foreach (var (label, gap) in new[]
+        {
+            ("inside the chain window", 120),
+            ("after the chain window", 900),
+        })
+        {
+            int n = Mark();
+            await Settle();
+            var a = new FakeTouch(id++);
+            Down(a, px, py); await Task.Delay(60); Up(a);
+            await Task.Delay(120);
+            var b = new FakeTouch(id++);
+            Down(b, px, py); await Task.Delay(60); Up(b);
+            await Task.Delay(gap);
+            var c = new FakeTouch(id++);
+            Down(c, px, py); await Task.Delay(150);
+            for (int i = 1; i <= 5; i++)
+            {
+                Move(c, px + 20 * i, py); await Task.Delay(30);
+            }
+            await Task.Delay(100);
+            Up(c);
+            await Task.Delay(500);
+            await Drain();
+            var ev = Since(n);
+            int ldowns = Dns(ev, "left"), rdowns = Dns(ev, "right");
+            // 3 from the double (1 + 2) + 1 from the grab.
+            Check(ldowns == 4 && rdowns == 0,
+                $"double-tap then press+move ({label}) = drag still grabs",
+                $"l={ldowns} (want 4) r={rdowns} ev={ev.Count}");
+        }
+        // ---- 5b. and the grab must NOT leak into ordinary use: a press with
+        // no multi-tap before it is a plain pointer move, and its release
+        // emits nothing. If this ever grabs, every cursor move on the pad
+        // would turn into a drag.
+        {
+            int n = Mark();
+            await Settle();
+            var d = new FakeTouch(id++);
+            Down(d, px, py); await Task.Delay(150);
+            for (int i = 1; i <= 5; i++) { Move(d, px + 20 * i, py); await Task.Delay(30); }
+            await Task.Delay(100);
+            Up(d);
+            await Task.Delay(400);
+            await Drain();
+            var ev = Since(n);
+            Check(ev.Count == 0,
+                "a plain press+move is a pointer move, NOT a grab",
+                $"ev={ev.Count}");
+        }
         // ---- 6. click, then press and HOLD STILL: now a real hold, so the
         // hold action (right click) must fire. It used to be swallowed and
         // turned into a silent drag-hold instead.

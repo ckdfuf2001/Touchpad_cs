@@ -391,6 +391,14 @@ public partial class PadWindow : Window
     /// drag and steal the long-press entirely.
     /// </summary>
     private int _dragArmId = -1;
+    /// <summary>
+    /// A completed double/triple tap leaves the grab armed for one more
+    /// press (see the plain-press branch in OnTouchDown). Twice MultiTapMs:
+    /// the chain window itself is deliberately short so a slow third tap
+    /// does not turn into a triple-click, but the human pause after a
+    /// double-click is much longer than the gap between two taps.
+    /// </summary>
+    private DateTime _grabArmUntil = DateTime.MinValue;
     private int _twoId = -1;        // second concurrent finger
     private bool _twoCandidate;
     private bool _twoActive;        // a two-finger gesture is/was in flight
@@ -1325,7 +1333,17 @@ public partial class PadWindow : Window
                     _thirdPress = false;
                     _secondId = -1;
                     _thirdId = -1;
-                    _dragArmId = -1;
+                    // A plain press can only be a grab if a multi-tap just
+                    // happened. Without that arm, press+move is a plain
+                    // pointer move and the release emits nothing - which is
+                    // what "no drag after a double-click" looked like: a
+                    // person needs more than the 600ms chain window between
+                    // the double and the next press, and then the grab was
+                    // silently unavailable. Arming it does NOT break cursor
+                    // movement: a quick press still clicks, only press+move
+                    // grabs, and the arm expires on its own.
+                    _dragArmId = DateTime.Now < _grabArmUntil
+                        ? e.TouchDevice.Id : -1;
                     ArmLong(e.TouchDevice.Id, G.LongPress);
                 }
             }
@@ -1721,6 +1739,11 @@ public partial class PadWindow : Window
                         if (_dragHold && id == _dragId)
                             ReleaseActionButton();
                         DoGesture(G.TripleTap);
+                        // Leave the grab armed for the next press: a
+                        // triple-click is a "select this line" intent, and
+                        // what the user does next is usually grab and move.
+                        _grabArmUntil = DateTime.Now.AddMilliseconds(
+                            _s.MultiTapMs * 2);
                     }
                     else if (id == _secondId && _secondPress)
                     {
@@ -1743,6 +1766,10 @@ public partial class PadWindow : Window
                         // (measured user report: "needs three touches").
                         _pendingTripleUntil = DateTime.Now.AddMilliseconds(_s.MultiTapMs);
                         _pendingTapUntil = DateTime.MinValue;
+                        // Same as above: after a double-click the next press
+                        // is a grab, even after the chain window has closed.
+                        _grabArmUntil = DateTime.Now.AddMilliseconds(
+                            _s.MultiTapMs * 2);
                         // else: hold timer already consumed it.
                     }
                     else if (_longFired)
