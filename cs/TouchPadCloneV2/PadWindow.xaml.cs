@@ -313,7 +313,22 @@ public partial class PadWindow : Window
     private void RememberPhysicalCursor()
     {
         if (UnifiedPhysical) return;
-        try { var (cx, cy) = InputSim.Cursor(); _physX = cx; _physY = cy; }
+        try
+        {
+            var (cx, cy) = InputSim.Cursor();
+            // Never record OUR OWN position as the physical one. Right after a
+            // release the cursor is still parked at the drop point - the hand-
+            // back is deliberately deferred so a drop can be processed - and a
+            // new session can start inside that window (measured: SESSION begin
+            // phys=(161,252) 280ms after a release at (162,253)). Capturing it
+            // made _physX/_physY the drop point, so every later hand-back moved
+            // the physical mouse's cursor THERE instead of where the mouse
+            // actually is, which reads as "the release always happens at the
+            // real mouse, over the pad".
+            if (DateTime.Now < _cursorFreeAt) return;
+            if (Math.Abs(cx - _fakeX) <= 2 && Math.Abs(cy - _fakeY) <= 2) return;
+            _physX = cx; _physY = cy;
+        }
         catch { }
     }
 
