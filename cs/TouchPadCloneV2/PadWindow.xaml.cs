@@ -119,7 +119,28 @@ public partial class PadWindow : Window
         // roams off-screen and neither cursor is visible anywhere.
         _fakeX = Math.Max(x0, Math.Min(x1, _fakeX));
         _fakeY = Math.Max(y0, Math.Min(y1, _fakeY));
-        if (RealCursorOnly) PushOutOfOwnPad();
+    }
+
+    /// <summary>
+    /// Move the aimed position out of the pad's own screen rectangle, and put
+    /// the cursor there. Called immediately before a press (a click or a drag
+    /// grab), because a press over the pad lands on our own window and is
+    /// lost - SafeClick does the same thing for a single click.
+    ///
+    /// Deliberately NOT called on every move: the cursor has to be able to
+    /// cross the pad's area like any other part of the screen. Applying it to
+    /// every event trapped the cursor on the pad's border and the pad became a
+    /// dead zone ("the mouse cannot move past the pad's edge").
+    /// </summary>
+    private void PullOutOfOwnPad()
+    {
+        double bx = _fakeX, by = _fakeY;
+        PushOutOfOwnPad();
+        if (bx == _fakeX && by == _fakeY) return;
+        InputSim.SetCursor((int)_fakeX, (int)_fakeY);
+        InputSim.NotePosition((int)_fakeX, (int)_fakeY);
+        _realSentX = (int)_fakeX; _realSentY = (int)_fakeY;
+        DebugLog.Write($"PULL out of own pad -> ({_fakeX:0},{_fakeY:0})");
     }
 
     /// <summary>
@@ -294,6 +315,10 @@ public partial class PadWindow : Window
         RememberPhysicalCursor();
         _session = true;
         EnterPersistentFake();
+        // One cursor: fight the system's pull onto the touch contact from the
+        // first event, not only while a button is held - it moves the cursor
+        // when it feels like it, and a plain move is just as vulnerable.
+        if (RealCursorOnly) StartDragKeeper();
         DebugLog.Write($"SESSION begin fake=({_fakeX:0},{_fakeY:0}) phys=({_physX},{_physY})");
     }
 
@@ -982,6 +1007,11 @@ public partial class PadWindow : Window
         // "net" came out as the -1e9 sentinel squared (1.4 billion px).
         _dragFromX = _fakeX; _dragFromY = _fakeY;
         _dragPathDip = 0;
+        // A press must not land on the pad's own rectangle: the pad is on top,
+        // so the click or the drag would be delivered to us instead of the
+        // target. Only here, at the moment of the press - doing it on every
+        // move trapped the cursor on the pad's border.
+        if (RealCursorOnly) PullOutOfOwnPad();
         _keepCursorOnce = true;        // no hand-back between click and hold
         SafeClick("left");
         _dragHold = true;
@@ -1012,11 +1042,11 @@ public partial class PadWindow : Window
         _dragKeeper?.Stop();
         _dragKeeper = new System.Windows.Threading.DispatcherTimer
         {
-            Interval = TimeSpan.FromMilliseconds(15),
+            Interval = TimeSpan.FromMilliseconds(8),
         };
         _dragKeeper.Tick += (_, _) =>
         {
-            if (!_session || _actionHeld == null)
+            if (!_session)
             {
                 _dragKeeper?.Stop();
                 return;
@@ -1078,8 +1108,13 @@ public partial class PadWindow : Window
 
     private void PressUp(string button)
     {
-        _dragKeeper?.Stop();
-        _dragKeeper = null;
+        // In one-cursor mode the keeper runs for the whole session (a plain
+        // move needs it too); otherwise it exists only for the drag.
+        if (!RealCursorOnly)
+        {
+            _dragKeeper?.Stop();
+            _dragKeeper = null;
+        }
         if (_session)
         {
             // Pin the position with SetCursorPos immediately before the
@@ -2022,35 +2057,32 @@ public partial class PadWindow : Window
                     }
                     if (RealCursorOnly)
                     {
-                        // DRIVE THE REAL CURSOR. Not a model of it - the real
-                        // position IS the state: read where the cursor is,
-                        // add this event's finger delta scaled by the gain,
-                        // put it there. A "fake = press-start + travel*gain"
-                        // model can disagree with reality the moment anything
-                        // clamps or nudges it (screen edge, the pad's own
-                        // rectangle), and then the cursor stops while the
-                        // model keeps accumulating - so it jumps later, or
-                        // never quite goes where the finger went. Reading the
-                        // truth every event cannot drift.
-                        if (Math.Abs(dx) + Math.Abs(dy) >= DeadDipPerEvent)
+                        // The MODEL is the state, not the cursor read-back.
+                        //
+                        // Reading the cursor and adding the finger delta looks
+                        // like "real control", but the system moves the cursor
+                        // onto the live touch contact, and every read then
+                        // starts from that yanked position - the deltas feed
+                        // the yank back into the cursor and it ends up pinned
+                        // near where the finger is ("the boundary is the x,y
+                        // of the touch"). Measured in the log as DIVERGED with
+                        // actual sitting on our own pad.
+                        //
+                        // Press-start + travel x gain cannot be poisoned that
+                        // way: it never reads the cursor. The yank is fought
+                        // on the output side instead - every event re-asserts
+                        // this position, and a keeper timer re-asserts it
+                        // between events (see StartDragKeeper).
+                        if (Math.Abs(tx) + Math.Abs(ty) >= DeadDip)
                         {
-                            var (rx, ry) = InputSim.Cursor();
-                            _fakeX = rx + dx * _dpi * gain;
-                            _fakeY = ry + dy * _dpi * gain;
+                            _fakeX = f.Fx0 + tx * _dpi * gain;
+                            _fakeY = f.Fy0 + ty * _dpi * gain;
                         }
                         ClampFake();
-                        InputSim.SetCursor((int)_fakeX, (int)_fakeY);
-                        InputSim.NotePosition((int)_fakeX, (int)_fakeY);
-                        // The cursor may have been clamped or pushed out of
-                        // the pad: store what actually happened, so clicks and
-                        // drags aim at the real thing rather than at the
-                        // number we asked for.
-                        var (nx, ny) = InputSim.Cursor();
-                        if (Math.Abs(nx - _fakeX) > 1 || Math.Abs(ny - _fakeY) > 1)
-                        {
-                            _fakeX = nx; _fakeY = ny;
-                        }
-                        _realSentX = (int)_fakeX; _realSentY = (int)_fakeY;
+                        int ix = (int)_fakeX, iy = (int)_fakeY;
+                        InputSim.SetCursor(ix, iy);
+                        InputSim.NotePosition(ix, iy);
+                        _realSentX = ix; _realSentY = iy;
                     }
                     else
                     {
