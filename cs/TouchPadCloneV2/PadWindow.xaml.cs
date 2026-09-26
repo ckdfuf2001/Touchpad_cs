@@ -607,9 +607,20 @@ public partial class PadWindow : Window
         if ((_syncProbeN++ % 6) == 0)
         {
             var (ax, ay) = InputSim.Cursor();
+            bool off = Math.Abs(ax - tx) > 2 || Math.Abs(ay - ty) > 2;
             DebugLog.Write($"DRAG sync -> ({tx},{ty}) actual=({ax},{ay})"
-                + (Math.Abs(ax - tx) > 2 || Math.Abs(ay - ty) > 2 ? " DIVERGED" : "")
+                + (off ? " DIVERGED" : "")
                 + $" under {DescribeWindowAt(ax, ay)}");
+            // Put it straight back. The yank happens AFTER our SetCursorPos
+            // (the system moves the cursor when it processes the touch), so
+            // waiting for the next move event leaves the cursor - and, if the
+            // release lands in that window, the drop - on the pad.
+            if (off)
+            {
+                InputSim.SetCursor(tx, ty);
+                ForgetRealCursor();
+                DebugLog.Write($"DRAG re-assert -> ({tx},{ty})");
+            }
         }
     }
 
@@ -1011,6 +1022,15 @@ public partial class PadWindow : Window
         Surface.PreviewTouchDown += OnTouchDown;
         Surface.PreviewTouchMove += OnTouchMove;
         Surface.PreviewTouchUp += OnTouchUp;
+        // Marking the TOUCH handled is not enough: a touch is first promoted
+        // to a STYLUS, and an unhandled stylus is promoted again to a MOUSE -
+        // and the system moves the cursor onto the contact as part of that.
+        // That yank is what dragged the cursor (and the drop) onto the pad
+        // mid-drag (logged: DRAG sync DIVERGED, actual sitting on our own
+        // pad). Swallow the promoted touch here; a real pen is left alone.
+        Surface.PreviewStylusDown += SwallowTouchStylus;
+        Surface.PreviewStylusMove += SwallowTouchStylus;
+        Surface.PreviewStylusUp += SwallowTouchStylus;
         // A contact that vanishes without TouchUp (capture stolen, driver
         // cancel) must still release: treat capture loss as a release.
         Surface.LostTouchCapture += OnTouchCaptureLost;
@@ -1569,6 +1589,10 @@ public partial class PadWindow : Window
             Fx0 = _fakeX, Fy0 = _fakeY,
         };
         _fingers[e.TouchDevice.Id] = f;
+        // Claim the contact for the whole gesture. A touch that is not
+        // captured is the one WPF promotes (to stylus, then to mouse), and
+        // the promotion is what moves the system cursor onto the pad.
+        try { Surface.CaptureTouch(e.TouchDevice); } catch { }
         if (_fingers.Count == 1)
         {
             _pressNote = "";
@@ -2280,6 +2304,23 @@ public partial class PadWindow : Window
     // pad tiles still work for a user who drives them with a mouse.
     // Synthetic output right after our own park/click is suppressed via
     // _suppressPhysicalUntil, never mistaken for physical.
+    /// <summary>
+    /// Swallow a TOUCH that WPF promoted to a stylus event. Leaving it
+    /// unhandled lets WPF promote it again to a mouse, and the system moves
+    /// the cursor onto the contact point for that - which lands on the pad,
+    /// because that is where the finger is. A real pen (TabletDeviceType
+    /// .Stylus) is passed through untouched.
+    /// </summary>
+    private static void SwallowTouchStylus(object sender, StylusEventArgs e)
+    {
+        try
+        {
+            if (e.StylusDevice?.TabletDevice?.Type == TabletDeviceType.Touch)
+                e.Handled = true;
+        }
+        catch { }
+    }
+
     private void OnMouseDown(object sender, WMouseButtonEventArgs e)
     {
         DebugLog.Write($"M-DOWN stylus={e.StylusDevice != null} fingers={_fingers.Count} suppressed={DateTime.Now < _suppressPhysicalUntil}");
