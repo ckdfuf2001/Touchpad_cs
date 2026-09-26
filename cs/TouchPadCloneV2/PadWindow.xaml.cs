@@ -544,11 +544,19 @@ public partial class PadWindow : Window
         // to the screen edge (measured: pinned at y=4 while the virtual cursor
         // was at 356). Absolute is exact and idempotent.
         InputSim.MoveTo(tx, ty);
-        if ((_syncProbeN++ % 12) == 0)
+        // Read back often, and say which window is under the cursor. The log
+        // line otherwise only records what we ASKED for; this records what the
+        // system did and whether the drag is still over the target at all.
+        // An external harness cannot answer this: SetForegroundWindow fails
+        // from a non-foreground process, so a test that injects a drag into
+        // another app is unreliable here (measured: focus lost after the first
+        // attempt, and the clipboard/UIA reads came back empty or errored).
+        if ((_syncProbeN++ % 6) == 0)
         {
             var (ax, ay) = InputSim.Cursor();
             DebugLog.Write($"DRAG sync -> ({tx},{ty}) actual=({ax},{ay})"
-                + (Math.Abs(ax - tx) > 2 || Math.Abs(ay - ty) > 2 ? " DIVERGED" : ""));
+                + (Math.Abs(ax - tx) > 2 || Math.Abs(ay - ty) > 2 ? " DIVERGED" : "")
+                + $" under {DescribeWindowAt(ax, ay)}");
         }
     }
 
