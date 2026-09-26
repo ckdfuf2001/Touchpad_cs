@@ -2021,11 +2021,20 @@ public partial class PadWindow : Window
                     {
                         _longFired = false; // long-press already fired
                     }
-                    else if (_s.TapToClick)
-                    {
-                        DoGesture(G.Tap);
-                        _pendingTapUntil = DateTime.Now.AddMilliseconds(_s.MultiTapMs);
-                    }
+            else if (_s.TapToClick)
+            {
+                DoGesture(G.Tap);
+                _pendingTapUntil = DateTime.Now.AddMilliseconds(_s.MultiTapMs);
+                // A single tap arms the grab too, not just a double/triple
+                // tap. The flow is "tap the thing, then press and move it",
+                // and those two are a second or more apart at human speed: the
+                // 600ms chain window has closed by then, so the press was read
+                // as a plain one, no grab was armed, and the drag produced NO
+                // button at all - the cursor roamed and nothing was pressed or
+                // released. Logged: TOUCHDOWN, long canceled, cursor moves,
+                // TOUCHUP gesture, with no BTN down and no DRAG end anywhere.
+                _grabArmUntil = DateTime.Now.AddMilliseconds(_s.MultiTapMs * 2);
+            }
                     break;
                 }
                 case TileAction.Pad when f.Moved:

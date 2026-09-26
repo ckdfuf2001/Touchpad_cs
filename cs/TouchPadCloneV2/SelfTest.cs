@@ -281,6 +281,16 @@ public static class SelfTest
         async Task Settle()
         {
             CenterFakeCursor();
+            // The grab window outlives the 750ms settle (it is 2x MultiTapMs),
+            // so a tap near the end of one case would arm a grab in the next
+            // and turn its plain press into a drag. Cases share the pad, so
+            // clear it here like the cursor.
+            try
+            {
+                typeof(PadWindow).GetField("_grabArmUntil", NF)
+                    ?.SetValue(_pad, DateTime.MinValue);
+            }
+            catch { }
             await Task.Delay(750);
         }
 
@@ -476,6 +486,32 @@ public static class SelfTest
             Check(Dns(ev, "right") == 0 && Dns(ev, "left") == 2,
                 "tap, press, pause 700ms, move = drag and never a right-click",
                 $"l={Dns(ev, "left")} (want 2) r={Dns(ev, "right")}");
+        }
+        // ---- 4e. THE reported flow, at human speed: tap, then a SECOND later
+        // press and move. The 600ms chain window has closed by then, so the
+        // press used to be a plain one with no grab armed - it roamed the
+        // cursor and produced NO button at all (logged: TOUCHDOWN, long
+        // canceled, cursor moves, TOUCHUP gesture, and no BTN down / DRAG end
+        // anywhere). A single tap now arms the grab as well.
+        {
+            int n = Mark();
+            await Settle();
+            var a = new FakeTouch(id++);
+            Down(a, px, py); await Task.Delay(60); Up(a);      // the click
+            await Task.Delay(1000);                            // human gap
+            var b = new FakeTouch(id++);
+            Down(b, px, py); await Task.Delay(120);
+            for (int i = 1; i <= 4; i++) { Move(b, px + 25 * i, py); await Task.Delay(30); }
+            await Task.Delay(100);
+            Up(b);
+            await Task.Delay(500);
+            await Drain();
+            var ev = Since(n);
+            int downs = ev.Count(e => e.Kind == "down" && e.Btn == "left");
+            int ups = ev.Count(e => e.Kind == "up" && e.Btn == "left");
+            Check(downs == 1 && ups == 1,
+                "tap, wait 1s, press+move = a real drag press and release",
+                $"down={downs} up={ups} ev={ev.Count}");
         }
         // ---- 5. the same after a DOUBLE tap: the third press must still be
         // able to grab. Reported as "no drag after a double-click". Both
