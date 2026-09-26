@@ -30,6 +30,14 @@ public partial class PadWindow : Window
     /// (User request + fixes aim drift that broke long-press menus.)
     /// </summary>
     private const double DeadDip = 6;
+    /// <summary>
+    /// Per-event deadzone, used only in one-cursor mode where each event is
+    /// applied as a delta rather than measured against the press point. Much
+    /// smaller than DeadDip: a single touch event moves a fraction of a
+    /// coarse press-travel threshold, and a per-event gate that large would
+    /// swallow ordinary slow movement.
+    /// </summary>
+    private const double DeadDipPerEvent = 0.5;
     private const double SwipeDip = 60;
     private const int MaxStepPx = 256;
     private const int VkTabTip = 0x09;
@@ -2012,21 +2020,56 @@ public partial class PadWindow : Window
                             f.PeakRate / Math.Max(1, _s.HoldCancelDip), 0, 1);
                         gain *= _s.HoldDamp + (1 - _s.HoldDamp) * fast;
                     }
-                    if (Math.Abs(tx) + Math.Abs(ty) >= DeadDip)
+                    if (RealCursorOnly)
                     {
-                        _fakeX = f.Fx0 + tx * _dpi * gain;
-                        _fakeY = f.Fy0 + ty * _dpi * gain;
+                        // DRIVE THE REAL CURSOR. Not a model of it - the real
+                        // position IS the state: read where the cursor is,
+                        // add this event's finger delta scaled by the gain,
+                        // put it there. A "fake = press-start + travel*gain"
+                        // model can disagree with reality the moment anything
+                        // clamps or nudges it (screen edge, the pad's own
+                        // rectangle), and then the cursor stops while the
+                        // model keeps accumulating - so it jumps later, or
+                        // never quite goes where the finger went. Reading the
+                        // truth every event cannot drift.
+                        if (Math.Abs(dx) + Math.Abs(dy) >= DeadDipPerEvent)
+                        {
+                            var (rx, ry) = InputSim.Cursor();
+                            _fakeX = rx + dx * _dpi * gain;
+                            _fakeY = ry + dy * _dpi * gain;
+                        }
+                        ClampFake();
+                        InputSim.SetCursor((int)_fakeX, (int)_fakeY);
+                        InputSim.NotePosition((int)_fakeX, (int)_fakeY);
+                        // The cursor may have been clamped or pushed out of
+                        // the pad: store what actually happened, so clicks and
+                        // drags aim at the real thing rather than at the
+                        // number we asked for.
+                        var (nx, ny) = InputSim.Cursor();
+                        if (Math.Abs(nx - _fakeX) > 1 || Math.Abs(ny - _fakeY) > 1)
+                        {
+                            _fakeX = nx; _fakeY = ny;
+                        }
+                        _realSentX = (int)_fakeX; _realSentY = (int)_fakeY;
                     }
-                    ClampFake();
-                    // While a button is down the OS cursor IS the drag cursor,
-                    // so it has to follow the virtual one. It used to stay
-                    // parked at the press point for the whole gesture, and
-                    // the drag was carried by whatever else wrote the cursor -
-                    // the OS touch-to-mouse promotion, unscaled and on a
-                    // different baseline. That is why a touch drag came out
-                    // as a shaky circle while the same drag with the physical
-                    // mouse (InputSim.Move on every event) was smooth.
-                    if (ButtonHeld() || RealCursorOnly) SyncRealCursorToFake();
+                    else
+                    {
+                        if (Math.Abs(tx) + Math.Abs(ty) >= DeadDip)
+                        {
+                            _fakeX = f.Fx0 + tx * _dpi * gain;
+                            _fakeY = f.Fy0 + ty * _dpi * gain;
+                        }
+                        ClampFake();
+                        // While a button is down the OS cursor IS the drag
+                        // cursor, so it has to follow the virtual one. It used
+                        // to stay parked at the press point for the whole
+                        // gesture, and the drag was carried by whatever else
+                        // wrote the cursor - the OS touch-to-mouse promotion,
+                        // unscaled and on a different baseline. That is why a
+                        // touch drag came out as a shaky circle while the same
+                        // drag with the physical mouse was smooth.
+                        if (ButtonHeld()) SyncRealCursorToFake();
+                    }
                     // NOTE: the real cursor is deliberately NEVER chased here.
                     // It stays (hidden) where it was; only the fake roams.
                     // Clicks carry their own absolute position (see ClickAt).
