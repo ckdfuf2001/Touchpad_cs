@@ -95,7 +95,7 @@ public partial class PadWindow : Window
     /// verified on the device - the selftest calls handlers directly and never
     /// goes through the input pipeline, so it cannot see any of this.
     /// </summary>
-    private const bool RealCursorOnly = false;
+    private static readonly bool RealCursorOnly = false;
 
     /// <summary>
     /// Until when the pad's touch surface must let mouse input through to the
@@ -199,61 +199,6 @@ public partial class PadWindow : Window
         // roams off-screen and neither cursor is visible anywhere.
         _fakeX = Math.Max(x0, Math.Min(x1, _fakeX));
         _fakeY = Math.Max(y0, Math.Min(y1, _fakeY));
-    }
-
-    /// <summary>
-    /// Move the aimed position out of the pad's own screen rectangle, and put
-    /// the cursor there. Called immediately before a press (a click or a drag
-    /// grab), because a press over the pad lands on our own window and is
-    /// lost - SafeClick does the same thing for a single click.
-    ///
-    /// Deliberately NOT called on every move: the cursor has to be able to
-    /// cross the pad's area like any other part of the screen. Applying it to
-    /// every event trapped the cursor on the pad's border and the pad became a
-    /// dead zone ("the mouse cannot move past the pad's edge").
-    /// </summary>
-    private void PullOutOfOwnPad()
-    {
-        double bx = _fakeX, by = _fakeY;
-        PushOutOfOwnPad();
-        if (bx == _fakeX && by == _fakeY) return;
-        InputSim.SetCursor((int)_fakeX, (int)_fakeY);
-        InputSim.NotePosition((int)_fakeX, (int)_fakeY);
-        _realSentX = (int)_fakeX; _realSentY = (int)_fakeY;
-        DebugLog.Write($"PULL out of own pad -> ({_fakeX:0},{_fakeY:0})");
-    }
-
-    /// <summary>
-    /// In one-cursor mode the cursor IS where the finger puts it, so it will
-    /// sit over the pad whenever the finger is on the pad - and a press there
-    /// lands on our own window instead of the target: the drag would drag the
-    /// pad and the drop would fall on it. Keep the aimed position out of the
-    /// pad's screen rectangle for the whole gesture. SafeClick's own nudge
-    /// already does this for a single click; this makes it hold for drags too.
-    /// </summary>
-    private void PushOutOfOwnPad()
-    {
-        try
-        {
-            var src = PresentationSource.FromVisual(this);
-            double sx = src?.CompositionTarget?.TransformToDevice.M11 ?? 1;
-            double sy = src?.CompositionTarget?.TransformToDevice.M22 ?? 1;
-            double rx = Left * sx, ry = Top * sy;
-            double rw = ActualWidth * sx, rh = ActualHeight * sy;
-            if (rw <= 0 || rh <= 0) return;
-            // Compare against the pad's rect grown by one pixel: the cursor
-            // must end up outside it, not exactly on the border.
-            if (_fakeX <= rx - 1 || _fakeX >= rx + rw + 1 ||
-                _fakeY <= ry - 1 || _fakeY >= ry + rh + 1) return;
-            double dl = _fakeX - (rx - 1), dr = (rx + rw + 1) - _fakeX;
-            double dt = _fakeY - (ry - 1), db = (ry + rh + 1) - _fakeY;
-            double m = Math.Min(Math.Min(dl, dr), Math.Min(dt, db));
-            if (m == dl) _fakeX = rx - 1;
-            else if (m == dr) _fakeX = rx + rw + 1;
-            else if (m == dt) _fakeY = ry - 1;
-            else _fakeY = ry + rh + 1;
-        }
-        catch { }
     }
 
     private void EnsureDpi()
@@ -753,6 +698,12 @@ public partial class PadWindow : Window
     /// </summary>
     private void SyncRealCursorToFake()
     {
+        // Refresh before the "no change" guard: the surface has to stay
+        // transparent to the mouse for the WHOLE gesture - the moves and the
+        // release must reach the target, and the release is what a drop is
+        // decided on. A 120ms tail is enough between events only because this
+        // runs on every one.
+        HoldMouseThrough();
         int tx = (int)_fakeX, ty = (int)_fakeY;
         if (tx == _realSentX && ty == _realSentY) return;
         _realSentX = tx; _realSentY = ty;
@@ -1089,12 +1040,12 @@ public partial class PadWindow : Window
         _dragPathDip = 0;
         // A press must not land on the pad's own rectangle: the pad is on top,
         // so the click or the drag would be delivered to us instead of the
-        // target. In one-cursor mode the surface is made mouse-transparent for
-        // the injection instead of moving the cursor, so the press reaches
-        // whatever is beneath and the drop stays exactly where the finger put
-        // it.
-        if (RealCursorOnly) HoldMouseThrough();
-        else PullOutOfOwnPad();
+        // The press must not land on the pad, and neither must the moves or
+        // the release that follow it. The surface is made mouse-transparent
+        // for the injection instead of moving the aim, so the press and the
+        // drop stay exactly where the finger put them (moving the aim put them
+        // a pixel off the pad's edge instead).
+        HoldMouseThrough();
         _keepCursorOnce = true;        // no hand-back between click and hold
         SafeClick("left");
         _dragHold = true;
@@ -1203,7 +1154,7 @@ public partial class PadWindow : Window
         }
         // The release has to reach the target as well, and it is the event a
         // drop is decided on.
-        if (RealCursorOnly) HoldMouseThrough();
+        HoldMouseThrough();
         if (_session)
         {
             // Pin the position with SetCursorPos immediately before the
@@ -1690,44 +1641,12 @@ public partial class PadWindow : Window
         // working right-click looks like a no-op.
         _menuClick = b != "left";
         // A synthetic click landing on our OWN window re-enters as a fresh
-        // tap and self-sustains (~1ms press/release flood, measured), so a
-        // left/middle click over the pad is nudged to the nearest pixel
-        // OUTSIDE it - never dropped, which used to swallow holds outright
-        // ("nothing happens"). Right/middle cannot flood (no context menu
-        // to re-enter, no tap classification), so right always passes.
-        try
-        {
-            var src = PresentationSource.FromVisual(this);
-            double sx = src?.CompositionTarget?.TransformToDevice.M11 ?? 1;
-            double sy = src?.CompositionTarget?.TransformToDevice.M22 ?? 1;
-            double rx = Left * sx, ry = Top * sy;
-            double rw = ActualWidth * sx, rh = ActualHeight * sy;
-            if (!RealCursorOnly && px >= rx && px <= rx + rw &&
-                py >= ry && py <= ry + rh)
-            {
-                if (b == "right")
-                {
-                    DebugLog.Write("BTN right-click over own pad: allowed");
-                }
-                else
-                {
-                    double dl = px - (rx - 1), dr = (rx + rw + 1) - px;
-                    double dt = py - (ry - 1), db = (ry + rh + 1) - py;
-                    double m = Math.Min(Math.Min(dl, dr), Math.Min(dt, db));
-                    if (m == dl) px = rx - 1;
-                    else if (m == dr) px = rx + rw + 1;
-                    else if (m == dt) py = ry - 1;
-                    else py = ry + rh + 1;
-                    ClampFake();
-                    DebugLog.Write($"BTN {b} over own pad: nudged to ({px:0},{py:0})");
-                }
-            }
-        }
-        catch { }
-        // One cursor: do not move the aim off the pad - make the pad let the
-        // click through to the application beneath instead, so the click lands
-        // exactly where the finger was.
-        if (RealCursorOnly) HoldMouseThrough();
+        // tap and self-sustains (~1ms press/release flood, measured), so the
+        // pad's surface is made mouse-transparent for the injection and the
+        // click goes to the application beneath it. That replaces the old
+        // nudge-to-the-nearest-pixel-outside, which moved the AIM: the click
+        // landed a pixel off the pad's edge rather than where the finger was.
+        HoldMouseThrough();
         InputSim.ClickAt((int)px, (int)py, b);
         ForgetRealCursor();
         _clickSincePress = true;
