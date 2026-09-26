@@ -56,6 +56,37 @@ public sealed class AppSettings
     public string CursorStyle { get; set; } = "cyan";
     public bool ShowFakeArrow { get; set; } = true;
     public int LongPressMs { get; set; } = 500;
+    /// <summary>
+    /// Hold vs drag threshold: travel in DIP within the last 150ms above
+    /// which a press counts as a drag and its long-press dies. It MUST be a
+    /// rate, not a distance from the press point: this panel reports a
+    /// steady ~0.4 DIP/ms creep for a resting finger (65 DIP/150ms) while a
+    /// real drag reaches ~2.5 DIP/ms (375 DIP/150ms). A distance rule
+    /// integrates the creep and cancels every hold within ~150ms.
+    /// </summary>
+    public double HoldCancelDip { get; set; } = 100;
+    /// <summary>
+    /// Pointer gain while a hold is pending, 1.0 = off (immediate movement,
+    /// the default). Below 1.0 the panel's resting creep (~0.4 DIP/ms, which
+    /// drags the cursor hundreds of px mid-hold) is softened, blending back
+    /// to full gain as the stroke becomes a real drag.
+    /// NOTE: do not "fix" the creep by pinning the pointer instead - normal
+    /// movement on this panel is the same speed as the creep (0.33-0.81
+    /// DIP/ms measured), so any pin threshold either never releases (the pad
+    /// feels dead for 500ms) or releases on the creep anyway.
+    /// </summary>
+    public double HoldDamp { get; set; } = 1.0;
+    /// <summary>
+    /// How the real system cursor relates to the virtual one.
+    /// "preserve" (default): the physical mouse is never displaced - every
+    ///   synthetic click/drag/wheel hands the real cursor back to where the
+    ///   mouse left it, and mouse input never steers the virtual cursor.
+    ///   Hover/tooltip feedback follows the physical cursor between actions.
+    /// "unified": legacy behaviour - the real cursor is parked under the
+    ///   fake one and a mouse press hands control back to the system cursor
+    ///   (one cursor identity, hover follows the virtual cursor).
+    /// </summary>
+    public string PhysicalMouseMode { get; set; } = "preserve";
     /// <summary>Multi-tap chain window (tap-tap, tap-tap-tap).</summary>
     public int MultiTapMs { get; set; } = 600;
     /// <summary>Gesture profile per layout family (settings tabs).</summary>

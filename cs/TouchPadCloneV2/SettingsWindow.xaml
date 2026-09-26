@@ -16,8 +16,18 @@
                 <CheckBox x:Name="FakeCur" Content="터치 중 시스템 커서 숨김 (Fake cursor)" Margin="0,4,0,0"/>
                 <CheckBox x:Name="ShowArrow" Content="가상 화살표 표시 (끄면 실커서만)" Margin="0,4,0,0"/>
                 <CheckBox x:Name="SwapBtn" Content="좌/우 버튼 반전" Margin="0,4,0,0"/>
+                <TextBlock Text="물리 마우스" Margin="0,8,0,0"/>
+                <ComboBox x:Name="PhysBox"/>
+                <TextBlock x:Name="PhysHint" Foreground="Gray" TextWrapping="Wrap"
+                           FontSize="11" Margin="0,2,0,0"/>
                 <TextBlock Text="길게 누르기 판정 (ms)" Margin="0,8,0,0"/>
                 <Slider x:Name="LongMs" Minimum="200" Maximum="1000" TickFrequency="50"/>
+                <TextBlock Text="홀드 중 드래그로 간주하는 이동 (DIP/150ms)" Margin="0,8,0,0"/>
+                <Slider x:Name="HoldSlop" Minimum="30" Maximum="300" TickFrequency="10"/>
+                <TextBlock Text="홀드 중 커서 감쇠 (1 = 즉시 이동)" Margin="0,8,0,0"/>
+                <Slider x:Name="HoldDampS" Minimum="0.2" Maximum="1" TickFrequency="0.05"/>
+                <TextBlock Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"
+                           Text="이 패드는 손가락을 가만히 있어도 초당 약 0.4 DIP씩 움직인 것으로 보고됩니다. 거리 기준으로 홀드 판정하면 0.2초 만에 취소되고, 정상 이동 속도(0.33~0.81 DIP/ms)와 구분되지 않아 커서를 멈추게 하면 패드가 0.5초 동안 죽습니다. 감쇠를 낮추면 홀드 중 커서가 덜 새지만 즉시 이동도 함께 느려집니다."/>
                 <TextBlock Text="더블/트리플 탭 판정 (ms)" Margin="0,8,0,0"/>
                 <Slider x:Name="MultiMs" Minimum="200" Maximum="1000" TickFrequency="50"/>
                 <Separator Margin="0,12,0,12"/>
@@ -55,6 +65,7 @@
             <StackPanel Margin="14">
                 <TextBlock Text="FloatPad 계열 레이아웃 제스처" FontWeight="Bold"/>
                 <TextBlock Text="floatpad / leftpad / rightpad / fullscreen …" Foreground="Gray"/>
+                <TextBlock Text="제스처 동작은 손가락 2개로만 실행됩니다. 한 손가락은 커서만 (이동·탭·홀드). 두 손가락 = 세로 스크롤, 가로 스와이프 내비게이션." Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"/>
                 <Grid x:Name="FloatGrid" Margin="0,6,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="150"/><ColumnDefinition/>
@@ -68,6 +79,7 @@
             <StackPanel Margin="14">
                 <TextBlock Text="ArtistPad 계열 레이아웃 제스처" FontWeight="Bold"/>
                 <TextBlock Text="이름에 Artist가 들어간 섹션" Foreground="Gray"/>
+                <TextBlock Text="제스처 동작은 손가락 2개로만 실행됩니다. 한 손가락은 커서만 (이동·탭·홀드). 두 손가락 = 세로 스크롤, 가로 스와이프 내비게이션." Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"/>
                 <Grid x:Name="ArtistGrid" Margin="0,6,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="150"/><ColumnDefinition/>
@@ -81,6 +93,7 @@
             <StackPanel Margin="14">
                 <TextBlock Text="VirtualCtrls 레이아웃 제스처" FontWeight="Bold"/>
                 <TextBlock Text="virtualctrls 섹션 (보조 컨트롤러)" Foreground="Gray"/>
+                <TextBlock Text="제스처 동작은 손가락 2개로만 실행됩니다. 한 손가락은 커서만 (이동·탭·홀드). 두 손가락 = 세로 스크롤, 가로 스와이프 내비게이션." Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"/>
                 <Grid x:Name="VirtualGrid" Margin="0,6,0,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="150"/><ColumnDefinition/>

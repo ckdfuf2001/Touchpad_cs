@@ -60,17 +60,28 @@ public static class WpfHit
     }
 }
 /// <summary>
-/// Disables the OS tablet gestures that compete with our own:
-/// "press and hold for right-click" synthesizes its OWN right down+up at
-/// the TOUCH point (measured: our fake-position click followed by a stray
-/// release/menu at the finger), and flicks inject scroll/nav we never asked
-/// for. Handled per touch-surface window via WM_TABLET_QUERYSYSTEMGESTURESTATUS.
+/// Disables the OS tablet gestures that compete with our own. Every one of
+/// them synthesizes its OWN click at the TOUCH point, which on our pad
+/// means a stray press on ourselves plus a menu at the finger:
+///  - press-and-hold / tap-to-long -> its own right down+up at the touch point
+///  - double/triple tap          -> extra click pairs that break the tap chain
+///  - flicks                     -> scroll/nav we never asked for
+/// Handled per touch-surface window via WM_TABLET_QUERYSYSTEMGESTURESTATUS.
 /// </summary>
 public static class TabletTweaks
 {
     private const int WM_TABLET_QUERYSYSTEMGESTURESTATUS = 0x02CC;
     private const long TABLET_DISABLE_PRESSANDHOLD = 0x00000001;
+    private const long TABLET_DISABLE_DOUBLETAP = 0x00000002;
+    private const long TABLET_DISABLE_TRIPLETAP = 0x00000004;
+    private const long TABLET_DISABLE_TAPTOOLONG = 0x00000008;
+    private const long TABLET_DISABLE_PENPRESSANDHOLD = 0x00000100;
     private const long TABLET_DISABLE_FLICKS = 0x00010000;
+
+    private const long Blocked =
+        TABLET_DISABLE_PRESSANDHOLD | TABLET_DISABLE_DOUBLETAP |
+        TABLET_DISABLE_TRIPLETAP | TABLET_DISABLE_TAPTOOLONG |
+        TABLET_DISABLE_PENPRESSANDHOLD | TABLET_DISABLE_FLICKS;
 
     public static void DisableSystemGestures(Window w)
     {
@@ -86,8 +97,7 @@ public static class TabletTweaks
                     if (msg == WM_TABLET_QUERYSYSTEMGESTURESTATUS)
                     {
                         handled = true;
-                        return (IntPtr)(TABLET_DISABLE_PRESSANDHOLD |
-                                        TABLET_DISABLE_FLICKS);
+                        return (IntPtr)Blocked;
                     }
                     return IntPtr.Zero;
                 });

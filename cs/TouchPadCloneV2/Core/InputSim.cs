@@ -1,4 +1,5 @@
-using System;
+﻿using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 namespace TouchPadCloneV2.Core;
@@ -95,6 +96,13 @@ public static class InputSim
     private const int SM_CXVIRTUALSCREEN = 78;
     private const int SM_CYVIRTUALSCREEN = 79;
     private const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
+    /// <summary>
+    /// Without this, MOUSEEVENTF_ABSOLUTE maps 0..65535 onto the PRIMARY
+    /// MONITOR, not the virtual desktop - while the coordinates below are
+    /// computed from SM_*VIRTUALSCREEN. On a multi-monitor desktop that
+    /// mismatch mis-scales every click and wheel.
+    /// </summary>
+    private const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
 
     public static (int X, int Y) Cursor()
     {
@@ -102,8 +110,63 @@ public static class InputSim
         return (p.X, p.Y);
     }
 
+    /// <summary>
+    /// Test-only injection recorder. A low-level mouse hook sees the whole
+    /// desktop - the physical mouse and context menus pollute it, so the
+    /// selftest asserts on what WE sent instead. Off (and empty) in normal
+    /// runs.
+    /// </summary>
+    public static bool RecordInjections;
+    public static readonly List<(long Ms, string Kind, string Btn, int X, int Y)>
+        Injected = new();
+
+    private static void Note(string kind, string btn, int x, int y)
+    {
+        if (!RecordInjections) return;
+        lock (Injected)
+            Injected.Add((Environment.TickCount64, kind, btn, x, y));
+    }
+
     public static void SetCursor(int x, int y) =>
         SetCursorPos(x, y);
+
+    private static uint DownFlag(string button) => button switch
+    {
+        "right" => MOUSEEVENTF_RIGHTDOWN,
+        "middle" => MOUSEEVENTF_MIDDLEDOWN,
+        _ => MOUSEEVENTF_LEFTDOWN,
+    };
+
+    private static uint UpFlag(string button) => button switch
+    {
+        "right" => MOUSEEVENTF_RIGHTUP,
+        "middle" => MOUSEEVENTF_MIDDLEUP,
+        _ => MOUSEEVENTF_LEFTUP,
+    };
+
+    private static INPUT AbsMove(int x, int y)
+    {
+        int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        return new INPUT
+        {
+            type = INPUT_MOUSE,
+            u = new INPUTUNION { mi = new MOUSEINPUT
+            {
+                dx = (int)((x - vx) * 65535.0 / Math.Max(1, vw - 1)),
+                dy = (int)((y - vy) * 65535.0 / Math.Max(1, vh - 1)),
+                mouseData = 0,
+                dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
+                         | MOUSEEVENTF_VIRTUALDESK,
+                time = 0, dwExtraInfo = IntPtr.Zero
+            } }
+        };
+    }
+
+    private static void Send(params INPUT[] batch) =>
+        SendInput((uint)batch.Length, batch, Marshal.SizeOf<INPUT>());
 
     /// <summary>
     /// Atomic click at an EXACT position: absolute-move + down + absolute-move
@@ -117,43 +180,56 @@ public static class InputSim
     /// </summary>
     public static void ClickAt(int x, int y, string button)
     {
-        int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
-        int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
-        int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-        int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-        int nx = (int)((x - vx) * 65535.0 / Math.Max(1, vw - 1));
-        int ny = (int)((y - vy) * 65535.0 / Math.Max(1, vh - 1));
-        uint downFlags = button switch
-        {
-            "right" => MOUSEEVENTF_RIGHTDOWN,
-            "middle" => MOUSEEVENTF_MIDDLEDOWN,
-            _ => MOUSEEVENTF_LEFTDOWN,
-        };
-        uint upFlags = button switch
-        {
-            "right" => MOUSEEVENTF_RIGHTUP,
-            "middle" => MOUSEEVENTF_MIDDLEUP,
-            _ => MOUSEEVENTF_LEFTUP,
-        };
-        INPUT move = new()
-        {
-            type = INPUT_MOUSE,
-            u = new INPUTUNION { mi = new MOUSEINPUT
-            {
-                dx = nx, dy = ny, mouseData = 0,
-                dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
-                time = 0, dwExtraInfo = IntPtr.Zero
-            } }
-        };
-        INPUT dn = move;
-        dn.u.mi.dwFlags = downFlags;
-        dn.u.mi.dx = dn.u.mi.dy = 0;
-        INPUT upEv = move;
-        upEv.u.mi.dwFlags = upFlags;
-        upEv.u.mi.dx = upEv.u.mi.dy = 0;
-        var batch = new[] { move, dn, move, upEv };
-        SendInput((uint)batch.Length, batch, Marshal.SizeOf<INPUT>());
+        Send(AbsMove(x, y), Button(DownFlag(button), x, y),
+             AbsMove(x, y), Button(UpFlag(button), x, y));
         DebugLog.Write($"BTN click {button} @({x},{y})");
+        Note("click", button, x, y);
+    }
+
+    /// <summary>
+    /// Absolute-move + button-down in ONE batch. The drag hold needs the
+    /// exact same guarantee as ClickAt: a bare Down() after SetCursorPos
+    /// loses the race against the OS yanking the cursor onto the live touch
+    /// contact, so the press landed on OUR OWN pad instead of the target
+    /// (measured symptom: click-then-hold never moved anything).
+    /// </summary>
+    public static void DownAt(int x, int y, string button)
+    {
+        Send(AbsMove(x, y), Button(DownFlag(button), x, y));
+        DebugLog.Write($"BTN down {button} @({x},{y})");
+        Note("down", button, x, y);
+    }
+
+    /// <summary>Absolute-move + button-up in ONE batch (mirror of DownAt).</summary>
+    public static void UpAt(int x, int y, string button)
+    {
+        Send(AbsMove(x, y), Button(UpFlag(button), x, y));
+        DebugLog.Write($"BTN up {button} @({x},{y})");
+        Note("up", button, x, y);
+    }
+
+    /// <summary>
+    /// Absolute-move + wheel in ONE batch: wheel messages go to the window
+    /// under the SYSTEM cursor, which mid-touch is yanked onto our pad.
+    /// </summary>
+    public static void WheelAt(int x, int y, int delta, bool horizontal)
+    {
+        INPUT w = AbsMove(x, y);
+        INPUT ev = w;
+        ev.u.mi.dwFlags = horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL;
+        ev.u.mi.dx = ev.u.mi.dy = 0;
+        ev.u.mi.mouseData = (uint)delta;
+        Send(w, ev);
+        Note("wheel", (horizontal ? "h" : "v") + delta, x, y);
+    }
+
+    /// <summary>A button event carrying no position (relative form).</summary>
+    private static INPUT Button(uint flags, int x, int y)
+    {
+        INPUT i = AbsMove(x, y);
+        i.u.mi.dwFlags = flags;
+        i.u.mi.dx = i.u.mi.dy = 0;
+        return i;
     }
 
     public static void Click(string button)
@@ -200,25 +276,9 @@ public static class InputSim
         if (dx != 0 || dy != 0) Mouse(MOUSEEVENTF_MOVE, dx, dy);
     }
 
-    public static void Down(string button)
-    {
-        Mouse(button switch
-        {
-            "right" => MOUSEEVENTF_RIGHTDOWN,
-            "middle" => MOUSEEVENTF_MIDDLEDOWN,
-            _ => MOUSEEVENTF_LEFTDOWN,
-        });
-    }
+    public static void Down(string button) => Mouse(DownFlag(button));
 
-    public static void Up(string button)
-    {
-        Mouse(button switch
-        {
-            "right" => MOUSEEVENTF_RIGHTUP,
-            "middle" => MOUSEEVENTF_MIDDLEUP,
-            _ => MOUSEEVENTF_LEFTUP,
-        });
-    }
+    public static void Up(string button) => Mouse(UpFlag(button));
 
     public static void Wheel(int delta, bool horizontal = false) =>
         Mouse(horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL, 0, 0, delta);

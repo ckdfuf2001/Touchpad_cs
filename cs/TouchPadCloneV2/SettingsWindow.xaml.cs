@@ -18,6 +18,26 @@ public partial class SettingsWindow : Window
     private static readonly string[] CursorStyles =
         ["cyan", "white", "black", "green", "yellow", "magenta"];
 
+    /// <summary>Label, stored value, explanation (shown under the box).</summary>
+    private static readonly (string label, string value, string hint)[] PhysModes =
+    [
+        ("가상 마우스 존중 (물리 마우스 그대로)", "preserve",
+            "가상 클릭·드래그가 실제 커서를 옮긴 뒤 원래 물리 마우스 위치로 되돌립니다. "
+          + "물리 마우스는 가상 커서를 조종하지 않습니다. 대신 툴팁 등 호버 반응은 "
+          + "동작 사이에는 물리 커서를 따릅니다."),
+        ("물리 마우스와 통합 (기존 동작)", "unified",
+            "실제 커서를 가상 커서 아래에 붙여 둡니다. 호버 반응이 항상 가상 커서를 "
+          + "따르지만, 물리 마우스 커서가 가상 커서 위치로 끌려갑니다."),
+    ];
+
+    private void ApplyPhysHint()
+    {
+        string v = PhysBox.SelectedItem as string ?? "preserve";
+        foreach (var m in PhysModes)
+            if (m.value == v) { PhysHint.Text = m.hint; return; }
+        PhysHint.Text = "";
+    }
+
     private static readonly (string key, string label, Func<GestureMap, string> get, Action<GestureMap, string> set)[] Slots =
     [
         ("tap", "짧게 탭", m => m.Tap, (m, v) => m.Tap = v),
@@ -40,6 +60,8 @@ public partial class SettingsWindow : Window
         Speed.Value = s.Speed;
         OpacityS.Value = s.Opacity;
         LongMs.Value = s.LongPressMs;
+        HoldSlop.Value = s.HoldCancelDip;
+        HoldDampS.Value = s.HoldDamp;
         MultiMs.Value = s.MultiTapMs;
         LayoutBox.ItemsSource = layouts;
         LayoutBox.SelectedItem = layouts.Contains(s.Layout) ? s.Layout : layouts.FirstOrDefault();
@@ -52,12 +74,26 @@ public partial class SettingsWindow : Window
             _onApply();
         };
         TapClick.IsChecked = s.TapToClick;
-        FakeCur.IsChecked = s.FakeCursor;
+        PhysBox.ItemsSource = PhysModes.Select(m => m.label).ToList();
+        PhysBox.SelectedItem = PhysModes.FirstOrDefault(
+            m => m.value == s.PhysicalMouseMode).label ?? PhysModes[0].label;
+        PhysBox.SelectionChanged += (_, _) =>
+        {
+            string lbl = PhysBox.SelectedItem as string ?? "";
+            foreach (var m in PhysModes)
+                if (m.label == lbl) { _s.PhysicalMouseMode = m.value; break; }
+            ApplyPhysHint();
+            _s.Save();
+            _onApply();
+        };
+        ApplyPhysHint();        FakeCur.IsChecked = s.FakeCursor;
         ShowArrow.IsChecked = s.ShowFakeArrow;
         SwapBtn.IsChecked = s.SwapButtons;
         Speed.ValueChanged += (_, _) => Live();
         OpacityS.ValueChanged += (_, _) => Live();
         LongMs.ValueChanged += (_, _) => Live();
+        HoldSlop.ValueChanged += (_, _) => Live();
+        HoldDampS.ValueChanged += (_, _) => Live();
         MultiMs.ValueChanged += (_, _) => Live();
 
         BuildGestureGrid(FloatGrid, s.Gestures, "float");
@@ -142,6 +178,8 @@ public partial class SettingsWindow : Window
         _s.Speed = Speed.Value;
         _s.Opacity = OpacityS.Value;
         _s.LongPressMs = (int)LongMs.Value;
+        _s.HoldCancelDip = HoldSlop.Value;
+        _s.HoldDamp = HoldDampS.Value;
         _s.MultiTapMs = (int)MultiMs.Value;
         _onApply();
     }
@@ -151,6 +189,8 @@ public partial class SettingsWindow : Window
         _s.Speed = Speed.Value;
         _s.Opacity = OpacityS.Value;
         _s.LongPressMs = (int)LongMs.Value;
+        _s.HoldCancelDip = HoldSlop.Value;
+        _s.HoldDamp = HoldDampS.Value;
         _s.MultiTapMs = (int)MultiMs.Value;
         if (LayoutBox.SelectedItem is string l) _s.Layout = l;
         if (CursorBox.SelectedItem is string c) _s.CursorStyle = c;

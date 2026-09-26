@@ -56,9 +56,9 @@ public partial class ModeStripWindow : Window
         Core.TabletTweaks.DisableSystemGestures(this);
         Left = (SystemParameters.PrimaryScreenWidth - Width) / 2;
         Top = 0;
-        Surface.TouchDown += OnTouchDown;
-        Surface.TouchMove += OnTouchMove;
-        Surface.TouchUp += OnTouchUp;
+        Surface.PreviewTouchDown += OnTouchDown;
+        Surface.PreviewTouchMove += OnTouchMove;
+        Surface.PreviewTouchUp += OnTouchUp;
         Surface.MouseDown += OnMouseDown;
         Surface.MouseMove += OnMouseMove;
         Surface.MouseUp += OnMouseUp;
