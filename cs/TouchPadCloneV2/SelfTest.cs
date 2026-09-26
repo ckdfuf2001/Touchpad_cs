@@ -416,11 +416,12 @@ public static class SelfTest
             await Drain();
             var c = Since(n);
             var downsL = c.Where(e => e.Kind != "up" && e.Btn == "left").ToList();
-            Check(downsL.Count == 2, "click+move = click then drag (2 L downs)",
+            // tap click + the grab's own click (the "push") + the held press.
+            Check(downsL.Count == 3, "click+move = click then drag (3 L downs)",
                 $"downs={downsL.Count}");
-            if (downsL.Count == 2)
+            if (downsL.Count == 3)
             {
-                var d2 = downsL[1];
+                var d2 = downsL[^1];   // the held press, after the click
                 double ddx = d2.X - fx0, ddy = d2.Y - fy0;
                 Check(Math.Abs(ddx) <= 2 && Math.Abs(ddy) <= 2,
                     "drag press lands ON the aim point",
@@ -482,10 +483,10 @@ public static class SelfTest
             await Task.Delay(500);
             await Drain();
             var ev = Since(n);
-            // 1 click from the tap, then the grab - and no right-click.
-            Check(Dns(ev, "right") == 0 && Dns(ev, "left") == 2,
+            // tap click, then the grab's click (the push), then the held press.
+            Check(Dns(ev, "right") == 0 && Dns(ev, "left") == 3,
                 "tap, press, pause 700ms, move = drag and never a right-click",
-                $"l={Dns(ev, "left")} (want 2) r={Dns(ev, "right")}");
+                $"l={Dns(ev, "left")} (want 3) r={Dns(ev, "right")}");
         }
         // ---- 4e. THE reported flow, at human speed: tap, then a SECOND later
         // press and move. The 600ms chain window has closed by then, so the
@@ -546,10 +547,10 @@ public static class SelfTest
             await Drain();
             var ev = Since(n);
             int ldowns = Dns(ev, "left"), rdowns = Dns(ev, "right");
-            // 3 from the double (1 + 2) + 1 from the grab.
-            Check(ldowns == 4 && rdowns == 0,
+            // 3 from the double (1 + 2) + the grab's click + the held press.
+            Check(ldowns == 5 && rdowns == 0,
                 $"double-tap then press+move ({label}) = drag still grabs",
-                $"l={ldowns} (want 4) r={rdowns} ev={ev.Count}");
+                $"l={ldowns} (want 5) r={rdowns} ev={ev.Count}");
         }
         // ---- 5b. and the grab must NOT leak into ordinary use: a press with
         // no multi-tap before it is a plain pointer move, and its release
@@ -591,9 +592,18 @@ public static class SelfTest
             await Drain();
             var c = Since(n);
             int ldowns = Dns(c, "left"), rdowns = Dns(c, "right");
+            int clicks = c.Count(e => e.Kind == "click" && e.Btn == "left");
             Check(rdowns == 0, "hold after a tap does NOT fire a right click",
                 $"r={rdowns} l={ldowns}");
-            Check(ldowns >= 2 && upWhileHeld == 0,
+            // The click is the PUSH: drag_hold must deliver a complete click
+            // (its own up included) or the application has nothing picked up -
+            // but the HELD button's release must not be part of it.
+            // exactly two: the tap's click and the grab's push. NOT a third on
+            // release - a click at the drop point is not part of a drag.
+            Check(clicks == 2,
+                "drag_hold delivers a full click first (the push)",
+                $"clicks={clicks} (want 2: tap + grab, none on release)");
+            Check(ldowns >= 3 && upWhileHeld == 0,
                 "hold after a tap = the button is HELD down (click-and-drag)",
                 $"l={ldowns} upsWhileHeld={upWhileHeld} heldAt1100={held}");
         }

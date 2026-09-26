@@ -171,6 +171,16 @@ public partial class PadWindow : Window
     /// </summary>
     private void RestorePhysicalCursor(string why)
     {
+        // A one-shot: the click that opens a drag_hold must NOT hand the
+        // cursor back between itself and the hold. The application would see
+        // the cursor leave the target and come back, which is exactly the
+        // motion that cancels a drag.
+        if (_keepCursorOnce)
+        {
+            _keepCursorOnce = false;
+            DebugLog.Write($"PHYS keep cursor for {why} (drag_hold click)");
+            return;
+        }
         if (UnifiedPhysical || _physX == int.MinValue) return;
         try
         {
@@ -464,6 +474,7 @@ public partial class PadWindow : Window
     private DateTime _grabArmUntil = DateTime.MinValue;
     /// <summary>A click has been delivered since the current press began.</summary>
     private bool _clickSincePress;
+    private bool _keepCursorOnce;
     /// <summary>Drop point bookkeeping for the drag-end log.</summary>
     private double _dragFromX = -1e9, _dragFromY = -1e9;
     private double _dragPathDip;
@@ -821,15 +832,14 @@ public partial class PadWindow : Window
         f.Start = f.Last;
         _dragFromX = _fakeX; _dragFromY = _fakeY;   // for the drop log
         _dragPathDip = 0;
-        // Ordering note: a grab only carries anything if the click before it
-        // landed, and it always does - a chained press is armed BY a tap that
-        // already clicked, and the post-multi-tap grab window is only open
-        // because a double/triple tap clicked. An earlier version delivered
-        // an extra click here "to be safe" and double-fired every drag; the
-        // selftest caught it. The flag is kept for the log line below,
-        // because "was the click delivered before this grab" is exactly what
-        // makes the difference between a working drag and a dead one.
-        PressDown("left");
+        // Same order as the hold timer's drag_hold (see GrabHold): the click
+        // is the push that picks the item up, then the button stays held. Both
+        // routes to a drag now do the same thing - an earlier version clicked
+        // here "to be safe" and double-fired every drag, but it did NOT click
+        // on the hold route, and the two disagreeing is what made "click a
+        // file then drag" behave differently depending on how the press
+        // started.
+        GrabHold(id);
         _pressNote = "drag (grabbed)";
         Status(_pressNote);
         // Who actually receives this press? If it is the overlay, or an
@@ -846,6 +856,24 @@ public partial class PadWindow : Window
     /// Actions that trigger while the finger is DOWN (long-press, 2nd hold).
     /// drag_hold presses the button until release; the rest fire once.
     /// </summary>
+    /// <summary>
+    /// Begin a drag_hold: deliver a COMPLETE click at the aim point, then
+    /// press and keep holding. The click is the "push" - without it the
+    /// application has nothing picked up, so the drag has nothing to carry -
+    /// and the release is deliberately NOT part of it: only the click's own up
+    /// happens here, the held button stays down until the finger lifts.
+    /// </summary>
+    private void GrabHold(int id)
+    {
+        _keepCursorOnce = true;        // no hand-back between click and hold
+        SafeClick("left");
+        _dragHold = true;
+        _dragId = id;
+        _actionHeld = "left";
+        _secondConsumed = true;
+        PressDown("left");
+    }
+
     private void FirePressAction(string action, int id)
     {
         // Rewind to the press-start aim point: tremor during the hold would
@@ -859,10 +887,7 @@ public partial class PadWindow : Window
         }
         if (action == "drag_hold")
         {
-            _dragHold = true;
-            _dragId = id;
-            _actionHeld = "left";
-            PressDown("left");
+            GrabHold(id);
         }
         else DoGesture(action);
     }
@@ -2020,8 +2045,11 @@ public partial class PadWindow : Window
                         _secondPress = false;
                         if (_dragHold && id == _dragId)
                         {
+                            // Release only. The push click already happened at
+                            // grab time (see GrabHold) and the release must NOT
+                            // carry a click of its own: it would fire at the
+                            // drop point, which is not part of a drag.
                             ReleaseActionButton();
-                            if (_s.TapToClick) SafeClick("left");
                         }
                         else if (!_secondConsumed)
                         {
