@@ -14,13 +14,9 @@
                 <ComboBox x:Name="CursorBox"/>
                 <CheckBox x:Name="TapClick" Content="탭 = 클릭 (끄면 탭 무시)" Margin="0,8,0,0"/>
                 <CheckBox x:Name="FakeCur" Content="터치 중 시스템 커서 숨김 (Fake cursor)" Margin="0,4,0,0"/>
-                <CheckBox x:Name="SimpleClk" Content="단순 클릭 경로 (TKM식: 파킹·억제 없음, 실험용)" Margin="0,4,0,0"/>
-                <CheckBox x:Name="DiagLogBox" Content="진단 로그 기록 (%TEMP%\touchpad_v2.log)" Margin="0,4,0,0"/>
                 <CheckBox x:Name="SwapBtn" Content="좌/우 버튼 반전" Margin="0,4,0,0"/>
                 <TextBlock Text="길게 누르기 판정 (ms)" Margin="0,8,0,0"/>
                 <Slider x:Name="LongMs" Minimum="200" Maximum="1000" TickFrequency="50"/>
-                <TextBlock Text="싱글탭 확정 대기 (ms, 짧을수록 반응↑·더블 판정은 별도 800ms)" Margin="0,8,0,0"/>
-                <Slider x:Name="TapDelayMs" Minimum="0" Maximum="1000" TickFrequency="50"/>
                 <Separator Margin="0,12,0,12"/>
                 <TextBlock Text="패드 모양" FontWeight="Bold" Foreground="#35C4FF"/>
                 <TextBlock Text="패드 투명도" Margin="0,6,0,0"/>

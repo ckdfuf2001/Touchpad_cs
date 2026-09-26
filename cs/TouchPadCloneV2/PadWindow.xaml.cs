@@ -23,12 +23,8 @@ namespace TouchPadCloneV2;
 /// </summary>
 public partial class PadWindow : Window
 {
-    private const double TapMs = 350;
+    private const double TapMs = 220;
     private const double TapMoveDip = 12;
-    // Hold tolerance is deliberately looser than tap: a real finger jitters
-    // while held, and cancelling long-press/drag on 12dip made
-    // touch-hold=right-click and 2nd-press-hold=drag almost never fire.
-    private const double HoldMoveDip = 28;
     private const double SwipeDip = 60;
     private const int MaxStepPx = 256;
     private const int VkTabTip = 0x09;
@@ -104,15 +100,16 @@ public partial class PadWindow : Window
     public void ApplyCursorStyle() => _overlay?.ApplyStyle(_s.CursorStyle);
 
     /// <summary>
-    /// Bring the real cursor back to the primary screen center (the fake
-    /// position roams the whole virtual desktop by design, so it can end up
-    /// on another monitor where the user isn't looking).
+    /// Bring the fake cursor back to the primary screen center (it roams
+    /// the whole virtual desktop by design, so it can end up on another
+    /// monitor where the user isn't looking - actions then fire invisibly).
     /// </summary>
     public void CenterFake()
     {
         var (cx, cy) = PrimaryCenter();
         _fakeX = cx; _fakeY = cy;
         ClampFake();
+        ShowFake();
         if (!_session)
         {
             InputSim.SetCursor((int)_fakeX, (int)_fakeY);
@@ -142,64 +139,19 @@ public partial class PadWindow : Window
         EnsureDpi();
         _session = true;
         EnterPersistentFake();
-        StartGlue();
         DebugLog.Write($"SESSION begin fake=({_fakeX:0},{_fakeY:0})");
-    }
-
-    // ---- Yank glue ----
-    // While a finger is down Windows drags the SYSTEM cursor toward the live
-    // touch contact. With a button held (drag_hold / tile hold) that sweep
-    // becomes a real drag in the target app and breaks click pairing
-    // (measured: a double-tap arrived as two singles - Down@fake, yank sweep
-    // to the finger, Up@fake, extra click@fake). Pin the system cursor to
-    // the fake one every 15ms for the whole session so Down/Move/Up all land
-    // on one point. Per-move glue in OnTouchMove stays for immediacy.
-    private System.Windows.Threading.DispatcherTimer? _glueTimer;
-
-    private void StartGlue()
-    {
-        if (_glueTimer != null || !_s.FakeCursor) return;
-        _glueTimer = new System.Windows.Threading.DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(15),
-        };
-        _glueTimer.Tick += (_, _) =>
-        {
-            if (!_session)
-            {
-                StopGlue();
-                return;
-            }
-            if (_fingers.Count == 0)
-            {
-                // TouchUp was missed (lost capture etc.): never pin the
-                // cursor forever - a stuck session froze the physical mouse.
-                EndSession();
-                return;
-            }
-            InputSim.SetCursor((int)_fakeX, (int)_fakeY);
-            _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
-        };
-        _glueTimer.Start();
-    }
-
-    private void StopGlue()
-    {
-        _glueTimer?.Stop();
-        _glueTimer = null;
     }
 
     private void EndSession()
     {
         if (!_session) return;
         _session = false;
-        StopGlue();
-        // Park the system cursor exactly under the fake one and make it
-        // VISIBLE again: outside a touch the physical mouse must work
-        // normally everywhere. The fake overlay is session-only.
+        // Park the system cursor exactly under the fake one and STAY hidden:
+        // trackpad mode shows a single cursor identity (the fake one).
         InputSim.SetCursor((int)_fakeX, (int)_fakeY);
+        EnsureHidden();
         _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
-        ExitPersistentFake();
+        ShowFake();
         DebugLog.Write($"SESSION end fake=({_fakeX:0},{_fakeY:0})");
         // ... (lift-yank re-park timer below)
         double parkX = _fakeX, parkY = _fakeY;
@@ -278,12 +230,6 @@ public partial class PadWindow : Window
     private System.Windows.Threading.DispatcherTimer? _holdTimer;
     private int _longId = -1;
     private bool _longFired;
-    // Deferred one-shots: a popup opened UNDER a live touch contact is
-    // dismissed by the finger lift (measured: GESTURE logged, no menu), so
-    // one-shot press actions (right-click etc.) are recorded at hold time
-    // and fired on RELEASE. drag_hold is the exception: it presses live.
-    private string? _longAction;
-    private string? _holdAction;
     private DateTime _pendingTapUntil = DateTime.MinValue;
     private bool _secondPress;
     private int _secondId = -1;
@@ -299,97 +245,6 @@ public partial class PadWindow : Window
     private void CancelLong() { _longTimer?.Stop(); _longTimer = null; _longId = -1; }
     private void CancelHold() { _holdTimer?.Stop(); _holdTimer = null; }
 
-    // ---- Deferred single-tap + independent double window ----
-    // A 1st tap does NOT click on release. It waits TapDelayMs so a 2nd tap
-    // can cancel it into a double-tap / hold-drag (classic tap disambiguation:
-    // firing immediately is what broke double-click and hold-drag - the 1st
-    // click was already gone before the 2nd press arrived).
-    // The double-tap DETECTION window is INDEPENDENT of the fire delay
-    // (floor 800ms): coupling them meant slow 2nd taps (gap > TapDelayMs)
-    // or TapDelayMs=0 never entered the double path at all and degraded
-    // into two separate singles - the reported "double acts as two clicks".
-    // If the single already fired before the 2nd tap, the pair is left for
-    // the OS to bind (same position, <system double-click time apart);
-    // otherwise the release adds the pairing click. Either way no triple.
-    private const double DoubleWindowMs = 800;
-    private System.Windows.Threading.DispatcherTimer? _tapTimer;
-    private bool _pendingSingle;   // single armed, not yet fired
-    private bool _singleFired;     // a click for the 1st tap already went out
-    private bool _doubleArmed;     // 2nd-tap window open (drag/double detectable)
-    private DateTime _doubleUntil = DateTime.MinValue;
-    private bool _cleanDouble;     // 1st click still withheld at 2nd Down
-
-    private void CancelSingle()
-    {
-        _tapTimer?.Stop();
-        _tapTimer = null;
-        _pendingSingle = false;
-    }
-
-    private void ClearDouble()
-    {
-        _doubleArmed = false;
-        _cleanDouble = false;
-    }
-
-    private void ArmSingleTap()
-    {
-        CancelSingle();
-        _pendingSingle = true;
-        _singleFired = false;
-        _doubleArmed = true;
-        _cleanDouble = false;
-        _doubleUntil = DateTime.Now.AddMilliseconds(
-            Math.Max(DoubleWindowMs, _s.TapDelayMs));
-        DebugLog.Write($"TAP wait {_s.TapDelayMs}ms (double window to {_doubleUntil:HH:mm:ss.fff})");
-        Status("tap? (waiting 2nd)");
-        if (_s.TapDelayMs <= 0)
-        {
-            // 0 = fire now, but the double window stays open: a 2nd tap can
-            // still drag; the OS binds the two singles into a double.
-            FlushSingle();
-            return;
-        }
-        _tapTimer = new System.Windows.Threading.DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(_s.TapDelayMs),
-        };
-        _tapTimer.Tick += (_, _) =>
-        {
-            CancelSingle();
-            _singleFired = true;
-            if (!_s.TapToClick) return;
-            DebugLog.Write("TAP single (deferred)");
-            DoGesture(G.Tap);
-        };
-        _tapTimer.Start();
-    }
-
-    /// <summary>
-    /// A tap that is too slow for single-click but still opens the double
-    /// window (no click fires for it; a 2nd tap pairs cleanly).
-    /// </summary>
-    private void ArmDoubleOnly()
-    {
-        CancelSingle();
-        _singleFired = false;
-        _doubleArmed = true;
-        _cleanDouble = false;
-        _doubleUntil = DateTime.Now.AddMilliseconds(DoubleWindowMs);
-        DebugLog.Write("TAP dead-zone (double window only)");
-    }
-
-    /// <summary>Next press is NOT a 2nd tap: deliver the waiting tap now.</summary>
-    private void FlushSingle()
-    {
-        if (!_pendingSingle) return;
-        CancelSingle();
-        _singleFired = true;
-        if (!_s.TapToClick) return;
-        DebugLog.Write("TAP single (flushed)");
-        DoGesture(G.Tap);
-    }
-
     private void ArmLong(int id)
     {
         CancelLong();
@@ -402,25 +257,12 @@ public partial class PadWindow : Window
         _longTimer.Tick += (_, _) =>
         {
             CancelLong();
-            if (!_fingers.TryGetValue(id, out var f)) return;
-            // Hold uses HoldMoveDip, not the tap threshold: tiny jitter
-            // must not kill a deliberate hold.
-            if (Math.Abs(f.Last.X - f.Start.X) + Math.Abs(f.Last.Y - f.Start.Y) > HoldMoveDip) return;
+            if (!_fingers.TryGetValue(id, out var f) || f.Moved) return;
             if (_fingers.Count != 1) return;
             _longFired = true;
-            _longAction = G.LongPress;
-            if (_longAction == "drag_hold")
-            {
-                _longAction = null; // pressed live; release path owns the Up
-                Status("long-press drag");
-                DebugLog.Write("GESTURE long-press (drag_hold down)");
-                FirePressAction("drag_hold", id);
-            }
-            else
-            {
-                Status("long-press (release to fire)");
-                DebugLog.Write($"GESTURE long-press ARM {_longAction}");
-            }
+            Status("long-press");
+            DebugLog.Write("GESTURE long-press");
+            FirePressAction(G.LongPress, id);
         };
         _longTimer.Start();
     }
@@ -436,38 +278,17 @@ public partial class PadWindow : Window
         {
             CancelHold();
             if (!_fingers.TryGetValue(id, out var f)) return;
-            if (_fingers.Count != 1) return;
             _secondConsumed = true;
-            _holdAction = G.SecondHold;
-            if (_holdAction == "drag_hold")
-            {
-                _holdAction = null; // pressed live; release path owns the Up
-                Status("second-hold");
-                DebugLog.Write("GESTURE second-hold (immediate drag)");
-                FirePressAction("drag_hold", id);
-            }
-            else
-            {
-                Status("second-hold (release to fire)");
-                DebugLog.Write($"GESTURE second-hold ARM {_holdAction}");
-            }
+            Status("second-hold");
+            DebugLog.Write("GESTURE second-hold");
+            FirePressAction(G.SecondHold, id);
         };
         _holdTimer.Start();
     }
 
-    /// <summary>Deliver a deferred one-shot press action, exactly once.</summary>
-    private void FireDeferred(ref string? slot)
-    {
-        string? a = slot;
-        slot = null;
-        if (string.IsNullOrEmpty(a) || a == "none" || a == "drag_hold") return;
-        DoGesture(a);
-    }
-
     /// <summary>
-    /// Live button press for drag_hold (down now, up on release). One-shot
-    /// actions never come here mid-touch anymore - they are recorded in
-    /// _longAction/_holdAction and fired on release via FireDeferred.
+    /// Actions that trigger while the finger is DOWN (long-press, 2nd hold).
+    /// drag_hold presses the button until release; the rest fire once.
     /// </summary>
     private void FirePressAction(string action, int id)
     {
@@ -479,8 +300,6 @@ public partial class PadWindow : Window
             ParkAtFake();
             InputSim.Down("left");
             _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
-            DebugLog.Write($"DRAG-HOLD down id={id} fake=({_fakeX:0},{_fakeY:0})");
-            Status($"drag-hold ({_fakeX:0},{_fakeY:0})");
         }
         else DoGesture(action);
     }
@@ -491,7 +310,6 @@ public partial class PadWindow : Window
         {
             ParkAtFake();
             InputSim.Up(_actionHeld);
-            DebugLog.Write($"DRAG-HOLD up fake=({_fakeX:0},{_fakeY:0})");
             _dragHold = false;
             _actionHeld = null;
         }
@@ -532,13 +350,7 @@ public partial class PadWindow : Window
             // fake mode engages on first touch (BeginSession), not at launch
             // (launching cursor-free is disorienting).
             if (IsVisible) AdoptCursor();
-            else
-            {
-                // Deliver a waiting tap before going away; never drop it.
-                FlushSingle();
-                ClearDouble();
-                EmergencyRestore();
-            }
+            else EmergencyRestore();
         };
         Loaded += (_, _) =>
         {
@@ -555,11 +367,8 @@ public partial class PadWindow : Window
     }
 
     /// <summary>
-    /// Trackpad mode, session-only variant: the system cursor is hidden and
-    /// the fake one shown ONLY while a finger is down. Outside a session the
-    /// real cursor is always visible so a physical mouse works normally
-    /// everywhere else (a globally-hidden cursor made the whole machine look
-    /// mouse-broken while the pad was merely open).
+    /// Trackpad mode: fake cursor persistently visible, system cursor parked
+    /// under it and hidden. Called on show/load and after settings apply.
     /// </summary>
     public void EnterPersistentFake()
     {
@@ -575,13 +384,6 @@ public partial class PadWindow : Window
         ShowFake();
         EnsureHidden();
         _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
-    }
-
-    /// <summary>Leave fake mode: real cursor back, overlay off.</summary>
-    public void ExitPersistentFake()
-    {
-        try { _overlay?.Hide(); } catch { }
-        EnsureVisible();
     }
 
     /// <summary>
@@ -906,48 +708,26 @@ public partial class PadWindow : Window
 
     private void SafeClick(string button)
     {
-        string b = (button == "left" && _s.SwapButtons) ? "right"
-            : (button == "right" && _s.SwapButtons) ? "left" : button;
-        // Reference parity path (arand4/TKM): TKM never repositions the
-        // cursor around clicks - Down+Up fire exactly where the system
-        // cursor already is. No park, no suppression.
-        if (_s.SimpleClicks)
-        {
-            var (sx0, sy0) = InputSim.Cursor();
-            DebugLog.Write($"CLICK-{b} simple @{sx0},{sy0}");
-            Status($"click {b} simple");
-            InputSim.Click(b);
-            return;
-        }
         ParkAtFake();
         // A synthetic click landing on our own window would re-enter as a
-        // new tap and self-sustain (~1ms press/release flood, measured) -
-        // but ONLY when no finger is down: while touching, our own mouse
-        // handlers ignore everything (they check _fingers), so explicit
-        // gesture clicks (e.g. long-press right-click, fired mid-touch)
-        // must always go through. Suppressing those is what silently ate
-        // right-clicks whenever the fake cursor sat over the pad.
-        if (_fingers.Count == 0)
+        // new tap and self-sustain (~1ms press/release flood, measured).
+        try
         {
-            try
+            var (px, py) = _session ? (_fakeX, _fakeY) : ToPair(InputSim.Cursor());
+            var src = PresentationSource.FromVisual(this);
+            double sx = src?.CompositionTarget?.TransformToDevice.M11 ?? 1;
+            double sy = src?.CompositionTarget?.TransformToDevice.M22 ?? 1;
+            double rx = Left * sx, ry = Top * sy;
+            if (px >= rx && px <= rx + ActualWidth * sx &&
+                py >= ry && py <= ry + ActualHeight * sy)
             {
-                var (px, py) = _session ? (_fakeX, _fakeY) : ToPair(InputSim.Cursor());
-                var src = PresentationSource.FromVisual(this);
-                double sx = src?.CompositionTarget?.TransformToDevice.M11 ?? 1;
-                double sy = src?.CompositionTarget?.TransformToDevice.M22 ?? 1;
-                double rx = Left * sx, ry = Top * sy;
-                if (px >= rx && px <= rx + ActualWidth * sx &&
-                    py >= ry && py <= ry + ActualHeight * sy)
-                {
-                    Status("self-click suppressed (cursor over pad)");
-                    DebugLog.Write($"CLICK-{button} SUPPRESSED over pad @{px:0},{py:0}");
-                    return;
-                }
+                Status("self-click suppressed (cursor over pad)");
+                return;
             }
-            catch { }
         }
-        DebugLog.Write($"CLICK-{b} @{(_session ? _fakeX : InputSim.Cursor().X):0},{(_session ? _fakeY : InputSim.Cursor().Y):0}");
-        Status($"click {b}");
+        catch { }
+        string b = (button == "left" && _s.SwapButtons) ? "right"
+            : (button == "right" && _s.SwapButtons) ? "left" : button;
         InputSim.Click(b);
     }
 
@@ -1002,33 +782,11 @@ public partial class PadWindow : Window
             BeginSession();
 
         // ---- gesture arming (pad tile, touch only here; buttons/keys above) ----
-        // A deferred single-tap is resolved by the next press: a 2nd tap on
-        // the pad inside the window cancels it (double sequence takes over,
-        // no single click ever fired); any other press flushes it first so
-        // the completed tap is never lost.
-        bool windowOpen = _doubleArmed && DateTime.Now < _doubleUntil;
-        bool isSecondTap = tile?.Action == TileAction.Pad && _fingers.Count == 1
-            && windowOpen;
-        if (isSecondTap)
-        {
-            // 2nd tap consumes the window. Pairing decision: single withheld
-            // -> release adds the pairing click (clean double); single
-            // already out -> the OS binds the two (no extra -> no triple).
-            _cleanDouble = !_singleFired;
-            CancelSingle();
-            _doubleArmed = false; // consumed; _cleanDouble kept for release
-            DebugLog.Write($"TAP 2nd press (clean={_cleanDouble})");
-        }
-        else
-        {
-            FlushSingle();
-            ClearDouble();
-        }
         if (tile?.Action == TileAction.Pad)
         {
             if (_fingers.Count == 1)
             {
-                if (isSecondTap)
+                if (DateTime.Now < _pendingTapUntil)
                 {
                     // Second press of a would-be double tap.
                     _secondPress = true;
@@ -1038,10 +796,8 @@ public partial class PadWindow : Window
                     {
                         // Click-and-hold state IMMEDIATELY (no 250ms dead
                         // zone): the button is down from this instant, moves
-                        // drag at once. The 1st tap's click was deferred
-                        // and just got cancelled, so Down+Up here = click #1
-                        // and the extra click on quick release = click #2:
-                        // together a clean OS-level double-click.
+                        // drag at once. Quick release completes an OS-level
+                        // double-click naturally (see release path).
                         ParkAtFake();
                         InputSim.Down("left");
                         _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
@@ -1062,11 +818,7 @@ public partial class PadWindow : Window
             else if (_fingers.Count == 2)
             {
                 // Second concurrent finger: long-press is off; maybe tap/scroll.
-                // A deferred one-shot long is dropped - the two-finger
-                // gesture owns this sequence now.
                 CancelLong();
-                _longFired = false;
-                _longAction = null;
                 _twoId = e.TouchDevice.Id;
                 _twoCandidate = true;
                 _twoActive = true;
@@ -1124,20 +876,12 @@ public partial class PadWindow : Window
         bool was = f.Moved;
         if (Math.Abs(p.X - f.Start.X) + Math.Abs(p.Y - f.Start.Y) > TapMoveDip)
             f.Moved = true;
-        // Hold-class gestures (long-press) tolerate HoldMoveDip of jitter;
-        // only a real displacement beyond that cancels the long timer.
-        // f.Moved (tap threshold) still kills tap-class gestures below.
-        double holdDisp = Math.Abs(p.X - f.Start.X) + Math.Abs(p.Y - f.Start.Y);
         if (f.Moved && !was)
         {
             // Any real motion kills tap-class gestures for everyone held.
-            if (e.TouchDevice.Id == _longId && holdDisp > HoldMoveDip) CancelLong();
+            if (e.TouchDevice.Id == _longId) CancelLong();
             if (_fingers.Count >= 2) _twoCandidate = false;
             // (drag_hold begins at 2nd-press DOWN now, not here.)
-        }
-        else if (was && e.TouchDevice.Id == _longId && holdDisp > HoldMoveDip)
-        {
-            CancelLong();
         }
 
         // Two concurrent contacts: vertical = live scroll, horizontal =
@@ -1165,35 +909,12 @@ public partial class PadWindow : Window
                 {
                     // Roam the fake cursor; the hidden system cursor is
                     // being yanked toward the finger by Windows, ignore it.
-                    // Deadband (like TKM's 0.5px): stationary-contact jitter
-                    // must not accumulate into the fake position, or the two
-                    // clicks of a double drift apart and the OS no longer
-                    // binds them (select + rename instead of open).
-                    double sdx = dx * _dpi * _s.Speed;
-                    double sdy = dy * _dpi * _s.Speed;
-                    if (Math.Abs(sdx) >= 0.5 || Math.Abs(sdy) >= 0.5)
-                    {
-                        _fakeX += sdx;
-                        _fakeY += sdy;
-                        ClampFake();
-                        ShowFake();
-                        // Drag in progress (left button held): the SYSTEM cursor
-                        // owns the drag, so it must follow the fake one.
-                        // Without this the button stays down at the press point
-                        // and the held object never moves (measured symptom:
-                        // 2nd-press-hold never drags).
-                        if (_dragHold && e.TouchDevice.Id == _dragId)
-                        {
-                            InputSim.SetCursor((int)_fakeX, (int)_fakeY);
-                            _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
-                        }
-                        DebugLog.Write($"FAKE d=({dx:0},{dy:0}) -> ({_fakeX:0},{_fakeY:0})");
-                        // Yank diagnosis: show the REAL cursor next to the fake.
-                        // If real stays glued to fake, no yank. If real runs off
-                        // toward the finger while held, the OS is yanking.
-                        var (rx0, ry0) = InputSim.Cursor();
-                        Status($"fake ({_fakeX:0},{_fakeY:0}) real ({rx0},{ry0})");
-                    }
+                    _fakeX += dx * _dpi * _s.Speed;
+                    _fakeY += dy * _dpi * _s.Speed;
+                    ClampFake();
+                    ShowFake();
+                    DebugLog.Write($"FAKE d=({dx:0},{dy:0}) -> ({_fakeX:0},{_fakeY:0})");
+                    Status($"fake ({_fakeX:0},{_fakeY:0})");
                 }
                 else
                 {
@@ -1271,7 +992,7 @@ public partial class PadWindow : Window
             CancelHold();
         }
         var (ucx, ucy) = InputSim.Cursor();
-        DebugLog.Write($"TOUCHUP id={e.TouchDevice.Id} {(tap ? "tap" : "gesture")} {(int)ms}ms end=({end.X:0},{end.Y:0}) moved={f.Moved} n={_fingers.Count} cursor=({ucx},{ucy})");
+        DebugLog.Write($"TOUCHUP id={e.TouchDevice.Id} {(tap ? "tap" : "gesture")} {(int)ms}ms n={_fingers.Count} cursor=({ucx},{ucy})");
         Status($"up {(tap ? "tap" : "gesture")} {(int)ms}ms n={_fingers.Count}");
         // Release capture BEFORE firing actions: windows opened from here
         // (settings/assist) must activate normally.
@@ -1308,92 +1029,42 @@ public partial class PadWindow : Window
                         _secondPress = false;
                         if (_dragHold && id == _dragId)
                         {
-                            // Was click-and-hold (button down since 2nd DOWN).
-                            // Clean (1st click withheld) -> Up is click #1 and
-                            // the extra is click #2: a proper double-click.
-                            // Unclean (1st already fired) -> Up alone is
-                            // click #2 and the OS binds the pair; no extra
-                            // (that would triple-click).
+                            // Was click-and-hold (button down since 2nd DOWN):
+                            // release it. If released right away, one extra
+                            // click completes an OS-level double-click
+                            // naturally - the DoubleTap slot is NOT fired
+                            // on top (that would triple-click).
                             ReleaseActionButton();
-                            DebugLog.Write($"DOUBLE clean={_cleanDouble} tapToClick={_s.TapToClick}");
-                            if (_s.TapToClick && _cleanDouble) SafeClick("left");
+                            if (_s.TapToClick) SafeClick("left");
                         }
                         else if (!_secondConsumed)
                         {
-                            if (_cleanDouble) DoGesture(G.DoubleTap);
-                            else if (_s.TapToClick) DoGesture(G.Tap);
+                            DoGesture(G.DoubleTap);
                         }
-                        else
-                        {
-                            // Hold timer elapsed: deliver the deferred one-shot
-                            // (drag_hold leaves _holdAction null -> no-op).
-                            FireDeferred(ref _holdAction);
-                        }
-                        _cleanDouble = false;
                         // else: hold timer already consumed it.
                     }
                     else if (_longFired)
                     {
-                        // Long timer elapsed: the one-shot was deferred to
-                        // release (finger is leaving - popup survives now).
-                        FireDeferred(ref _longAction);
-                        _longFired = false;
+                        _longFired = false; // long-press already fired
                     }
-                    else
+                    else if (_s.TapToClick)
                     {
-                        // Defer: fire only if no 2nd tap arrives within
-                        // TapDelayMs (a 2nd tap cancels this into double /
-                        // hold-drag; any other press flushes it at Down).
-                        ArmSingleTap();
-                    }
-                    break;
-                }
-                case TileAction.Pad when !tap && !f.Moved:
-                {
-                    // Held still past TapMs without moving. Timer-fired
-                    // one-shots deliver now (finger leaving - popup survives).
-                    // Dead-zone releases (too slow for tap, too quick for
-                    // hold) click nothing but still open the double window
-                    // so a slow 2nd tap can drag or pair.
-                    // (Timer-fired and dead-zone are exclusive: the timer
-                    // clears _longId when it fires.)
-                    bool wasLongArmed = e.TouchDevice.Id == _longId;
-                    if (_longFired)
-                    {
-                        FireDeferred(ref _longAction);
-                        _longFired = false;
-                    }
-                    if (wasLongArmed) CancelLong();
-                    if (e.TouchDevice.Id == _secondId && _secondPress && !_dragHold)
-                    {
-                        FireDeferred(ref _holdAction);
-                        CancelHold();
-                        _secondPress = false;
-                        _cleanDouble = false;
-                    }
-                    else if (wasLongArmed)
-                    {
-                        ArmDoubleOnly();
+                        DoGesture(G.Tap);
+                        _pendingTapUntil = DateTime.Now.AddMilliseconds(350);
                     }
                     break;
                 }
                 case TileAction.Pad when f.Moved:
                     if (_longFired)
                     {
-                        // Held past the timer, then drifted: still deliver
-                        // the deferred one-shot on release.
-                        FireDeferred(ref _longAction);
                         _longFired = false; // long-press owned this press
                     }
                     else if (e.TouchDevice.Id == _secondId && _secondPress)
                     {
                         // 2nd press that moved: it was a drag (button down
                         // since 2nd DOWN) - release it, no click, no double.
-                        // A deferred one-shot hold still fires.
-                        FireDeferred(ref _holdAction);
                         CancelHold();
                         _secondPress = false;
-                        _cleanDouble = false;
                         if (_dragHold && e.TouchDevice.Id == _dragId)
                             ReleaseActionButton();
                     }

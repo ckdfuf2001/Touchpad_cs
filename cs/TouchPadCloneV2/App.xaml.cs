@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using WApplication = System.Windows.Application;
 
@@ -26,22 +27,22 @@ public partial class App : WApplication
         base.OnStartup(e);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
+        if (Environment.GetEnvironmentVariable("TOUCHPAD_SELFTEST") == "1")
+        {
+            // Headless-ish selftest: real window + real handlers, no tray.
+            // Must stay on the UI (STA) thread: async void keeps context.
+            RunSelfTestAsync();
+            return;
+        }
+
         _settings = Core.AppSettings.Load();
-        Core.DebugLog.ForceOn = _settings.DiagLog;
         // Crash recovery: a previous run may have left the cursor hidden.
         // Relaunching the app always repairs it (touch works cursor-free).
         Core.InputSim.RestoreCursor();
         Core.DebugLog.Clear();
-        var (dblMs, dblCx, dblCy) = Core.InputSim.DoubleClickMetrics();
         Core.DebugLog.Write("settings: speed=" + _settings.Speed +
             " layout=" + _settings.Layout +
-            " preset=" + _settings.PresetFile +
-            " tapDelay=" + _settings.TapDelayMs +
-            " longMs=" + _settings.LongPressMs +
-            " tapClick=" + _settings.TapToClick +
-            " fake=" + _settings.FakeCursor +
-            " simple=" + _settings.SimpleClicks);
-        Core.DebugLog.Write($"os: dblClickTime={dblMs}ms dblSize={dblCx}x{dblCy}");
+            " preset=" + _settings.PresetFile);
         _presets = LoadPresets();
         if (!_presets.ContainsKey(_settings.Layout))
             _settings.Layout = _presets.ContainsKey("floatpad")
@@ -91,6 +92,19 @@ public partial class App : WApplication
         Exit += (_, _) => _pad?.EmergencyRestore();
     }
 
+    private async void RunSelfTestAsync()
+    {
+        await Task.Delay(500);
+        int rc;
+        try { rc = await SelfTest.Run(); }
+        catch (Exception ex)
+        {
+            Console.WriteLine("SELFTEST CRASH: " + ex);
+            rc = 2;
+        }
+        Environment.Exit(rc);
+    }
+
     private Dictionary<string, Core.Layout> LoadPresets()
     {
         string bundled = System.IO.Path.Combine(
@@ -107,7 +121,6 @@ public partial class App : WApplication
     private void Apply()
     {
         if (_pad == null || _strip == null) return;
-        Core.DebugLog.ForceOn = _settings.DiagLog;
         _presets = LoadPresets();
         if (!_presets.ContainsKey(_settings.Layout))
             _settings.Layout = _presets.Keys.First();
@@ -116,11 +129,10 @@ public partial class App : WApplication
         _pad.RefreshChrome();
         _pad.ApplyCursorStyle();
         // Cursor/overlay only while the pad is actually shown (launch = off).
-        // Outside a touch session the real cursor stays visible so a
-        // physical mouse works normally; fake mode engages per-touch.
         if (_pad.IsVisible)
         {
-            _pad.EmergencyRestore();
+            if (_settings.FakeCursor) _pad.EnterPersistentFake();
+            else _pad.EmergencyRestore();
         }
         // Fullscreen layouts take the whole screen; others restore tile size.
         // Only on family transition, so sliders don't yank the window.

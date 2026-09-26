@@ -1,0 +1,2 @@
+pystray>=6
+pillow>=10

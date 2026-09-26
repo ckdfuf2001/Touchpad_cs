@@ -52,22 +52,8 @@ public sealed class AppSettings
     public bool TapToClick { get; set; } = true;
     public bool SwapButtons { get; set; } = false;
     public bool FakeCursor { get; set; } = true;
-    /// <summary>
-    /// TKM-parity click delivery: no ParkAtFake, no self-click suppression -
-    /// clicks fire exactly where the system cursor is (reference: arand4/TKM
-    /// Trackpad.xaml.cs, which never repositions the cursor around clicks).
-    /// </summary>
-    public bool SimpleClicks { get; set; } = false;
     public string CursorStyle { get; set; } = "cyan";
     public int LongPressMs { get; set; } = 500;
-    /// <summary>
-    /// Single-tap is deferred by this long so a 2nd tap can cancel it into
-    /// a double-tap / hold-drag. 0 = fire immediately (double still detected
-    /// in a separate 800ms window, OS-bound).
-    /// </summary>
-    public int TapDelayMs { get; set; } = 500;
-    /// <summary>In-app diagnostic log switch (%TEMP%\touchpad_v2.log).</summary>
-    public bool DiagLog { get; set; } = false;
     /// <summary>Gesture profile per layout family (settings tabs).</summary>
     public GestureMap Gestures { get; set; } = new();
     public GestureMap ArtistGestures { get; set; } = new();

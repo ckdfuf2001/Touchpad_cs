@@ -2,15 +2,9 @@
 bin/
 obj/
 dist/
-dist_single/
-out/
-# VS/Rider
+__pycache__/
+*.pyc
+*.pyo
 .vs/
-.idea/
 *.user
-*.suo
-# archives
-*.zip
-# OS
-Thumbs.db
-Desktop.ini
+TestResults/

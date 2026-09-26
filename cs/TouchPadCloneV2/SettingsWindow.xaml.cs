@@ -39,7 +39,6 @@ public partial class SettingsWindow : Window
         Speed.Value = s.Speed;
         OpacityS.Value = s.Opacity;
         LongMs.Value = s.LongPressMs;
-        TapDelayMs.Value = s.TapDelayMs;
         LayoutBox.ItemsSource = layouts;
         LayoutBox.SelectedItem = layouts.Contains(s.Layout) ? s.Layout : layouts.FirstOrDefault();
         CursorBox.ItemsSource = CursorStyles;
@@ -52,13 +51,10 @@ public partial class SettingsWindow : Window
         };
         TapClick.IsChecked = s.TapToClick;
         FakeCur.IsChecked = s.FakeCursor;
-        SimpleClk.IsChecked = s.SimpleClicks;
-        DiagLogBox.IsChecked = s.DiagLog;
         SwapBtn.IsChecked = s.SwapButtons;
         Speed.ValueChanged += (_, _) => Live();
         OpacityS.ValueChanged += (_, _) => Live();
         LongMs.ValueChanged += (_, _) => Live();
-        TapDelayMs.ValueChanged += (_, _) => Live();
 
         BuildGestureGrid(FloatGrid, s.Gestures, "float");
         BuildGestureGrid(ArtistGrid, s.ArtistGestures, "artist");
@@ -142,7 +138,6 @@ public partial class SettingsWindow : Window
         _s.Speed = Speed.Value;
         _s.Opacity = OpacityS.Value;
         _s.LongPressMs = (int)LongMs.Value;
-        _s.TapDelayMs = (int)TapDelayMs.Value;
         _onApply();
     }
 
@@ -151,13 +146,10 @@ public partial class SettingsWindow : Window
         _s.Speed = Speed.Value;
         _s.Opacity = OpacityS.Value;
         _s.LongPressMs = (int)LongMs.Value;
-        _s.TapDelayMs = (int)TapDelayMs.Value;
         if (LayoutBox.SelectedItem is string l) _s.Layout = l;
         if (CursorBox.SelectedItem is string c) _s.CursorStyle = c;
         _s.TapToClick = TapClick.IsChecked == true;
         _s.FakeCursor = FakeCur.IsChecked == true;
-        _s.SimpleClicks = SimpleClk.IsChecked == true;
-        _s.DiagLog = DiagLogBox.IsChecked == true;
         _s.SwapButtons = SwapBtn.IsChecked == true;
         var sg = _s.StripGestures;
         string SGet(string k) => _gestures.TryGetValue("strip:" + k, out var c)

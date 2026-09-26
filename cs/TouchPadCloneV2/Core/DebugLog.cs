@@ -3,15 +3,10 @@ using System.IO;
 
 namespace TouchPadCloneV2.Core;
 
-/// <summary>File log, active with TOUCHPAD_DEBUG=1, a TOUCHPAD_DEBUG file
-/// in %TEMP%, or the in-app "진단 로그 기록" checkbox.</summary>
+/// <summary>File log, active only with TOUCHPAD_DEBUG=1.</summary>
 public static class DebugLog
 {
-    /// <summary>Set from AppSettings.DiagLog at startup/apply.</summary>
-    public static bool ForceOn;
-
-    private static bool On =>
-        ForceOn ||
+    private static readonly bool On =
         Environment.GetEnvironmentVariable("TOUCHPAD_DEBUG") == "1" ||
         File.Exists(System.IO.Path.Combine(
             Environment.GetEnvironmentVariable("TEMP") ?? ".",

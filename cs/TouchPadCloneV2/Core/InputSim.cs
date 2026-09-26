@@ -104,21 +104,6 @@ public static class InputSim
     private static extern int ShowCursor(bool bShow);
 
     [DllImport("user32.dll")]
-    private static extern int GetSystemMetrics(int nIndex);
-
-    [DllImport("user32.dll")]
-    private static extern uint GetDoubleClickTime();
-
-    private const int SM_CXDOUBLECLK = 36;
-    private const int SM_CYDOUBLECLK = 37;
-
-    /// <summary>OS double-click binding limits, for diagnostics.</summary>
-    public static (uint ms, int cx, int cy) DoubleClickMetrics() =>
-        (GetDoubleClickTime(),
-         GetSystemMetrics(SM_CXDOUBLECLK),
-         GetSystemMetrics(SM_CYDOUBLECLK));
-
-    [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetCursorInfo(out CURSORINFO pci);
 
