@@ -22,6 +22,7 @@ public partial class SettingsWindow : Window
     [
         ("tap", "짧게 탭", m => m.Tap, (m, v) => m.Tap = v),
         ("double_tap", "더블탭", m => m.DoubleTap, (m, v) => m.DoubleTap = v),
+        ("triple_tap", "세 번 탭", m => m.TripleTap, (m, v) => m.TripleTap = v),
         ("long_press", "길게 누르기", m => m.LongPress, (m, v) => m.LongPress = v),
         ("second_hold", "두번째 누른채", m => m.SecondHold, (m, v) => m.SecondHold = v),
         ("two_finger_tap", "두손가락 탭", m => m.TwoFingerTap, (m, v) => m.TwoFingerTap = v),

@@ -231,8 +231,11 @@ public partial class PadWindow : Window
     private int _longId = -1;
     private bool _longFired;
     private DateTime _pendingTapUntil = DateTime.MinValue;
+    private DateTime _pendingTripleUntil = DateTime.MinValue;
     private bool _secondPress;
     private int _secondId = -1;
+    private bool _thirdPress;
+    private int _thirdId = -1;
     private bool _secondConsumed;   // hold timer already fired
     private bool _dragHold;         // action button currently held for drag
     private int _dragId = -1;
@@ -792,6 +795,7 @@ public partial class PadWindow : Window
                     _secondPress = true;
                     _secondId = e.TouchDevice.Id;
                     _secondConsumed = false;
+                    _thirdPress = false;
                     if (G.SecondHold == "drag_hold")
                     {
                         // Click-and-hold state IMMEDIATELY (no 250ms dead
@@ -809,9 +813,27 @@ public partial class PadWindow : Window
                     }
                     else ArmHold(e.TouchDevice.Id);
                 }
+                else if (DateTime.Now < _pendingTripleUntil)
+                {
+                    // Third press: triple-tap candidate (or triple-drag).
+                    _thirdPress = true;
+                    _thirdId = e.TouchDevice.Id;
+                    _secondPress = false;
+                    if (G.SecondHold == "drag_hold")
+                    {
+                        ParkAtFake();
+                        InputSim.Down("left");
+                        _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
+                        _dragHold = true;
+                        _dragId = e.TouchDevice.Id;
+                        _actionHeld = "left";
+                        DebugLog.Write("GESTURE third-hold (immediate drag)");
+                    }
+                }
                 else
                 {
                     _secondPress = false;
+                    _thirdPress = false;
                     ArmLong(e.TouchDevice.Id);
                 }
             }
@@ -1021,7 +1043,18 @@ public partial class PadWindow : Window
                 {
                     int id = e.TouchDevice.Id;
                     if (id == _longId) CancelLong();
-                    if (id == _secondId && _secondPress)
+                    if (id == _thirdId && _thirdPress)
+                    {
+                        // Third press released right away: triple-tap event.
+                        // (Held-down was a triple-drag; Up ends it silently.)
+                        _thirdPress = false;
+                        _pendingTripleUntil = DateTime.MinValue;
+                        _pendingTapUntil = DateTime.MinValue;
+                        if (_dragHold && id == _dragId)
+                            ReleaseActionButton();
+                        DoGesture(G.TripleTap);
+                    }
+                    else if (id == _secondId && _secondPress)
                     {
                         // Second press released (Up always ends a held drag,
                         // even with TapToClick off - else the button sticks).
@@ -1036,6 +1069,12 @@ public partial class PadWindow : Window
                             // on top (that would triple-click).
                             ReleaseActionButton();
                             if (_s.TapToClick) SafeClick("left");
+                            // Multi-tap windows are generous (450ms): slow
+                            // tappers otherwise fall out of the double/triple
+                            // chain and every tap degrades to a single click
+                            // (measured user report: "needs three touches").
+                            _pendingTripleUntil = DateTime.Now.AddMilliseconds(450);
+                            _pendingTapUntil = DateTime.MinValue;
                         }
                         else if (!_secondConsumed)
                         {
@@ -1050,7 +1089,7 @@ public partial class PadWindow : Window
                     else if (_s.TapToClick)
                     {
                         DoGesture(G.Tap);
-                        _pendingTapUntil = DateTime.Now.AddMilliseconds(350);
+                        _pendingTapUntil = DateTime.Now.AddMilliseconds(450);
                     }
                     break;
                 }
@@ -1058,6 +1097,14 @@ public partial class PadWindow : Window
                     if (_longFired)
                     {
                         _longFired = false; // long-press owned this press
+                    }
+                    else if (e.TouchDevice.Id == _thirdId && _thirdPress)
+                    {
+                        // 3rd press that moved: triple-drag ends, no event.
+                        _thirdPress = false;
+                        _pendingTripleUntil = DateTime.MinValue;
+                        if (_dragHold && e.TouchDevice.Id == _dragId)
+                            ReleaseActionButton();
                     }
                     else if (e.TouchDevice.Id == _secondId && _secondPress)
                     {
@@ -1119,6 +1166,8 @@ public partial class PadWindow : Window
             case "right_click": SafeClick("right"); break;
             case "middle_click": SafeClick("middle"); break;
             case "double_click": SafeClick("left"); SafeClick("left"); break;
+            case "triple_click":
+                SafeClick("left"); SafeClick("left"); SafeClick("left"); break;
             case "drag_hold": SafeClick("left"); break; // release-context fallback
             case "wheel_up": InputSim.Wheel(_s.WheelStep); break;
             case "wheel_down": InputSim.Wheel(-_s.WheelStep); break;

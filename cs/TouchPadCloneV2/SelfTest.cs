@@ -130,7 +130,17 @@ public static class SelfTest
     private static void Check(bool cond, string what, string info = "")
     {
         Console.WriteLine($"  [{(cond ? "PASS" : "FAIL")}] {what} {info}");
-        if (!cond) _fails++;
+        if (!cond)
+        {
+            Console.WriteLine("  raw hook tail:");
+            int from = Math.Max(0, _clicks.Count - 12);
+            for (int i = from; i < _clicks.Count; i++)
+            {
+                var e = _clicks[i];
+                Console.WriteLine($"    {e.Ms} {e.Btn} {(e.Down ? "dn" : "up")} ({e.X},{e.Y})");
+            }
+            _fails++;
+        }
     }
 
     private static List<Click> Since(int n) =>
@@ -272,6 +282,24 @@ public static class SelfTest
             Check(downs == 2, "double-hold-drag = click + hold (2 downs, no extra)",
                 $"downs={downs}");
             Check(!Stuck(), "dblhold: no stuck button");
+        }
+        // ---- 5. triple tap quick: click + natural double + triple event ----
+        {
+            int n = _clicks.Count;
+            for (int k = 0; k < 3; k++)
+            {
+                var d = new FakeTouch(id++);
+                Down(d, px, py); await Task.Delay(60); Up(d);
+                await Task.Delay(150);
+            }
+            await Task.Delay(400);
+            var c = Since(n);
+            int downs = 0;
+            foreach (var e in c) if (e.Down && e.Btn == "L") downs++;
+            // 1 + (down + extra) + (down + triple×3) = 7
+            Check(downs == 7, "triple tap = 7 downs incl. triple event",
+                $"downs={downs}");
+            Check(!Stuck(), "triple: no stuck button");
         }
 
         UnhookWindowsHookEx(_hook);

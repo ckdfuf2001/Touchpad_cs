@@ -137,22 +137,34 @@ public static class InputSim
 
     public static void Click(string button)
     {
+        var (x, y) = Cursor();
+        DebugLog.Write($"BTN click {button} @({x},{y})");
         Down(button); Up(button);
     }
 
-    public static void Down(string button) => Mouse(button switch
+    public static void Down(string button)
     {
-        "right" => MOUSEEVENTF_RIGHTDOWN,
-        "middle" => MOUSEEVENTF_MIDDLEDOWN,
-        _ => MOUSEEVENTF_LEFTDOWN,
-    });
+        var (x, y) = Cursor();
+        DebugLog.Write($"BTN down {button} @({x},{y})");
+        Mouse(button switch
+        {
+            "right" => MOUSEEVENTF_RIGHTDOWN,
+            "middle" => MOUSEEVENTF_MIDDLEDOWN,
+            _ => MOUSEEVENTF_LEFTDOWN,
+        });
+    }
 
-    public static void Up(string button) => Mouse(button switch
+    public static void Up(string button)
     {
-        "right" => MOUSEEVENTF_RIGHTUP,
-        "middle" => MOUSEEVENTF_MIDDLEUP,
-        _ => MOUSEEVENTF_LEFTUP,
-    });
+        var (x, y) = Cursor();
+        DebugLog.Write($"BTN up {button} @({x},{y})");
+        Mouse(button switch
+        {
+            "right" => MOUSEEVENTF_RIGHTUP,
+            "middle" => MOUSEEVENTF_MIDDLEUP,
+            _ => MOUSEEVENTF_LEFTUP,
+        });
+    }
 
     public static void Wheel(int delta, bool horizontal = false) =>
         Mouse(horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL, 0, 0, delta);
