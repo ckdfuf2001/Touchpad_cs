@@ -49,6 +49,30 @@ public partial class ModeStripWindow : Window
     private string _tapPending = "none";
 
     /// <summary>
+    /// While a touch gesture is in progress, the strip lets mouse input
+    /// through to whatever is beneath it - otherwise a drag whose release
+    /// lands along the top of the screen is dropped on the strip and lost.
+    /// The close button is excluded so it stays usable.
+    /// </summary>
+    private IntPtr StripWndProc(IntPtr hwnd, int msg, IntPtr wParam,
+        IntPtr lParam, ref bool handled)
+    {
+        if (msg != 0x0084 || !PadWindow.SessionActive) return IntPtr.Zero;
+        try
+        {
+            int sx = unchecked((short)(long)lParam);
+            int sy = unchecked((short)((long)lParam >> 16));
+            var win = PointFromScreen(new Point(sx, sy));
+            if (InputHitTest(win) is System.Windows.Controls.Button)
+                return IntPtr.Zero;
+            handled = true;
+            return new IntPtr(-1);   // HTTRANSPARENT
+        }
+        catch { }
+        return IntPtr.Zero;
+    }
+
+    /// <summary>
     /// Block a mouse event promoted from a touch. A physical mouse has no
     /// StylusDevice and passes through.
     /// </summary>
@@ -69,6 +93,21 @@ public partial class ModeStripWindow : Window
         // raises its own topmost window afterwards covers it and nothing
         // brings it back, which is "the strip gets covered by a program".
         Core.TopmostKeeper.Attach(this);
+        // And while a touch gesture runs the strip must get out of the way of
+        // the mouse: it is topmost along the top of the screen, so a drag that
+        // ended up there was dropped on it (logged: "DRAG end ... under
+        // [TouchPadClone ModeStrip]") and the drop went nowhere. Its own close
+        // button stays clickable.
+        SourceInitialized += (_, _) =>
+        {
+            try
+            {
+                var src = System.Windows.Interop.HwndSource.FromHwnd(
+                    new System.Windows.Interop.WindowInteropHelper(this).Handle);
+                src?.AddHook(StripWndProc);
+            }
+            catch { }
+        };
         Left = (SystemParameters.PrimaryScreenWidth - Width) / 2;
         Top = 0;
         Surface.PreviewTouchDown += OnTouchDown;

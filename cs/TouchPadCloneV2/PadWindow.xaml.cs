@@ -369,6 +369,14 @@ public partial class PadWindow : Window
         catch { }
     }
 
+    /// <summary>
+    /// True while a touch gesture is in progress anywhere in the app. Shared
+    /// so the mode strip can get out of the way: it is topmost and sits along
+    /// the top of the screen, so a drag ending up there was dropped on it
+    /// (logged: "DRAG end ... under [TouchPadClone ModeStrip]").
+    /// </summary>
+    public static bool SessionActive { get; private set; }
+
     private void BeginSession()
     {
         // A re-park left over from the previous press must die here: it would
@@ -380,6 +388,7 @@ public partial class PadWindow : Window
         // Before anything of ours moves it: this is the spot to return to.
         RememberPhysicalCursor();
         _session = true;
+        SessionActive = true;
         EnterPersistentFake();
         // One cursor: fight the system's pull onto the touch contact from the
         // first event, not only while a button is held - it moves the cursor
@@ -392,6 +401,7 @@ public partial class PadWindow : Window
     {
         if (!_session) return;
         _session = false;
+        SessionActive = false;
         if (ArrowOn)
         {
             // Single cursor identity: keep it hidden, arrow stays.
@@ -2137,10 +2147,15 @@ public partial class PadWindow : Window
         {
             case TileAction.Pad when (dx != 0 || dy != 0):
             {
-                // A chained press stays FROZEN until it resolves: the drag
-                // grab must land on what the user actually pressed, and a
-                // cursor that drifts during a hold is unusable for aiming.
-                if (_dragArmId == e.TouchDevice.Id && !_dragHold) break;
+                // A chained press used to be FROZEN here until it resolved,
+                // "so the grab lands on what the user actually pressed". That
+                // is already guaranteed a different way - both grab routes
+                // rewind the aim to the press point (StartDrag sets
+                // _fakeX/_fakeY to f.Fx0/Fy0, FirePressAction rewinds the
+                // same) - so the freeze only delayed the cursor. Measured as
+                // "after a double touch, moving does nothing": the cursor sat
+                // still for the ~135ms until the grab and then jumped, which
+                // reads as unresponsive, not as aiming.
                 // Deltas are touch positions in our own surface space -
                 // fully independent of the OS cursor, so no feedback loop.
                 if (_session)
