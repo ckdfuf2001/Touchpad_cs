@@ -464,6 +464,9 @@ public partial class PadWindow : Window
     private DateTime _grabArmUntil = DateTime.MinValue;
     /// <summary>A click has been delivered since the current press began.</summary>
     private bool _clickSincePress;
+    /// <summary>Drop point bookkeeping for the drag-end log.</summary>
+    private double _dragFromX = -1e9, _dragFromY = -1e9;
+    private double _dragPathDip;
     private int _twoId = -1;        // second concurrent finger
     private bool _twoCandidate;
     private bool _twoActive;        // a two-finger gesture is/was in flight
@@ -790,6 +793,8 @@ public partial class PadWindow : Window
         ClampFake();
         _overlay?.MoveToPhysical(_fakeX, _fakeY);
         f.Start = f.Last;
+        _dragFromX = _fakeX; _dragFromY = _fakeY;   // for the drop log
+        _dragPathDip = 0;
         // Ordering note: a grab only carries anything if the click before it
         // landed, and it always does - a chained press is armed BY a tap that
         // already clicked, and the post-multi-tap grab window is only open
@@ -870,6 +875,16 @@ public partial class PadWindow : Window
             ForgetRealCursor();
         }
         else InputSim.Up(button);
+        // Where the drop actually lands, and how far the drag went. A file
+        // drag that ends 70px from where it started, in the same folder, is a
+        // no-op in Explorer - it looks exactly like a drag that never
+        // happened, so the question "did it drag?" has to be answered with the
+        // drop target, not the injection.
+        double netDip = Math.Sqrt(
+            Math.Pow(_fakeX - _dragFromX, 2) + Math.Pow(_fakeY - _dragFromY, 2));
+        DebugLog.Write($"DRAG end @({_fakeX:0},{_fakeY:0}) net={netDip:0}px"
+            + $" path={_dragPathDip:0}DIP under {DescribeWindowAt(_fakeX, _fakeY)}");
+        _dragFromX = _dragFromY = -1e9;
         _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
         // The drag is over: give the real cursor back to the physical mouse
         // so a virtual drag never leaves it parked under the fake one.
@@ -1789,7 +1804,11 @@ public partial class PadWindow : Window
                     // different baseline. That is why a touch drag came out
                     // as a shaky circle while the same drag with the physical
                     // mouse (InputSim.Move on every event) was smooth.
-                    if (ButtonHeld()) SyncRealCursorToFake();
+                    if (ButtonHeld())
+                    {
+                        _dragPathDip += Math.Sqrt(dx * dx + dy * dy);
+                        SyncRealCursorToFake();
+                    }
                     // NOTE: the real cursor is deliberately NEVER chased here.
                     // It stays (hidden) where it was; only the fake roams.
                     // Clicks carry their own absolute position (see ClickAt).
