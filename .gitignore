@@ -1,0 +1,16 @@
+# build outputs
+bin/
+obj/
+dist/
+dist_single/
+out/
+# VS/Rider
+.vs/
+.idea/
+*.user
+*.suo
+# archives
+*.zip
+# OS
+Thumbs.db
+Desktop.ini

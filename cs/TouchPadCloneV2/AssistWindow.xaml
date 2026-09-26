@@ -1,0 +1,14 @@
+<Window x:Class="TouchPadCloneV2.AssistWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AssistPad" WindowStyle="None" AllowsTransparency="True"
+        Background="#D82C3340" Topmost="True" ShowInTaskbar="False"
+        ResizeMode="NoResize" Width="320" Height="64">
+    <StackPanel Orientation="Horizontal" Margin="4">
+        <Button x:Name="BCtrl" Content="Ctrl" Width="66" Margin="2"/>
+        <Button x:Name="BShift" Content="Shift" Width="66" Margin="2"/>
+        <Button x:Name="BAlt" Content="Alt" Width="66" Margin="2"/>
+        <Button x:Name="BSpace" Content="Space" Width="66" Margin="2"/>
+        <Button x:Name="BClose" Content="✕" Width="34" Margin="2"/>
+    </StackPanel>
+</Window>

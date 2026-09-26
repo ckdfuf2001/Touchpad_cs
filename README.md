@@ -1,0 +1,61 @@
+# TouchMousePointer 클론 (가상 트랙패드)
+
+원본: `C:\Program Files\TouchMousePointer` (Lovesummertrue, v3.0.1.2) 분석 기반 호환 클론.
+자세한 분석은 [ANALYSIS.md](ANALYSIS.md), 전체 메뉴얼·구조도는 [docs/manual.html](docs/manual.html) 참조.
+
+## 현행: v2 (C#/WPF, `cs/TouchPadCloneV2/`) — 권장
+
+WPF **진짜 터치 이벤트**(손가락별 추적)로 동작. v1(Python/tkinter)은
+마우스 에뮬 기반이라 자기증폭 발진이 나서 retired — `touchpad_clone/`에 보존.
+
+```bat
+cd cs\TouchPadCloneV2
+dotnet build
+dotnet run
+```
+
+- 플로팅 가상 터치패드: 한손가락 드래그=상대이동(선형), 탭=클릭, 스와이프=휠·뒤로/앞으로, 두손가락=스크롤·우클릭
+- 좌/우/중 버튼 + 드래그 락, 세로/가로 휠 타일, `VK_*`/한글자 키 타일(Ctrl 콤보 포함), 보조패드
+- 원본 INI 프리셋 호환 로더 — 원본 `Preset *.ini` 직접 열기 가능 (`cs/PresetCheck`로 56종 전수 검증)
+- 상단 ModeStrip(터치 시 확장), 트레이 상주, 설정 저장 (`%APPDATA%\TouchPadClone\settings.json`, v1과 공유)
+- 진단: `set TOUCHPAD_DEBUG=1` → `%TEMP%\touchpad_v2.log`에 터치 원신호 기록
+- 미구현: 커서 시각화 오버레이(v1에만 있음), 핀치 제스처, vJoy 축 에뮬, `artsize_*`
+
+## 구버전: v1 (Python, `touchpad_clone/`) — 참고용
+
+```bat
+python -m pip install -r requirements.txt
+python -m touchpad_clone.main
+```
+
+## 모드 전환 (원본 대응 + 클론 확장)
+
+원본에는 **화면 상단 전용 스와이프 영역이 없다.** 원본의 모드 전환 수단은:
+1. 패드 위 **핀치 아웃 = 풀스크린 / 핀치 인 = 창모드 복귀** (공식 스크린샷 4→7번)
+2. 작업표시줄 **트레이 아이콘 탭** (램프 점등 = 풀스크린 ON)
+3. 제스처에 할당하는 **Layout… 전환**, 패드의 **menu 타일**
+
+클론은 2·3과 menu 타일을 지원하고, 요청받은 상단 스와이프를 위해
+추가로 **ModeStrip**(화면 상단 중앙 바, 터치하면 확장)을 상시 표시한다:
+- 좌/우로 밀기 = 이전/다음 레이아웃 (`floatpad → leftpad → …`)
+- 탭 = 설정 열기, 아래로 밀기 = 풀스크린 토글
+
+## vJoy (가상 조이스틱) 설치 안내
+
+원본의 `VJoy64.dll`은 Shaul Efraim의 오픈소스 **vJoy** SDK로,
+`Preset WASD gaming.ini`가 게임에 조이스틱 신호를 보내기 위해 쓴다.
+vJoy는 드라이버라서 동봉이 안 되고 **별도 설치**가 필요하다:
+
+- 공식 사이트: http://vjoystick.sourceforge.net
+- 다운로드: https://sourceforge.net/projects/vjoystick/files/
+- GitHub: https://github.com/shauleiz/vJoy
+- Windows 10/11 최신 빌드용 유지 포크: https://github.com/jshafer817/vJoy
+
+v2 설정 창의 "게임 프리셋용 vJoy" 행에서 설치 상태 확인 + 바로 열기.
+vJoy 없이도 WASD 프리셋은 **키보드 입력으로 대체 동작**한다.
+
+## 원본과의 차이
+
+- 핀치 줌인/아웃 전환은 ModeStrip 아래밀기로 대체 (핀치 제스처 미구현)
+- vJoy 축 에뮬 미포함, WebView2 설정·스토어 라이선스 미포함
+- 커서 시각화 오버레이는 v1에만 있음 (v2 이식 예정)

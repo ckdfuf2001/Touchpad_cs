@@ -1,0 +1,8 @@
+<Window x:Class="TouchPadCloneV2.FakeCursorOverlay"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="TouchPadClone Cursor" WindowStyle="None" AllowsTransparency="True"
+        Background="Transparent" Topmost="True" ShowInTaskbar="False"
+        ResizeMode="NoResize" ShowActivated="False" Width="48" Height="48">
+    <Canvas x:Name="Paper" Width="48" Height="48" />
+</Window>

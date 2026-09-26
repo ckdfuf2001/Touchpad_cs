@@ -1,0 +1,94 @@
+<Window x:Class="TouchPadCloneV2.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="TouchPad Clone - 설정" Width="560" Height="620"
+        Topmost="True" WindowStartupLocation="CenterScreen">
+    <TabControl x:Name="Tabs" TabStripPlacement="Left">
+        <TabItem Header="General">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="14">
+                <TextBlock Text="커서·입력" FontWeight="Bold" Foreground="#35C4FF"/>
+                <TextBlock Text="커서 속도" Margin="0,6,0,0"/>
+                <Slider x:Name="Speed" Minimum="0.2" Maximum="5" TickFrequency="0.1"/>
+                <TextBlock Text="가상 커서 아이콘" Margin="0,8,0,0"/>
+                <ComboBox x:Name="CursorBox"/>
+                <CheckBox x:Name="TapClick" Content="탭 = 클릭 (끄면 탭 무시)" Margin="0,8,0,0"/>
+                <CheckBox x:Name="FakeCur" Content="터치 중 시스템 커서 숨김 (Fake cursor)" Margin="0,4,0,0"/>
+                <CheckBox x:Name="SimpleClk" Content="단순 클릭 경로 (TKM식: 파킹·억제 없음, 실험용)" Margin="0,4,0,0"/>
+                <CheckBox x:Name="DiagLogBox" Content="진단 로그 기록 (%TEMP%\touchpad_v2.log)" Margin="0,4,0,0"/>
+                <CheckBox x:Name="SwapBtn" Content="좌/우 버튼 반전" Margin="0,4,0,0"/>
+                <TextBlock Text="길게 누르기 판정 (ms)" Margin="0,8,0,0"/>
+                <Slider x:Name="LongMs" Minimum="200" Maximum="1000" TickFrequency="50"/>
+                <TextBlock Text="싱글탭 확정 대기 (ms, 짧을수록 반응↑·더블 판정은 별도 800ms)" Margin="0,8,0,0"/>
+                <Slider x:Name="TapDelayMs" Minimum="0" Maximum="1000" TickFrequency="50"/>
+                <Separator Margin="0,12,0,12"/>
+                <TextBlock Text="패드 모양" FontWeight="Bold" Foreground="#35C4FF"/>
+                <TextBlock Text="패드 투명도" Margin="0,6,0,0"/>
+                <Slider x:Name="OpacityS" Minimum="0.2" Maximum="1" TickFrequency="0.05"/>
+                <TextBlock Text="레이아웃 (원본 INI 섹션)" Margin="0,8,0,0"/>
+                <ComboBox x:Name="LayoutBox"/>
+                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                    <Button x:Name="PresetBtn" Content="프리셋 INI 열기…" Width="130"/>
+                    <Button x:Name="SaveBtn" Content="적용·저장" Width="100" Margin="8,0,0,0"/>
+                </StackPanel>
+                <Separator Margin="0,12,0,12"/>
+                <TextBlock Text="상단 스트립 제스처" FontWeight="Bold" Foreground="#35C4FF"/>
+                <TextBlock Text="등록·삭제: 원하는 동작 선택, 끄려면 '없음'" Foreground="Gray" Margin="0,0,0,4"/>
+                <Grid x:Name="StripGrid" Margin="0,4,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="150"/><ColumnDefinition/>
+                    </Grid.ColumnDefinitions>
+                </Grid>
+                <Separator Margin="0,12,0,12"/>
+                <TextBlock Text="게임 프리셋용 vJoy" FontWeight="Bold" Foreground="#35C4FF"/>
+                <TextBlock x:Name="VjoyStatus" Foreground="Gray"/>
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                    <Button x:Name="VjoyDl" Content="다운로드 페이지" Width="130"/>
+                    <Button x:Name="VjoyFork" Content="Win10/11 포크" Width="120" Margin="8,0,0,0"/>
+                </StackPanel>
+                <TextBlock Text="vJoy 없이도 WASD 프리셋은 키보드 입력으로 대체 동작."
+                           Foreground="Gray" TextWrapping="Wrap" Margin="0,4,0,0"/>
+            </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+        <TabItem Header="FloatPad">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="14">
+                <TextBlock Text="FloatPad 계열 레이아웃 제스처" FontWeight="Bold"/>
+                <TextBlock Text="floatpad / leftpad / rightpad / fullscreen …" Foreground="Gray"/>
+                <Grid x:Name="FloatGrid" Margin="0,6,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="150"/><ColumnDefinition/>
+                    </Grid.ColumnDefinitions>
+                </Grid>
+            </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+        <TabItem Header="ArtistPad">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="14">
+                <TextBlock Text="ArtistPad 계열 레이아웃 제스처" FontWeight="Bold"/>
+                <TextBlock Text="이름에 Artist가 들어간 섹션" Foreground="Gray"/>
+                <Grid x:Name="ArtistGrid" Margin="0,6,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="150"/><ColumnDefinition/>
+                    </Grid.ColumnDefinitions>
+                </Grid>
+            </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+        <TabItem Header="VirtualCtrls">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="14">
+                <TextBlock Text="VirtualCtrls 레이아웃 제스처" FontWeight="Bold"/>
+                <TextBlock Text="virtualctrls 섹션 (보조 컨트롤러)" Foreground="Gray"/>
+                <Grid x:Name="VirtualGrid" Margin="0,6,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="150"/><ColumnDefinition/>
+                    </Grid.ColumnDefinitions>
+                </Grid>
+            </StackPanel>
+            </ScrollViewer>
+        </TabItem>
+    </TabControl>
+</Window>

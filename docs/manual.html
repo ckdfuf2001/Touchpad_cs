@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TouchMousePointer 분석 &amp; 클론 구현 메뉴얼</title>
+<style>
+  :root{--bg:#0f141b;--card:#182029;--line:#2b3644;--txt:#e8ecf4;--mut:#9aa6bd;
+        --acc:#2e6be6;--cy:#35c4ff;--ok:#3fb97f;--warn:#e6a23c}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font:15px/1.7 "Segoe UI","Malgun Gothic",sans-serif}
+  header{position:sticky;top:0;z-index:5;background:#0c1117ee;border-bottom:1px solid var(--line);padding:10px 22px}
+  header b{font-size:17px} header span{color:var(--mut);font-size:13px;margin-left:10px}
+  nav{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+  nav a{color:var(--cy);text-decoration:none;font-size:13px;border:1px solid var(--line);
+        border-radius:20px;padding:2px 12px}
+  nav a:hover{background:#1d2836}
+  main{max-width:1020px;margin:0 auto;padding:26px 22px 80px}
+  h2{margin-top:46px;padding-bottom:6px;border-bottom:2px solid var(--acc);font-size:21px}
+  h3{color:var(--cy);margin-top:28px;font-size:17px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin:14px 0}
+  table{width:100%;border-collapse:collapse;font-size:14px;margin:10px 0}
+  th,td{border:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+  th{background:#202a38;color:var(--cy)}
+  code{background:#0a0e13;border:1px solid var(--line);border-radius:5px;padding:1px 6px;
+       font-family:Consolas,monospace;font-size:13px;color:#ffd479}
+  pre{background:#0a0e13;border:1px solid var(--line);border-radius:10px;padding:14px;overflow:auto;
+      font-size:13px;line-height:1.6}
+  .tag{display:inline-block;font-size:12px;border-radius:6px;padding:1px 8px;margin-right:6px}
+  .t-ok{background:#123626;color:var(--ok)} .t-no{background:#3a2a12;color:var(--warn)}
+  .t-info{background:#12283a;color:var(--cy)}
+  svg{max-width:100%;height:auto;background:#0a0e13;border:1px solid var(--line);border-radius:12px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  footer{color:var(--mut);font-size:13px;text-align:center;padding:30px}
+  kbd{background:#202a38;border:1px solid var(--line);border-bottom-width:3px;border-radius:6px;
+      padding:1px 8px;font-family:inherit}
+  @media print{header{position:static}body{background:#fff;color:#000}.card,pre,svg{border-color:#999}th{color:#000}}
+</style>
+</head>
+<body>
+<header>
+  <b>TouchMousePointer 분석 &amp; 클론 구현 메뉴얼</b>
+  <span>원본 v3.0.1.2 (Lovesummertrue) · 클론 v2.0.0 (C#/WPF) · 2026-09-26</span>
+  <nav>
+    <a href="#s1">1 개요</a><a href="#s2">2 원본 구조</a><a href="#s3">3 타일 엔진</a>
+    <a href="#s4">4 클론 구조</a><a href="#s5">5 모듈 명세</a><a href="#s6">6 사용법</a>
+    <a href="#s7">7 vJoy</a><a href="#s8">8 차이·과제</a><a href="#s9">9 왜 v2인가</a>
+  </nav>
+</header>
+<main>
+
+<!-- ============ 1 ============ -->
+<h2 id="s1">1. 개요</h2>
+<div class="card">
+TouchMousePointer는 Windows 8.1/10/11 태블릿·컨버터블용 <b>가상 트랙패드(온스크린 마우스)</b>다.
+터치스크린을 트랙패드로 바꿔 표준 커서를 조작하므로, 손가락이 타깃을 가리지 않고
+롤오버 메뉴·툴팁·창 리사이즈·작은 버튼 조작이 가능해진다.
+본 문서는 <code>C:\Program Files\TouchMousePointer</code> 실측 분석과,
+그 동작·파일호환 클론 구현 기록이다.
+현행 클론은 <b>v2 (C#/WPF, <code>cs/TouchPadCloneV2/</code>)</b>이며,
+초기 프로토타입 v1 (Python/tkinter, <code>touchpad_clone/</code>)은
+입력 방식의 구조적 한계로 v2에 자리를 넘겼다 (경위 §9).
+</div>
+<div class="grid2">
+<div class="card"><h3>원본 프로파일</h3>
+<table><tr><th>항목</th><th>값</th></tr>
+<tr><td>제품/버전</td><td>TouchMousePointer 3.0.1.2</td></tr>
+<tr><td>제작사</td><td>Lovesummertrue Software</td></tr>
+<tr><td>요구사항</td><td>Windows 8 이상 + 멀티터치 패널</td></tr>
+<tr><td>가격</td><td>개인 무료 (V2 기준, V3는 tabletpro.com)</td></tr>
+<tr><td>상주 프로세스</td><td>TouchMousePointer.exe + TouchMousePointerTray.exe</td></tr>
+</table></div>
+<div class="card"><h3>클론 v2 프로파일</h3>
+<table><tr><th>항목</th><th>값</th></tr>
+<tr><td>위치</td><td><code>cs/TouchPadCloneV2</code></td></tr>
+<tr><td>언어/의존성</td><td>C# · .NET 10 + WPF + WinForms(트레이만)</td></tr>
+<tr><td>입력</td><td>WPF 진짜 터치 이벤트 (손가락별 추적, §9)</td></tr>
+<tr><td>실행</td><td><code>dotnet run</code> 또는 빌드된 <code>TouchPadCloneV2.exe</code></td></tr>
+<tr><td>설정 저장</td><td><code>%APPDATA%\TouchPadClone\settings.json</code> (v1과 공유)</td></tr>
+<tr><td>진단 로그</td><td><code>%TEMP%\touchpad_v2.log</code> (<code>TOUCHPAD_DEBUG=1</code>일 때)</td></tr>
+</table></div>
+</div>
+
+<!-- ============ 2 ============ -->
+<h2 id="s2">2. 원본 프로그램 구조 분석</h2>
+<h3>2.1 설치 파일 역할</h3>
+<table>
+<tr><th>파일</th><th>크기·날짜</th><th>역할 (실측 추정)</th></tr>
+<tr><td><code>TouchMousePointer.exe</code></td><td>1.2MB · 2025-02-26</td><td><b>본체</b>: 투명 오버레이 윈도우 + 트랙패드 엔진. 터치를 가로채 SendInput 계열로 커서 조작으로 변환</td></tr>
+<tr><td><code>TouchMousePointerTray.exe</code></td><td>240KB</td><td><b>트레이 상주</b>: 탭=패드 ON/OFF, 롱탭=설정 메뉴</td></tr>
+<tr><td><code>TouchMousePointerUI.exe</code></td><td>58KB · 2019</td><td>구버전 설정 UI 잔재 (현행은 WebView2 기반 추정)</td></tr>
+<tr><td><code>TouchMousePointer3012.dll</code></td><td>185KB</td><td>3.0.1.2 코어 엔진 (제스처·프리셋 파서)</td></tr>
+<tr><td><code>TouchMousePointerRes.dll</code></td><td>2.1MB</td><td>리소스 (이미지·언어·아이콘)</td></tr>
+<tr><td><code>TabletProWebView2.dll</code> + <code>TabletProStoreChecker.exe</code></td><td>3.5MB</td><td>설정 WebView 렌더링 + 스토어 라이선스 체크</td></tr>
+<tr><td><code>VJoy64.dll</code></td><td>80KB · 2013</td><td>vJoy 가상 조이스틱 SDK (WASD 게임 프리셋용, §7)</td></tr>
+<tr><td><code>TouchMouseSetup.exe</code></td><td>398KB</td><td>인스톨러 / 관리자권한 재실행 헬퍼</td></tr>
+<tr><td><code>invisible.cur</code></td><td>—</td><td>투명 커서. 풀스크린 시 실제 커서를 숨기고 가짜 커서를 그림</td></tr>
+<tr><td><code>FontAwesome(.otf)</code></td><td>—</td><td>타일 아이콘 (<code>%uF053</code> 표기) 렌더링용</td></tr>
+<tr><td><code>Pad.ini</code> / <code>Preset *.ini</code> 50여종</td><td>—</td><td>내장 레이아웃 + 앱별 프리셋 (Photoshop·Blender·Krita·Excel·OneNote·ZBrush·WASD…)</td></tr>
+</table>
+<h3>2.2 원본 아키텍처</h3>
+<svg viewBox="0 0 980 380" font-family="Segoe UI" font-size="13">
+  <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8" fill="none" stroke="#35c4ff" stroke-width="1.5"/></marker></defs>
+  <rect x="20" y="30" width="180" height="90" rx="10" fill="#12283a" stroke="#35c4ff"/><text x="110" y="58" fill="#fff" text-anchor="middle">Touch (터치/펜)</text><text x="110" y="80" fill="#9aa6bd" text-anchor="middle">멀티터치 패널</text><text x="110" y="100" fill="#9aa6bd" text-anchor="middle">WM_TOUCH / POINTER</text>
+  <rect x="250" y="30" width="220" height="90" rx="10" fill="#1a2f1f" stroke="#3fb97f"/><text x="360" y="58" fill="#fff" text-anchor="middle">TouchMousePointer.exe</text><text x="360" y="80" fill="#9aa6bd" text-anchor="middle">투명 오버레이 윈도우</text><text x="360" y="100" fill="#9aa6bd" text-anchor="middle">상대좌표 변환 + 제스처</text>
+  <rect x="520" y="30" width="200" height="90" rx="10" fill="#1a2f1f" stroke="#3fb97f"/><text x="620" y="58" fill="#fff" text-anchor="middle">3012.dll (엔진)</text><text x="620" y="80" fill="#9aa6bd" text-anchor="middle">타일 파서 · 속도/가속도</text><text x="620" y="100" fill="#9aa6bd" text-anchor="middle">시각화 (sonar/track)</text>
+  <rect x="770" y="30" width="190" height="90" rx="10" fill="#2a1f3a" stroke="#b48cf2"/><text x="865" y="58" fill="#fff" text-anchor="middle">표준 커서</text><text x="865" y="80" fill="#9aa6bd" text-anchor="middle">SendInput (드라이버 無)</text><text x="865" y="100" fill="#9aa6bd" text-anchor="middle">모든 앱에서 동작</text>
+  <rect x="60" y="170" width="200" height="80" rx="10" fill="#182029" stroke="#5a6478"/><text x="160" y="198" fill="#fff" text-anchor="middle">Tray.exe</text><text x="160" y="220" fill="#9aa6bd" text-anchor="middle">탭=ON/OFF·롱탭=설정</text>
+  <rect x="300" y="170" width="200" height="80" rx="10" fill="#182029" stroke="#5a6478"/><text x="400" y="198" fill="#fff" text-anchor="middle">WebView2 설정</text><text x="400" y="220" fill="#9aa6bd" text-anchor="middle">속도·제스처·레이아웃</text>
+  <rect x="540" y="170" width="200" height="80" rx="10" fill="#182029" stroke="#5a6478"/><text x="640" y="198" fill="#fff" text-anchor="middle">Pad.ini + Preset 50종</text><text x="640" y="220" fill="#9aa6bd" text-anchor="middle">타일 레이아웃 정의</text>
+  <rect x="780" y="170" width="160" height="80" rx="10" fill="#182029" stroke="#5a6478"/><text x="860" y="198" fill="#fff" text-anchor="middle">VJoy64.dll</text><text x="860" y="220" fill="#9aa6bd" text-anchor="middle">WASD 게임용</text>
+  <rect x="300" y="290" width="380" height="60" rx="10" fill="#3a2a12" stroke="#e6a23c"/><text x="490" y="313" fill="#fff" text-anchor="middle">시각화 3종: Sonar · Track line · Fake arrow</text><text x="490" y="333" fill="#9aa6bd" text-anchor="middle">invisible.cur 로 실제 커서 숨김 + 오버레이 표시</text>
+  <g stroke="#35c4ff" stroke-width="1.5" marker-end="url(#ar)">
+    <line x1="200" y1="75" x2="248" y2="75"/><line x1="470" y1="75" x2="518" y2="75"/>
+    <line x1="720" y1="75" x2="768" y2="75"/><line x1="400" y1="170" x2="400" y2="122"/>
+    <line x1="600" y1="170" x2="560" y2="122"/><line x1="620" y1="170" x2="620" y2="248" stroke-dasharray="5,4"/>
+  </g>
+</svg>
+<div class="card"><b>핵심 원리 3줄 요약.</b> ① 마우스 드라이버를 쓰지 않고 화면 전체(또는 플로팅 영역)에
+투명 최상위 윈도우를 설치한다. ② 터치 이동 델타 × 속도/가속도 = 커서 상대이동으로 변환한다.
+③ 풀스크린에서는 실제 커서를 투명 커서로 숨기고 소나·궤적·가짜 화살표를 오버레이로 그린다.</div>
+<h3>2.3 원본 모드 전환 (중요 — 상단 스와이프 영역은 없음)</h3>
+<div class="card">공식 도움말·스크린샷 전수 확인 결과, 원본에는 <b>화면 상단 전용 스와이프 영역이 존재하지 않는다.</b>
+모드 전환 수단은 ① 패드 위 <b>핀치 아웃=풀스크린 / 핀치 인=창모드 복귀</b>(꽤 멀리 벌려야 함),
+② 트레이 아이콘 탭(램프 점등=풀스크린 ON), ③ 제스처에 할당하는 <b>Layout… 전환</b>과 패드의 <b>menu 타일</b>이다.
+클론의 상단 ModeStrip(§6.2)은 요청받은 편의기능으로 원본에는 없는 확장이다.</div>
+
+<!-- ============ 3 ============ -->
+<h2 id="s3">3. 타일 레이아웃 엔진 (원본 INI 문법)</h2>
+<h3>3.1 문법</h3>
+<pre>[floatpad]                       ; 섹션 = 레이아웃 1종 (floatpad/leftpad/…/ArtistPad/…)
+scale=100,100                    ; 기준 스케일 (무시 가능)
+aspect=1,1                       ; 가로세로비 힌트 (일부 섹션)
+tile000=padframe,0,20,100,80     ; tileNNN=종류,x,y,너비,높이[,extra…]
+tile001=lbtn,0,0,50,20
+tile004=pad,0,0,100,100          ; 입력층은 보통 마지막(최상위 z-order)</pre>
+<div class="card">좌표는 패드 창 기준 <b>0~100 상대 %</b>. 렌더는 섹션 순서대로, 히트테스트는 역순(나중 타일 우선) —
+원본 z-order와 동일. <code>tile002=VK_CONTROL,0,0,25,20</code>처럼 가상키,
+<code>tile010=C,0,5,50,15,7,Copy</code>처럼 한 글자 키도 된다.</div>
+<h3>3.2 타일 종류</h3>
+<table>
+<tr><th>종류</th><th>의미</th><th>클론 지원</th></tr>
+<tr><td><code>pad</code> / <code>padframe</code></td><td>입력면 / 테두리(히트 제외)</td><td><span class="tag t-ok">지원</span></td></tr>
+<tr><td><code>lbtn/rbtn/mbtn</code>, <code>dragframe_*</code></td><td>클릭 / 누른채 드래그</td><td><span class="tag t-ok">지원</span></td></tr>
+<tr><td><code>wheel/hwheel/wheel_no_mbtn</code></td><td>세로·가로 스크롤</td><td><span class="tag t-ok">지원</span></td></tr>
+<tr><td><code>VK_*</code> (CONTROL/SHIFT/MENU/SPACE/TAB/RETURN/BACK/F1~F12/NUMPAD/OEM/미디어…)</td><td>가상키 (홀드 지원)</td><td><span class="tag t-ok">지원 (확장 테이블)</span></td></tr>
+<tr><td>한 글자 키 (<code>C/V/X/Z…</code>) + extra <code>7</code>=Ctrl, <code>shift%20alt</code></td><td>Ctrl+C 같은 콤보 (ArtistPad 복사/붙여넣기 등)</td><td><span class="tag t-ok">지원 (key_combo)</span></td></tr>
+<tr><td><code>movegrip/menu/minimize/closebtn</code></td><td>창 이동 / 설정 / 숨기기 / 닫기</td><td><span class="tag t-ok">지원</span></td></tr>
+<tr><td><code>assistpad/tabtip/blank</code></td><td>보조패드 호출 / 터치키보드 / 빈칸</td><td><span class="tag t-ok">지원</span></td></tr>
+<tr><td><code>artsize_*</code></td><td>브러시 크기 (원본 전용)</td><td><span class="tag t-no">빈 타일 표시</span></td></tr>
+</table>
+<h3>3.3 실측 예시 — Photoshop ArtistPad 58타일</h3>
+<div class="card"><code>hwheel</code> 전체폭 스크롤 바 + 숫자패드 + <code>VK_F1~F12</code> +
+<code>C/X/V</code>(Ctrl 콤보: 복사/잘라내기/붙여넣기) + <code>Z</code>(Ctrl+Z) +
+<code>VK_CONTROL/SHIFT/MENU</code> 홀드 행 + <code>wheel</code> + <code>dragframe_rbtn</code> +
+<code>menu/minimize</code> + 최상위 <code>pad</code> 입력층. 클론 파서로 <b>원본 프리셋 56/56 파싱 성공</b> 확인.</div>
+
+<!-- ============ 4 ============ -->
+<h2 id="s4">4. 클론 v2 아키텍처 (C#/WPF)</h2>
+<svg viewBox="0 0 980 430" font-family="Segoe UI" font-size="13">
+  <rect x="380" y="10" width="220" height="52" rx="10" fill="#12283a" stroke="#35c4ff"/><text x="490" y="32" fill="#fff" text-anchor="middle">App.xaml.cs (배선)</text><text x="490" y="50" fill="#9aa6bd" text-anchor="middle">설정·프리셋·생성·종료</text>
+  <rect x="20" y="100" width="170" height="70" rx="10" fill="#1a2f1f" stroke="#3fb97f"/><text x="105" y="126" fill="#fff" text-anchor="middle">PadWindow</text><text x="105" y="146" fill="#9aa6bd" text-anchor="middle">진짜 Touch 이벤트 패드</text>
+  <rect x="210" y="100" width="170" height="70" rx="10" fill="#1a2f1f" stroke="#3fb97f"/><text x="295" y="126" fill="#fff" text-anchor="middle">ModeStripWindow</text><text x="295" y="146" fill="#9aa6bd" text-anchor="middle">상단 스트립 (터치)</text>
+  <rect x="400" y="100" width="170" height="70" rx="10" fill="#1a2f1f" stroke="#3fb97f"/><text x="485" y="126" fill="#fff" text-anchor="middle">AssistWindow</text><text x="485" y="146" fill="#9aa6bd" text-anchor="middle">Ctrl/Shift 홀드 패드</text>
+  <rect x="590" y="100" width="170" height="70" rx="10" fill="#1a2f1f" stroke="#3fb97f"/><text x="675" y="126" fill="#fff" text-anchor="middle">SettingsWindow</text><text x="675" y="146" fill="#9aa6bd" text-anchor="middle">속도·레이아웃·vJoy</text>
+  <rect x="780" y="100" width="180" height="70" rx="10" fill="#1a2f1f" stroke="#3fb97f"/><text x="870" y="126" fill="#fff" text-anchor="middle">TrayManager</text><text x="870" y="146" fill="#9aa6bd" text-anchor="middle">트레이 아이콘</text>
+  <rect x="20" y="210" width="220" height="70" rx="10" fill="#182029" stroke="#5a6478"/><text x="130" y="236" fill="#fff" text-anchor="middle">Core/Preset.cs</text><text x="130" y="256" fill="#9aa6bd" text-anchor="middle">원본 INI 파서·히트테스트</text>
+  <rect x="260" y="210" width="220" height="70" rx="10" fill="#182029" stroke="#5a6478"/><text x="370" y="236" fill="#fff" text-anchor="middle">Core/InputSim.cs</text><text x="370" y="256" fill="#9aa6bd" text-anchor="middle">SendInput P/Invoke</text>
+  <rect x="500" y="210" width="220" height="70" rx="10" fill="#182029" stroke="#5a6478"/><text x="610" y="236" fill="#fff" text-anchor="middle">AppSettings·DebugLog</text><text x="610" y="256" fill="#9aa6bd" text-anchor="middle">JSON 설정·진단 로그</text>
+  <rect x="740" y="210" width="220" height="70" rx="10" fill="#2a1f3a" stroke="#b48cf2"/><text x="850" y="236" fill="#fff" text-anchor="middle">Win32 (user32)</text><text x="850" y="256" fill="#9aa6bd" text-anchor="middle">커서·클릭·키 실제 출력</text>
+  <rect x="20" y="320" width="940" height="70" rx="10" fill="#0a0e13" stroke="#35c4ff"/><text x="490" y="345" fill="#fff" text-anchor="middle">입력 흐름: 손가락별 TouchDown/Move/Up → 타일 히트(구체 타일 우선) → 상대이동·클릭·휠·키홀드 → InputSim → 시스템 커서</text><text x="490" y="367" fill="#9aa6bd" text-anchor="middle">핵심: 델타는 손가락 좌표에서만 재고 OS 커서를 절대 읽지 않음 → 자기증폭 발진 불가 (§9)</text>
+  <g stroke="#35c4ff" stroke-width="1.5" marker-end="url(#ar)">
+    <line x1="490" y1="62" x2="490" y2="98"/><line x1="105" y1="170" x2="130" y2="208"/>
+    <line x1="370" y1="170" x2="370" y2="208"/><line x1="850" y1="170" x2="770" y2="245"/>
+  </g>
+</svg>
+
+<!-- ============ 5 ============ -->
+<h2 id="s5">5. 모듈 명세 (v2)</h2>
+<table>
+<tr><th>모듈</th><th>공개 API</th><th>설명</th></tr>
+<tr><td><code>Core/Preset.cs</code></td><td><code>ParseFile / HitTest / KeyCombo / OrderedNames</code></td><td>원본 INI 파서. UTF-16 BOM 제거, 보간 없음(%값 대응). 구체 타일이 pad 배경층에 우선. <code>cs/PresetCheck</code>로 원본 56종 전수 검증</td></tr>
+<tr><td><code>Core/InputSim.cs</code></td><td><code>Cursor / Move / Click / Down·Up / Wheel / TapKey / Combo / HoldKey</code></td><td>SendInput P/Invoke. 드라이버 없이 표준 커서 조작</td></tr>
+<tr><td><code>PadWindow</code></td><td><code>SetLayout / RefreshOpacity + Request* 이벤트</code></td><td>프레임리스·최상위·반투명 패드. 상단 타이틀바 오버레이(이름·배속, 드래그 이동, ⚙설정 — 터치 영역 아님, ✕는 스트립으로 이동) + 하단 모서리 리사이저(◢◣, vsync 배치, 화면 밖 금지 클램프, 크기 저장). 손가락별 터치 추적, 탭/더블탭/롱프레스/두번째홀드(드래그)/두손가락탭/스와이프(전부 액션 매핑·패밀리별), self-click 억제, 256px 퓨즈</td></tr>
+<tr><td><code>ModeStripWindow</code></td><td><code>Gesture(string) + ModePickerWindow</code></td><td>상단 스트립. 터치하면 44px로 확장. 탭/좌우/위아래를 General 탭에서 등록·삭제(없음 선택), 위/아래밀기 기본=모드 버튼 팝업(10초 자동닫힘)</td></tr>
+<tr><td><code>AssistWindow</code></td><td>Ctrl/Shift/Alt/Space 홀드 버튼</td><td>원본 virtualctrls 대응. 닫을 때 홀드 해제 보장</td></tr>
+<tr><td><code>SettingsWindow</code></td><td>속도·투명도·레이아웃·제스처·프리셋·vJoy</td><td>좌측 탭: General / FloatPad / ArtistPad / VirtualCtrls. 패밀리별 제스처 프로필(탭·더블탭·롱프레스·두번째홀드·두손가락탭·스와이프×4) + 롱프레스 시간. 시각화 오버레이는 v2에 없음 (미구현). vJoy 상태 + 다운로드 바로가기</td></tr>
+<tr><td><code>TrayManager</code></td><td>보이기/숨기기/설정/종료</td><td>WinForms NotifyIcon (런타임 생성 아이콘)</td></tr>
+<tr><td><code>Core/AppSettings</code></td><td><code>Load / Save</code></td><td>JSON 설정 + GestureMap (v1과 같은 파일 공유, 가속도 항목 없음=선형 고정)</td></tr>
+<tr><td><code>Core/DebugLog</code></td><td><code>Clear / Write</code></td><td><code>TOUCHPAD_DEBUG=1</code>일 때만 <code>%TEMP%\touchpad_v2.log</code> 기록</td></tr>
+</table>
+<div class="card">v1 (Python) 모듈은 <code>touchpad_clone/</code>에 보존되어 있다:
+<code>layout.py / mouse.py / pad.py / modestrip.py / overlay.py / assist.py / tray.py / settings_ui.py / config.py / vjoy.py</code>.
+동작은 하나 v1 입력 파이프라인(마우스 에뮬 기반)은 §9의 이유로 retired.</div>
+
+<!-- ============ 6 ============ -->
+<h2 id="s6">6. 사용 메뉴얼 (v2)</h2>
+<h3>6.1 설치·실행·종료</h3>
+<pre>cd cs\TouchPadCloneV2
+dotnet build
+dotnet run            # 또는 bin\Debug\net10.0-windows\TouchPadCloneV2.exe 직접 실행</pre>
+<div class="card">요구사항: .NET 10 WindowsDesktop 런타임 (빌드용 SDK는 10.0.201 확인).
+종료는 <b>트레이 아이콘 → 종료</b>. 패드만 치우려면 트레이 → 패드 숨기기(또는 패드의 – 버튼).
+진단은 <code>set TOUCHPAD_DEBUG=1</code> 후 실행 → <code>%TEMP%\touchpad_v2.log</code>에
+<code>TOUCHDOWN id=.. / TOUCHMOVE d=(..) -&gt; (..) / TOUCHUP</code> 기록.</div>
+<h3>6.2 조작법</h3>
+<table>
+<tr><th>위치</th><th>동작</th><th>결과</th></tr>
+<tr><td>패드 입력면</td><td>한 손가락 드래그</td><td>커서 상대이동 (선형: 드래그×속도, 뭉침 무관)</td></tr>
+<tr><td>패드 입력면</td><td>짧은 탭 / 빠른 두 번 탭</td><td>좌클릭 / 제스처(기본 좌클릭). 커서가 패드 위에 있으면 자기클릭 억제</td></tr>
+<tr><td>패드 입력면</td><td>상·하·좌·우 스와이프(60dip↑)</td><td>휠 위·아래 / 뒤로·앞으로 (설정에서 변경)</td></tr>
+<tr><td>패드 입력면</td><td>두 손가락 드래그 / 두 번째 손가락 탭</td><td>스크롤 (주축 판정) / 우클릭</td></tr>
+<tr><td>버튼 타일</td><td>누름</td><td>좌·우·중 클릭, <code>dragframe_*</code>은 누른 채 이동=드래그</td></tr>
+<tr><td>휠 타일</td><td>위·아래(좌·우) 드래그</td><td>세로(가로) 스크롤</td></tr>
+<tr><td>키 타일</td><td>탭=입력, 홀드=누른 채 유지</td><td>Ctrl/Shift 홀드 채 그림 그리기, C타일=Ctrl+C 등 콤보</td></tr>
+<tr><td><b>상단 스트립</b></td><td>톡 (패드 꺼짐)</td><td>마지막 모드 패드 켜기 + 스트립 우측 ✕(패드 닫기) 표시</td></tr>
+<tr><td><b>상단 스트립</b></td><td>톡 (패드 켜짐) / 위·아래로 밀기</td><td>모드 패널 열기·닫기 (아래 붙은 버튼 목록, 외부 탭에 자동닫힘, General에서 변경)</td></tr>
+<tr><td>트레이</td><td>보이기·숨기기·설정·종료</td><td>원본 트레이 메뉴 대응</td></tr>
+</table>
+<h3>6.3 설정 항목</h3>
+<div class="card">커서 속도(0.2~5.0, 선형 고정·가속도 없음) · 패드 투명도(0.2~1.0) ·
+길게 누르기 판정 시간 · 레이아웃(INI 섹션 선택) · 가상 커서 아이콘(cyan 기본) ·
+탭=클릭 on/off · 좌우반전 ·
+FloatPad/ArtistPad/VirtualCtrls 패밀리별 제스처 9종(탭·더블탭·롱프레스·두번째홀드·두손가락탭·스와이프×4, 액션 11종) ·
+프리셋 INI 열기(원본 <code>Preset *.ini</code> 직접 로드) ·
+vJoy 상태 확인 + 다운로드 바로가기. 커서 시각화 오버레이는 v2 미구현.</div>
+
+<!-- ============ 7 ============ -->
+<h2 id="s7">7. vJoy 설치 안내</h2>
+<div class="card">원본의 <code>VJoy64.dll</code>은 Shaul Efraim의 오픈소스 <b>vJoy 가상 조이스틱</b> SDK다.
+<code>Preset WASD gaming.ini</code>(풀스크린 31타일)가 게임에 조이스틱 축·버튼 신호를 보내기 위해 사용한다.
+vJoy는 서명된 <b>드라이버라서 동봉이 불가능하고 반드시 별도 설치</b>해야 한다
+(원본 설치 도움말이 가리키는 곳과 동일한 공식 링크):
+<table>
+<tr><th>용도</th><th>링크</th></tr>
+<tr><td>공식 사이트</td><td><code>http://vjoystick.sourceforge.net</code></td></tr>
+<tr><td>다운로드 (SourceForge)</td><td><code>https://sourceforge.net/projects/vjoystick/files/</code></td></tr>
+<tr><td>소스 (GitHub)</td><td><code>https://github.com/shauleiz/vJoy</code></td></tr>
+<tr><td>Win10/11 최신 빌드용 포크</td><td><code>https://github.com/jshafer817/vJoy</code></td></tr>
+</table>
+설정 창의 “게임 프리셋용 vJoy” 행에서 설치 상태(설치됨/미설치)를 확인하고 버튼으로 바로 열 수 있다.
+vJoy가 없어도 WASD 프리셋은 <b>키보드 입력으로 대체 동작</b>한다 (아날로그 축 에뮬만 제외).
+본 검증 PC에는 vJoy 드라이버·디바이스가 정상 설치되어 있음.</div>
+
+<!-- ============ 8 ============ -->
+<h2 id="s8">8. 원본과의 차이 · 향후 과제</h2>
+<table>
+<tr><th>항목</th><th>원본</th><th>클론 v2 (현재)</th><th>향후</th></tr>
+<tr><td>멀티터치</td><td>WM_TOUCH/POINTER, 2~4핑거·핀치</td><td><span class="tag t-ok">WPF Touch 손가락별 추적</span> · 두손가락 스크롤</td><td>3~4핑거·핀치 제스처</td></tr>
+<tr><td>핀치 풀스크린 전환</td><td>패드 위 핀치 인/아웃</td><td>스트립 아래밀기로 대체</td><td>핀치 제스처로 복원</td></tr>
+<tr><td>vJoy 축 에뮬</td><td><span class="tag t-ok">지원</span></td><td><span class="tag t-info">키보드 대체</span> (링크 안내만)</td><td>네이티브 피더 옵션</td></tr>
+<tr><td><code>artsize_*</code> 브러시 타일</td><td><span class="tag t-ok">지원</span></td><td><span class="tag t-no">빈 타일</span></td><td><code>[</code> <code>]</code> 매핑 연결</td></tr>
+<tr><td>커서 시각화 3종</td><td><span class="tag t-ok">지원</span></td><td><span class="tag t-no">미구현</span> (v1에만 있음)</td><td>클릭스루 오버레이로 이식</td></tr>
+<tr><td>관리자권한·스토어 라이선스</td><td>지원</td><td>미포함</td><td>매니페스트·MSIX</td></tr>
+</table>
+<div class="card"><b>검증 로그 (v2).</b> <code>cs/PresetCheck</code>:
+원본 프리셋 56/56 파싱·10307 타일 ·
+floatpad 5타일·pad 최상위·Photoshop ArtistPad 58타일·WASD fullscreen 31타일 ·
+Ctrl+C/V/X/Z + Shift+Alt+W 콤보 디코딩 · 타일 우선순위 히트테스트 —
+전 항목 PASS. 감사 중 UTF-16 BOM 섹션명 버그 1건 발견·수정. 모드 선택 시 프로세스 종료 크래시 1건(이벤트 로그로 확정: 닫히는 창에 중복 Close) 수정 후 양방향 전환 검증.</div>
+
+<!-- ============ 9 ============ -->
+<h2 id="s9">9. 왜 v2인가 — v1의 구조적 한계와 깃 리서치</h2>
+<div class="card"><b>v1의 발진 사고.</b> v1(tkinter)은 OS 커서 좌표에서 이동 델타를 쟀다.
+그런데 그 좌표 안에는 <b>직전에 v1이 쏜 이동량</b>이 포함되어 있었다:
+<code>측정값 = 손가락 + 자기이동</code>. 이득&gt;1에서 양의 피드백이 되어
+실측 로그에 <code>d=(-1137,-711) -&gt; (-11880,-6606)</code>이 8회 반복 —
+커서가 화면 모서리↔모서리로 핑퐁쳤다. 보정·퓨즈로 완화는 됐지만,
+에뮬 마우스 기반 설계 자체가 흔들리는 토대였다.</div>
+<div class="card"><b>깃 리서치.</b> <code>arand4/TKM</code>(Touch Keyboard &amp; Mouse, WPF/.NET 8)의
+<code>Trackpad.xaml.cs</code>를 직접 확인: WPF <b>진짜 터치 이벤트</b>
+(<code>TouchDown/Move/Up</code> + <code>TouchDevice.Id</code>별 추적 +
+<code>CaptureTouch</code>)를 쓰고, 마우스 핸들러에
+<code>if (e.StylusDevice != null) return;</code>으로 터치 승격 이벤트를 차단한다.
+델타는 컨트롤 좌표계 <b>손가락 위치</b>에서만 재서 OS 커서와 무관 — 발진이 구조적으로 불가.
+v2는 이 패턴을 따른 <b>자체 구현</b>이다. 주의:
+TKM README엔 MIT라 돼 있으나 <b>LICENSE 파일은 GPL-3.0</b>이라 코드를 베끼지 않았다.
+<code>SHU-Anonymous/virtualTouchpad</code>(MIT, C#)도 찾았으나 구시대 방식이라 미채택.
+윈도우 내장 가상 터치패드(작업표시줄 → 터치패드 단추)도 설치 없는 대안으로 유효.</div>
+
+</main>
+<footer>TouchMousePointer clone docs · 원본 © Lovesummertrue Software · vJoy © Shaul Efraim (MIT) · TKM © arand4 (GPL-3.0, 코드 미사용·참고만)</footer>
+</body>
+</html>
