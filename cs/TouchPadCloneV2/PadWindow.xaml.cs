@@ -113,23 +113,26 @@ public partial class PadWindow : Window
     private IntPtr PadWndProc(IntPtr hwnd, int msg, IntPtr wParam,
         IntPtr lParam, ref bool handled)
     {
-        if (msg != WM_NCHITTEST) return IntPtr.Zero;
+        if (msg != WM_NCHITTEST || !MouseThroughActive) return IntPtr.Zero;
         try
         {
             int sx = unchecked((short)(long)lParam);
             int sy = unchecked((short)((long)lParam >> 16));
-            // The TOUCH SURFACE never receives mouse input - not a touch
-            // promoted to a mouse, not a synthetic drag press or release, not
-            // the physical mouse either. Everything in that rectangle belongs
-            // to the application underneath, which is the only way a drag
-            // release aimed there can reach the drag's source at the position
-            // the finger chose. Returning HTTRANSPARENT is the mechanism
-            // (WindowFromPoint skips a window that answers this way).
+            // Let our own synthetic click/drag through to the application
+            // underneath, so a press or release aimed at the pad is not lost
+            // on our window.
             //
-            // The title bar is deliberately excluded: it is chrome, not the
-            // touch surface, and its buttons have to stay clickable.
+            // ONLY while injecting. Doing this unconditionally made the pad
+            // transparent to TOUCH as well - the system picks the touch target
+            // with the same hit test - and the surface went dead: the log had
+            // 108 "NCHITTEST through" and not one touch session. That is also
+            // why the cursor seemed to vanish: with no touch there is no
+            // session, so nothing draws it.
             var win = PointFromScreen(new Point(sx, sy));
+            // Chrome (title bar buttons) and the corner resizers are not the
+            // touch surface: they must stay usable with the mouse.
             if (IsChrome(InputHitTest(win))) return IntPtr.Zero;
+            if (ResizerAt(win.X, win.Y) != null) return IntPtr.Zero;
             if ((_hitTestN++ % 40) == 0)
                 DebugLog.Write($"NCHITTEST through @({sx},{sy})");
             handled = true;
