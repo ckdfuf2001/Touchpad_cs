@@ -181,6 +181,19 @@ public partial class PadWindow : Window
             DebugLog.Write($"PHYS keep cursor for {why} (drag_hold click)");
             return;
         }
+        // A drop is in flight. The release has to land, and be read by the
+        // application, at the virtual cursor - and a drop is not always
+        // processed synchronously with the button-up. Handing the cursor back
+        // at once (measured: the same millisecond as the BTN up line) is what
+        // made a drag drop at the PHYSICAL mouse position instead of where it
+        // was dragged to. Nothing may move the cursor until the grace has
+        // passed.
+        if (DateTime.Now < _cursorFreeAt)
+        {
+            DebugLog.Write($"PHYS defer restore for {why}"
+                + $" ({(int)(_cursorFreeAt - DateTime.Now).TotalMilliseconds}ms left)");
+            return;
+        }
         if (UnifiedPhysical || _physX == int.MinValue) return;
         try
         {
@@ -251,7 +264,7 @@ public partial class PadWindow : Window
         // opened, and the hand-back closed it again a moment later.
         if (!_menuClick && wantX != int.MinValue)
         {
-            int tries = 6;
+            int tries = 12;   // covers DropGraceMs plus a few polls
             _rePark?.Stop();
             _rePark = new System.Windows.Threading.DispatcherTimer
             {
@@ -264,6 +277,12 @@ public partial class PadWindow : Window
                 {
                     if (--tries <= 0) { timer.Stop(); return; }
                     if (_session || !_s.FakeCursor) { timer.Stop(); return; }
+                    // A drop is in flight: the release must land, and be
+                    // SEEN, at the virtual cursor. Moving the cursor back
+                    // before the application has processed it made the drop
+                    // land at the physical mouse instead. Keep polling, just
+                    // do not move yet.
+                    if (DateTime.Now < _cursorFreeAt) return;
                     var (cx, cy) = InputSim.Cursor();
                     if (Math.Abs(cx - wantX) <= 2 && Math.Abs(cy - wantY) <= 2)
                     {
@@ -475,6 +494,16 @@ public partial class PadWindow : Window
     /// <summary>A click has been delivered since the current press began.</summary>
     private bool _clickSincePress;
     private bool _keepCursorOnce;
+    /// <summary>
+    /// How long the cursor must stay at the drop point after a synthetic
+    /// release, before anything may hand it back to the physical mouse. A
+    /// drop is not always processed synchronously with the button-up, so
+    /// moving the cursor at once (it used to happen in the same millisecond)
+    /// made the drop land at the PHYSICAL mouse position.
+    /// </summary>
+    private const int DropGraceMs = 300;
+    /// <summary>Cursor may not be moved back to the physical mouse before this.</summary>
+    private DateTime _cursorFreeAt = DateTime.MinValue;
     /// <summary>Drop point bookkeeping for the drag-end log.</summary>
     private double _dragFromX = -1e9, _dragFromY = -1e9;
     private double _dragPathDip;
@@ -830,8 +859,6 @@ public partial class PadWindow : Window
         ClampFake();
         _overlay?.MoveToPhysical(_fakeX, _fakeY);
         f.Start = f.Last;
-        _dragFromX = _fakeX; _dragFromY = _fakeY;   // for the drop log
-        _dragPathDip = 0;
         // Same order as the hold timer's drag_hold (see GrabHold): the click
         // is the push that picks the item up, then the button stays held. Both
         // routes to a drag now do the same thing - an earlier version clicked
@@ -865,6 +892,11 @@ public partial class PadWindow : Window
     /// </summary>
     private void GrabHold(int id)
     {
+        // Origin and path bookkeeping for the drag-end log, here rather than
+        // in StartDrag: the hold-timer route never calls StartDrag, so its
+        // "net" came out as the -1e9 sentinel squared (1.4 billion px).
+        _dragFromX = _fakeX; _dragFromY = _fakeY;
+        _dragPathDip = 0;
         _keepCursorOnce = true;        // no hand-back between click and hold
         SafeClick("left");
         _dragHold = true;
@@ -933,6 +965,15 @@ public partial class PadWindow : Window
             ForgetRealCursor();
         }
         else InputSim.Up(button);
+        // The release just happened: give the application time to process it
+        // (a drop in particular) at the virtual cursor BEFORE anything moves
+        // the cursor back. See RestorePhysicalCursor.
+        if (_session)
+        {
+            _cursorFreeAt = DateTime.Now.AddMilliseconds(DropGraceMs);
+            DebugLog.Write($"RELEASE: holding the cursor at"
+                + $" ({_fakeX:0},{_fakeY:0}) for {DropGraceMs}ms (drop in flight)");
+        }
         // Where the drop actually lands, and how far the drag went. A file
         // drag that ends 70px from where it started, in the same folder, is a
         // no-op in Explorer - it looks exactly like a drag that never
