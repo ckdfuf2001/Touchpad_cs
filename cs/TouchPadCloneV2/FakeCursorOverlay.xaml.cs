@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using TouchPadCloneV2.Core;
 
 namespace TouchPadCloneV2;
 
@@ -58,7 +59,15 @@ public partial class FakeCursorOverlay : Window
             // cursor saw a button press with no motion - the drag "event"
             // fired and nothing was dragged.
             if (HwndSource.FromHwnd(_hwnd) is { } src)
+            {
                 src.AddHook(NcHitTest);
+                DebugLog.Write("OVERLAY hit-test hook installed");
+            }
+            else
+            {
+                DebugLog.Write("OVERLAY hit-test hook NOT installed"
+                    + " (HwndSource.FromHwnd returned null)");
+            }
             if (_hasPend) Place(_pendX, _pendY);
         };
         var arrow = new Polygon
@@ -105,6 +114,7 @@ public partial class FakeCursorOverlay : Window
     public void MoveToPhysical(double physX, double physY)
     {
         _pendX = physX; _pendY = physY; _hasPend = true;
+        if (_suspended) return;      // a button is held, see Suspend
         if (!IsVisible)
         {
             try { base.Show(); } catch { }
@@ -131,6 +141,26 @@ public partial class FakeCursorOverlay : Window
         if (msg == WM_NCHITTEST) { handled = true; return HTTRANSPARENT; }
         return IntPtr.Zero;
     }
+
+    /// <summary>
+    /// Stop drawing the arrow without forgetting where it was (Hide() is the
+    /// window). Used while a button is held: the arrow is placed exactly on
+    /// the cursor's hotspot by design, so for as long as it is up it is a
+    /// topmost window sitting under the cursor - and mouse input pass-through
+    /// for a layered window applies to its transparent area, not to the opaque
+    /// arrow glyph. A click survives that (down and up are injected in one
+    /// batch), a drag does not: the arrow is re-placed on every move, so the
+    /// moves and the release land on the arrow instead of the application.
+    /// </summary>
+    public void Suspend() { try { base.Hide(); } catch { } _suspended = true; }
+
+    public void Resume()
+    {
+        _suspended = false;
+        if (_hasPend) MoveToPhysical(_pendX, _pendY);
+    }
+
+    private bool _suspended;
 
     public new void Hide()
     {

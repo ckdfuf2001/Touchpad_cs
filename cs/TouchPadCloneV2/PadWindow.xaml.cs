@@ -537,12 +537,13 @@ public partial class PadWindow : Window
         int tx = (int)_fakeX, ty = (int)_fakeY;
         if (tx == _realSentX && ty == _realSentY) return;
         _realSentX = tx; _realSentY = ty;
+        // ABSOLUTE, not relative. Relative was tried for "drag continuity" and
+        // is simply wrong here: Windows applies pointer acceleration to
+        // relative mouse input only, so our deltas came out amplified, and the
+        // per-event correction amplified its own correction - the cursor ran
+        // to the screen edge (measured: pinned at y=4 while the virtual cursor
+        // was at 356). Absolute is exact and idempotent.
         InputSim.MoveTo(tx, ty);
-        // Read the cursor back now and then. The log line records what we
-        // ASKED for; this records what the system actually did with it. If
-        // the two diverge, something else is writing the cursor during the
-        // gesture - and the symptom is exactly "the drag event fired at the
-        // right coordinates and nothing was dragged".
         if ((_syncProbeN++ % 12) == 0)
         {
             var (ax, ay) = InputSim.Cursor();
@@ -806,6 +807,12 @@ public partial class PadWindow : Window
         PressDown("left");
         _pressNote = "drag (grabbed)";
         Status(_pressNote);
+        // Take the arrow down for the rest of the drag: it sits on the
+        // cursor's hotspot by design, and a layered window's mouse pass-through
+        // covers its transparent area, not the opaque glyph. A click survives
+        // it (one atomic batch), a drag does not - the arrow is re-placed on
+        // every move, so the moves land on the arrow instead of the target.
+        _overlay?.Suspend();
         // Who actually receives this press? If it is the overlay, or an
         // unfocused window (whose activation click eats the drag), the log
         // says so here instead of the symptom being "the drag event fired
@@ -885,6 +892,9 @@ public partial class PadWindow : Window
         DebugLog.Write($"DRAG end @({_fakeX:0},{_fakeY:0}) net={netDip:0}px"
             + $" path={_dragPathDip:0}DIP under {DescribeWindowAt(_fakeX, _fakeY)}");
         _dragFromX = _dragFromY = -1e9;
+        // The drag is over: the arrow may come back and the real cursor goes
+        // back to the physical mouse.
+        _overlay?.Resume();
         _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
         // The drag is over: give the real cursor back to the physical mouse
         // so a virtual drag never leaves it parked under the fake one.
@@ -1689,6 +1699,10 @@ public partial class PadWindow : Window
         }
         var p = e.GetTouchPoint(Surface).Position;
         double dx = p.X - f.Last.X, dy = p.Y - f.Last.Y;
+        // Count the whole path, before any early return. The drag-end log
+        // reported a path SHORTER than the net distance (36DIP against 184px),
+        // which is impossible - it was only seeing part of the movement.
+        if (ButtonHeld()) _dragPathDip += Math.Sqrt(dx * dx + dy * dy);
         f.Last = p;
         f.Active = DateTime.Now;
         f.Trail.Add((f.Active, p.X, p.Y));
@@ -1804,11 +1818,7 @@ public partial class PadWindow : Window
                     // different baseline. That is why a touch drag came out
                     // as a shaky circle while the same drag with the physical
                     // mouse (InputSim.Move on every event) was smooth.
-                    if (ButtonHeld())
-                    {
-                        _dragPathDip += Math.Sqrt(dx * dx + dy * dy);
-                        SyncRealCursorToFake();
-                    }
+                    if (ButtonHeld()) SyncRealCursorToFake();
                     // NOTE: the real cursor is deliberately NEVER chased here.
                     // It stays (hidden) where it was; only the fake roams.
                     // Clicks carry their own absolute position (see ClickAt).
