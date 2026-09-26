@@ -98,6 +98,14 @@ public partial class PadWindow : Window
     private static readonly bool RealCursorOnly = false;
 
     /// <summary>
+    /// The drag grab - OUR gesture. (Briefly switched off to isolate it; that
+    /// was a misreading of the request. What was wanted is that a REAL mouse
+    /// drag must not operate in the pad's area - see PadWndProc and the mouse
+    /// handlers, which swallow what they receive.)
+    /// </summary>
+    private static readonly bool DragEnabled = true;
+
+    /// <summary>
     /// Until when the pad's touch surface must let mouse input through to the
     /// window beneath. Set for the duration of a synthetic click or drag, plus
     /// a short tail so the tail end of a press/click is not caught on the
@@ -997,6 +1005,12 @@ public partial class PadWindow : Window
     /// </summary>
     private void StartDrag(int id)
     {
+        if (!DragEnabled)
+        {
+            DebugLog.Write($"DRAG disabled: press id={id} stays a cursor move");
+            _dragArmId = -1;
+            return;
+        }
         if (_dragHold || !_fingers.TryGetValue(id, out var f)) return;
         CancelLong();
         _dragHold = true;
@@ -1045,6 +1059,12 @@ public partial class PadWindow : Window
     /// </summary>
     private void GrabHold(int id)
     {
+        if (!DragEnabled)
+        {
+            DebugLog.Write($"DRAG disabled: hold id={id} clicks instead of grabbing");
+            DoGesture("drag_hold");   // release-context click, see DoGesture
+            return;
+        }
         // Origin and path bookkeeping for the drag-end log, here rather than
         // in StartDrag: the hold-timer route never calls StartDrag, so its
         // "net" came out as the -1e9 sentinel squared (1.4 billion px).
@@ -2565,8 +2585,20 @@ public partial class PadWindow : Window
     {
         DebugLog.Write($"M-DOWN stylus={e.StylusDevice != null} fingers={_fingers.Count} suppressed={DateTime.Now < _suppressPhysicalUntil}");
         if (IsChrome(e.OriginalSource)) return;
-        if (e.StylusDevice != null || _fingers.Count > 0) return;
-        if (DateTime.Now < _suppressPhysicalUntil) return;
+        // Everything below is the touch surface: no mouse event that lands
+        // here may act on anything else, so every path marks it handled. A
+        // real mouse drag in the pad's area therefore does nothing, and a
+        // mouse event promoted from a touch does nothing either.
+        if (e.StylusDevice != null || _fingers.Count > 0)
+        {
+            e.Handled = true;
+            return;
+        }
+        if (DateTime.Now < _suppressPhysicalUntil)
+        {
+            e.Handled = true;
+            return;
+        }
         if (UnifiedPhysical) HandoverToPhysicalMouse();
         else RememberPhysicalCursor();   // this spot belongs to the mouse
         PressedAnywhere?.Invoke();
@@ -2605,8 +2637,19 @@ public partial class PadWindow : Window
     private void OnMouseMove(object sender, WMouseEventArgs e)
     {
         if (IsChrome(e.OriginalSource)) return;
-        if (e.StylusDevice != null || _fingers.Count > 0) return;
-        if (DateTime.Now < _suppressPhysicalUntil) return;
+        // The touch surface swallows every mouse event it receives: a real
+        // mouse drag here must not do anything, and neither must a mouse event
+        // promoted from a touch.
+        if (e.StylusDevice != null || _fingers.Count > 0)
+        {
+            e.Handled = true;
+            return;
+        }
+        if (DateTime.Now < _suppressPhysicalUntil)
+        {
+            e.Handled = true;
+            return;
+        }
         var hp = e.GetPosition(Surface);
         // Resize drag in progress (screen coords: window motion must not
         // feed back into the deltas).
@@ -2625,7 +2668,11 @@ public partial class PadWindow : Window
         string? hz = ResizerAt(hp.X, hp.Y);
         Cursor = hz == "left" ? Cursors.SizeNESW
             : hz == "right" ? Cursors.SizeNWSE : Cursors.Arrow;
-        if (_mouseDown) return; // handover already happened on MouseDown
+        if (_mouseDown)
+        {
+            e.Handled = true;   // no drag from a press on the surface
+            return;             // handover already happened on MouseDown
+        }
         // Hover: in unified mode the fake cursor tracks the mouse so the two
         // read as one cursor. In preserve mode the two are separate: the
         // physical mouse must not steer the virtual one.
@@ -2640,7 +2687,13 @@ public partial class PadWindow : Window
     private void OnMouseUp(object sender, WMouseButtonEventArgs e)
     {
         if (IsChrome(e.OriginalSource)) return;
-        if (e.StylusDevice != null || !_mouseDown) return;
+        // Swallow: nothing outside the pad may act on a mouse event that
+        // landed on the touch surface.
+        if (e.StylusDevice != null || !_mouseDown)
+        {
+            e.Handled = true;
+            return;
+        }
         if (_rsMouse)
         {
             Surface.ReleaseMouseCapture();
@@ -2649,7 +2702,7 @@ public partial class PadWindow : Window
             e.Handled = true;
             return;
         }
-        if (DateTime.Now < _suppressPhysicalUntil) { _mouseDown = false; return; }
+        if (DateTime.Now < _suppressPhysicalUntil) { _mouseDown = false; e.Handled = true; return; }
         if (UnifiedPhysical) HandoverToPhysicalMouse();
         _mouseDown = false;
         if (_mouseDownButton != null)
