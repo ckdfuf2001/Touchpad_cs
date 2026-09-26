@@ -289,6 +289,14 @@ public static class InputSim
         Note("move", "", x, y);
     }
 
+    /// <summary>
+    /// Record a cursor position that was set by something other than a
+    /// SendInput move (SetCursorPos). Without it the injection log cannot see
+    /// the drag at all - "moves=0" through a whole drag - which is the same
+    /// blind spot that hid the missing drag motion earlier.
+    /// </summary>
+    public static void NotePosition(int x, int y) => Note("move", "", x, y);
+
     public static void Down(string button) => Mouse(DownFlag(button));
 
     public static void Up(string button) => Mouse(UpFlag(button));

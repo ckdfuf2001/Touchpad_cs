@@ -537,13 +537,26 @@ public partial class PadWindow : Window
         int tx = (int)_fakeX, ty = (int)_fakeY;
         if (tx == _realSentX && ty == _realSentY) return;
         _realSentX = tx; _realSentY = ty;
-        // ABSOLUTE, not relative. Relative was tried for "drag continuity" and
-        // is simply wrong here: Windows applies pointer acceleration to
-        // relative mouse input only, so our deltas came out amplified, and the
-        // per-event correction amplified its own correction - the cursor ran
-        // to the screen edge (measured: pinned at y=4 while the virtual cursor
-        // was at 356). Absolute is exact and idempotent.
-        InputSim.MoveTo(tx, ty);
+        // SetCursorPos, NOT a SendInput absolute move.
+        //
+        // This is the one difference between the two ways to move the cursor
+        // that survived testing in a minimal harness (Notepad, same text line,
+        // same timing, same button injection - only the move method changed):
+        // a drag built from SendInput absolute moves selected nothing, while
+        // the same drag built from SetCursorPos (and the same one built from
+        // relative moves) selected the text. Clicks never showed it because a
+        // click's down and up are one atomic batch at one position - there is
+        // no motion for the application to track, so "press, and release at
+        // the moved-to place" works for a click and silently fails for a drag.
+        //
+        // SetCursorPos is also exact (no pointer acceleration, which only
+        // affects relative input) and self-correcting, unlike relative deltas
+        // which drifted into the screen edge.
+        InputSim.SetCursor(tx, ty);
+        // SetCursorPos is invisible to the injection recorder, so say it here:
+        // otherwise a whole drag logs "moves=0" and the harness is blind to
+        // the very motion it exists to check.
+        InputSim.NotePosition(tx, ty);
         // Read back often, and say which window is under the cursor. The log
         // line otherwise only records what we ASKED for; this records what the
         // system did and whether the drag is still over the target at all.
@@ -880,6 +893,13 @@ public partial class PadWindow : Window
     {
         if (_session)
         {
+            // Pin the position with SetCursorPos immediately before the
+            // release. UpAt's own absolute move is a SendInput move, and if
+            // those are not being applied as cursor motion (see
+            // SyncRealCursorToFake) then the release could register at the
+            // previous position - the press point - instead of the place the
+            // finger moved to, which drops the drag back where it started.
+            InputSim.SetCursor((int)_fakeX, (int)_fakeY);
             InputSim.UpAt((int)_fakeX, (int)_fakeY, button);
             ForgetRealCursor();
         }
