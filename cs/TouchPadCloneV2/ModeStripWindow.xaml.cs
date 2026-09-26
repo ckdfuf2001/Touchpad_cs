@@ -54,6 +54,11 @@ public partial class ModeStripWindow : Window
         InitializeComponent();
         Core.NoActivate.Apply(this);
         Core.TabletTweaks.DisableSystemGestures(this);
+        // The strip is a permanent control bar and has to stay visible. Its
+        // Topmost="True" is only the initial state - another application that
+        // raises its own topmost window afterwards covers it and nothing
+        // brings it back, which is "the strip gets covered by a program".
+        Core.TopmostKeeper.Attach(this);
         Left = (SystemParameters.PrimaryScreenWidth - Width) / 2;
         Top = 0;
         Surface.PreviewTouchDown += OnTouchDown;
