@@ -113,7 +113,22 @@ public partial class PadWindow : Window
     /// </summary>
     private DateTime _mouseThroughUntil = DateTime.MinValue;
     private const int MouseThroughTailMs = 120;
-    private bool MouseThroughActive => DateTime.Now < _mouseThroughUntil;
+    /// <summary>
+    /// True while the pad's surface must let mouse input through to the window
+    /// beneath.
+    ///
+    /// Held down for the WHOLE time a synthetic button is: a tail alone made
+    /// the hit test flicker. Measured as "the drag flickers between the touch
+    /// area and the virtual one, and the release lands in one of the two" -
+    /// between two moves the 120ms tail lapsed, the surface went back to
+    /// claiming the point, the pad received that move, and the next move
+    /// arming it again handed the following one to the application. The drag
+    /// was being split between two windows. The tail is only there so a lone
+    /// click - which injects down and up in one batch and then stops - stays
+    /// covered for a moment after.
+    /// </summary>
+    private bool MouseThroughActive =>
+        _actionHeld != null || DateTime.Now < _mouseThroughUntil;
 
     private const int WM_NCHITTEST = 0x0084;
     private static readonly IntPtr HTTRANSPARENT = new(-1);
