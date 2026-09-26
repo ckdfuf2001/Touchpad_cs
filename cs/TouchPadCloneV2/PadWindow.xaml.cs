@@ -96,6 +96,45 @@ public partial class PadWindow : Window
     /// </summary>
     private const bool RealCursorOnly = true;
 
+    /// <summary>
+    /// Until when the pad's touch surface must let mouse input through to the
+    /// window beneath. Set for the duration of a synthetic click or drag, plus
+    /// a short tail so the tail end of a press/click is not caught on the
+    /// wrong side of the flag.
+    /// </summary>
+    private DateTime _mouseThroughUntil = DateTime.MinValue;
+    private const int MouseThroughTailMs = 120;
+    private bool MouseThroughActive => DateTime.Now < _mouseThroughUntil;
+
+    private const int WM_NCHITTEST = 0x0084;
+    private static readonly IntPtr HTTRANSPARENT = new(-1);
+
+    private IntPtr PadWndProc(IntPtr hwnd, int msg, IntPtr wParam,
+        IntPtr lParam, ref bool handled)
+    {
+        if (msg != WM_NCHITTEST || !MouseThroughActive) return IntPtr.Zero;
+        try
+        {
+            // lParam is the screen point, packed as two shorts.
+            int x = unchecked((short)(long)lParam);
+            int y = unchecked((short)((long)lParam >> 16));
+            var tl = Surface.PointToScreen(new Point(0, 0));
+            var br = Surface.PointToScreen(
+                new Point(Surface.ActualWidth, Surface.ActualHeight));
+            if (x >= tl.X && x <= br.X && y >= tl.Y && y <= br.Y)
+            {
+                handled = true;
+                return HTTRANSPARENT;   // -> the application underneath
+            }
+        }
+        catch { }
+        return IntPtr.Zero;
+    }
+
+    /// <summary>Keep the surface mouse-transparent while an injection runs.</summary>
+    private void HoldMouseThrough() =>
+        _mouseThroughUntil = DateTime.Now.AddMilliseconds(MouseThroughTailMs);
+
     private void EnsureHidden()
     {
         // The real cursor is the cursor now, so it must stay visible.
@@ -1009,9 +1048,12 @@ public partial class PadWindow : Window
         _dragPathDip = 0;
         // A press must not land on the pad's own rectangle: the pad is on top,
         // so the click or the drag would be delivered to us instead of the
-        // target. Only here, at the moment of the press - doing it on every
-        // move trapped the cursor on the pad's border.
-        if (RealCursorOnly) PullOutOfOwnPad();
+        // target. In one-cursor mode the surface is made mouse-transparent for
+        // the injection instead of moving the cursor, so the press reaches
+        // whatever is beneath and the drop stays exactly where the finger put
+        // it.
+        if (RealCursorOnly) HoldMouseThrough();
+        else PullOutOfOwnPad();
         _keepCursorOnce = true;        // no hand-back between click and hold
         SafeClick("left");
         _dragHold = true;
@@ -1052,6 +1094,9 @@ public partial class PadWindow : Window
                 return;
             }
             int tx = (int)_fakeX, ty = (int)_fakeY;
+            // Keep the surface transparent for as long as a button is down:
+            // the release has to reach the target too.
+            if (ButtonHeld()) HoldMouseThrough();
             var (ax, ay) = InputSim.Cursor();
             if (Math.Abs(ax - tx) <= 1 && Math.Abs(ay - ty) <= 1) return;
             InputSim.SetCursor(tx, ty);
@@ -1115,6 +1160,9 @@ public partial class PadWindow : Window
             _dragKeeper?.Stop();
             _dragKeeper = null;
         }
+        // The release has to reach the target as well, and it is the event a
+        // drop is decided on.
+        if (RealCursorOnly) HoldMouseThrough();
         if (_session)
         {
             // Pin the position with SetCursorPos immediately before the
@@ -1159,6 +1207,27 @@ public partial class PadWindow : Window
         InitializeComponent();
         Core.NoActivate.Apply(this);
         Core.TabletTweaks.DisableSystemGestures(this);
+        // Make the pad's touch surface transparent to mouse input WHILE we are
+        // injecting a synthetic click or drag. The pad is on top, so a press
+        // aimed at the pad's rectangle is otherwise delivered to us and lost -
+        // which is why the cursor used to be pushed out of the pad before a
+        // press, and why a drop that landed there went nowhere.
+        //
+        // Only while injecting: normal mouse and touch routing is untouched,
+        // so the title bar, the tile buttons and every touch handler behave
+        // exactly as before. A blanket HTTRANSPARENT would be simpler but it
+        // would also make the pad transparent to TOUCH, and touch is the whole
+        // point of the window.
+        SourceInitialized += (_, _) =>
+        {
+            try
+            {
+                var src = System.Windows.Interop.HwndSource.FromHwnd(
+                    new System.Windows.Interop.WindowInteropHelper(this).Handle);
+                src?.AddHook(PadWndProc);
+            }
+            catch { }
+        };
         SyncWindowSize();
         Left = SystemParameters.PrimaryScreenWidth - Width - 40;
         Top = SystemParameters.PrimaryScreenHeight - Height - 120;
@@ -1578,7 +1647,8 @@ public partial class PadWindow : Window
             double sy = src?.CompositionTarget?.TransformToDevice.M22 ?? 1;
             double rx = Left * sx, ry = Top * sy;
             double rw = ActualWidth * sx, rh = ActualHeight * sy;
-            if (px >= rx && px <= rx + rw && py >= ry && py <= ry + rh)
+            if (!RealCursorOnly && px >= rx && px <= rx + rw &&
+                py >= ry && py <= ry + rh)
             {
                 if (b == "right")
                 {
@@ -1599,6 +1669,10 @@ public partial class PadWindow : Window
             }
         }
         catch { }
+        // One cursor: do not move the aim off the pad - make the pad let the
+        // click through to the application beneath instead, so the click lands
+        // exactly where the finger was.
+        if (RealCursorOnly) HoldMouseThrough();
         InputSim.ClickAt((int)px, (int)py, b);
         ForgetRealCursor();
         _clickSincePress = true;
