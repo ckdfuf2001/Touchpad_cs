@@ -427,11 +427,15 @@ public static class SelfTest
                     "drag press lands ON the aim point",
                     $"down@({d2.X},{d2.Y}) aim=({fx0:0},{fy0:0})");
             }
-            // Every synthetic click moves the REAL cursor (SendInput is
-            // absolute), which used to drag the physical mouse along.
+            // One cursor: after the drag the cursor must be where the drag
+            // ENDED (the drop point), not handed back to where the physical
+            // mouse was. Handing it back was the bug the report described -
+            // the drop landed at the mouse instead of where it was dragged to.
             var (cx, cy) = InputSim.Cursor();
-            Check(Math.Abs(cx - mx) <= 2 && Math.Abs(cy - my) <= 2,
-                "real cursor back after the drag", $"now=({cx},{cy}) want=({mx},{my})");
+            double ax = FakeX(), ay = FakeY();
+            Check(Math.Abs(cx - ax) <= 3 && Math.Abs(cy - ay) <= 3,
+                "after the drag the cursor stays at the drop point",
+                $"now=({cx},{cy}) drop=({ax:0},{ay:0}) phys=({mx},{my})");
         }
         // ---- 4c. while a button is held, the OS cursor must be ON the
         // virtual one. A drag is carried entirely by the cursor, and a touch
@@ -567,9 +571,13 @@ public static class SelfTest
             await Task.Delay(400);
             await Drain();
             var ev = Since(n);
-            Check(ev.Count == 0,
+            // Only ACTIONS count. In one-cursor mode the cursor genuinely
+            // moves during this press, so moves are expected and correct;
+            // what must not happen is a click/grab.
+            int acts = ev.Count(e => e.Kind != "move");
+            Check(acts == 0,
                 "a plain press+move is a pointer move, NOT a grab",
-                $"ev={ev.Count}");
+                $"acts={acts} moves={ev.Count - acts}");
         }
         // ---- 6. click, then press and HOLD STILL. The hold of a press that
         // follows a tap belongs to SecondHold (drag_hold by default), NOT to
@@ -661,8 +669,9 @@ public static class SelfTest
             await Task.Delay(400);
             await Drain();
             var c = Since(n);
-            Check(c.Count == 0, "hard 1-finger scrape fires NO gesture",
-                $"ev={c.Count}");
+            int scrapeActs = c.Count(e => e.Kind != "move");
+            Check(scrapeActs == 0, "hard 1-finger scrape fires NO gesture",
+                $"acts={scrapeActs} moves={c.Count - scrapeActs}");
             Check(FakeX() < aimX - 20 || FakeY() < aimY - 20,
                 "1-finger scrape moved the cursor",
                 $"({aimX:0},{aimY:0}) -> ({FakeX():0},{FakeY():0})");
@@ -754,9 +763,10 @@ public static class SelfTest
             await Task.Delay(400);
             await Drain();
             var c = Since(n);
-            Check(c.Count == 0,
+            int fActs = c.Count(e => e.Kind != "move");
+            Check(fActs == 0,
                 "2nd finger during a drag fires nothing (no scroll, no click)",
-                $"ev={c.Count}");
+                $"acts={fActs} moves={c.Count - fActs}");
         }
         // ---- 11. a slow creep must NOT scroll, must NOT carry the cursor
         // away, and must be visible EARLY: the pin that held the pointer

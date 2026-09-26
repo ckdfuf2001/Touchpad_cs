@@ -66,8 +66,32 @@ public partial class PadWindow : Window
     // hundreds and the cursor could never come back). Gate it here.
     private bool _cursorHidden;
 
+    /// <summary>
+    /// REAL-CURSOR-ONLY MODE. The touch moves the actual system cursor, the
+    /// actual cursor is visible, and clicks/drags are delivered where it is.
+    ///
+    /// The whole dual-cursor design exists to keep the physical mouse's cursor
+    /// where the mouse left it while a separate "virtual" cursor is aimed with
+    /// the finger. Every hard bug in this area came from the two disagreeing:
+    /// the click has to be aimed at the virtual one, the drag has to move the
+    /// real one onto it, the system yanks the real one onto the touch contact,
+    /// the virtual one can sit on our own pad, and a release has to be
+    /// protected from the hand-back long enough for a drop to be processed.
+    /// With one cursor none of that can happen: what the application sees IS
+    /// what the user sees.
+    ///
+    /// The cost is that touch input now displaces the physical mouse's cursor
+    /// - the two cannot be independent when there is only one cursor - and
+    /// that the cursor cannot enter the pad's own rectangle during a gesture,
+    /// because a press there would land on the pad (see ClampFake).
+    /// Flip to false to get the old dual-cursor behaviour back.
+    /// </summary>
+    private const bool RealCursorOnly = true;
+
     private void EnsureHidden()
     {
+        // The real cursor is the cursor now, so it must stay visible.
+        if (RealCursorOnly) return;
         if (_cursorHidden) return;
         InputSim.HideCursor();
         _cursorHidden = true;
@@ -87,6 +111,40 @@ public partial class PadWindow : Window
         // roams off-screen and neither cursor is visible anywhere.
         _fakeX = Math.Max(x0, Math.Min(x1, _fakeX));
         _fakeY = Math.Max(y0, Math.Min(y1, _fakeY));
+        if (RealCursorOnly) PushOutOfOwnPad();
+    }
+
+    /// <summary>
+    /// In one-cursor mode the cursor IS where the finger puts it, so it will
+    /// sit over the pad whenever the finger is on the pad - and a press there
+    /// lands on our own window instead of the target: the drag would drag the
+    /// pad and the drop would fall on it. Keep the aimed position out of the
+    /// pad's screen rectangle for the whole gesture. SafeClick's own nudge
+    /// already does this for a single click; this makes it hold for drags too.
+    /// </summary>
+    private void PushOutOfOwnPad()
+    {
+        try
+        {
+            var src = PresentationSource.FromVisual(this);
+            double sx = src?.CompositionTarget?.TransformToDevice.M11 ?? 1;
+            double sy = src?.CompositionTarget?.TransformToDevice.M22 ?? 1;
+            double rx = Left * sx, ry = Top * sy;
+            double rw = ActualWidth * sx, rh = ActualHeight * sy;
+            if (rw <= 0 || rh <= 0) return;
+            // Compare against the pad's rect grown by one pixel: the cursor
+            // must end up outside it, not exactly on the border.
+            if (_fakeX <= rx - 1 || _fakeX >= rx + rw + 1 ||
+                _fakeY <= ry - 1 || _fakeY >= ry + rh + 1) return;
+            double dl = _fakeX - (rx - 1), dr = (rx + rw + 1) - _fakeX;
+            double dt = _fakeY - (ry - 1), db = (ry + rh + 1) - _fakeY;
+            double m = Math.Min(Math.Min(dl, dr), Math.Min(dt, db));
+            if (m == dl) _fakeX = rx - 1;
+            else if (m == dr) _fakeX = rx + rw + 1;
+            else if (m == dt) _fakeY = ry - 1;
+            else _fakeY = ry + rh + 1;
+        }
+        catch { }
     }
 
     private void EnsureDpi()
@@ -171,6 +229,10 @@ public partial class PadWindow : Window
     /// </summary>
     private void RestorePhysicalCursor(string why)
     {
+        // One cursor: there is no separate physical position to hand back to,
+        // and moving the cursor here is exactly what used to make a drop land
+        // at the mouse instead of where it was dragged to.
+        if (RealCursorOnly) return;
         // A one-shot: the click that opens a drag_hold must NOT hand the
         // cursor back between itself and the hold. The application would see
         // the cursor leave the target and come back, which is exactly the
@@ -258,6 +320,10 @@ public partial class PadWindow : Window
         // true and the cursor stayed on the finger.)
         double wantX = UnifiedPhysical ? _fakeX : _physX;
         double wantY = UnifiedPhysical ? _fakeY : _physY;
+        // One cursor: there is nothing to hand back, and re-parking is what
+        // dragged the cursor (and a drop) off the target a moment after the
+        // release. Leave the cursor where the gesture put it.
+        if (RealCursorOnly) return;
         // A context menu is still up: the cursor must STAY on it. Every
         // SetCursorPos away from an open menu dismisses it, which is why a
         // right-click appeared to do nothing - the event fired, the menu
@@ -1111,7 +1177,7 @@ public partial class PadWindow : Window
     /// With ShowFakeArrow off there is no arrow and no hiding: the chased
     /// real cursor is the only cursor.
     /// </summary>
-    private bool ArrowOn => _s.FakeCursor && _s.ShowFakeArrow;
+    private bool ArrowOn => !RealCursorOnly && _s.FakeCursor && _s.ShowFakeArrow;
 
     public void EnterPersistentFake()
     {
@@ -1960,7 +2026,7 @@ public partial class PadWindow : Window
                     // different baseline. That is why a touch drag came out
                     // as a shaky circle while the same drag with the physical
                     // mouse (InputSim.Move on every event) was smooth.
-                    if (ButtonHeld()) SyncRealCursorToFake();
+                    if (ButtonHeld() || RealCursorOnly) SyncRealCursorToFake();
                     // NOTE: the real cursor is deliberately NEVER chased here.
                     // It stays (hidden) where it was; only the fake roams.
                     // Clicks carry their own absolute position (see ClickAt).
