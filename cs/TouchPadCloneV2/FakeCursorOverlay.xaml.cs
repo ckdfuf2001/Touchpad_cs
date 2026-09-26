@@ -122,6 +122,19 @@ public partial class FakeCursorOverlay : Window
         Place(physX, physY);
     }
 
+    /// <summary>
+    /// Put the arrow back at the top of the topmost band, where it was last
+    /// placed. The pad re-asserts its own topmost state on a timer (so another
+    /// application cannot cover it), which lifts the pad above the arrow - so
+    /// the arrow has to be brought forward right after that or it vanishes the
+    /// moment it passes over the pad.
+    /// </summary>
+    public void BringToFront()
+    {
+        if (_hwnd == IntPtr.Zero || !IsVisible) return;
+        Place(_pendX, _pendY);
+    }
+
     private void Place(double physX, double physY)
     {
         SetWindowPos(_hwnd, HWND_TOPMOST,

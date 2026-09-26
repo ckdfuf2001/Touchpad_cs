@@ -136,6 +136,46 @@ public partial class PadWindow : Window
     private void HoldMouseThrough() =>
         _mouseThroughUntil = DateTime.Now.AddMilliseconds(MouseThroughTailMs);
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(
+        System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool SetWindowPos(IntPtr h, IntPtr after,
+        int x, int y, int cx, int cy, uint flags);
+    private static readonly IntPtr HWND_TOPMOST = new(-1);
+    private const uint SWP_NOMOVE = 0x0002, SWP_NOSIZE = 0x0001,
+        SWP_NOACTIVATE = 0x0010, SWP_SHOWWINDOW = 0x0040;
+
+    private System.Windows.Threading.DispatcherTimer? _topTimer;
+
+    /// <summary>
+    /// Re-assert "always on top" for the pad AND for the cursor, in that
+    /// order.
+    ///
+    /// Topmost="True" is only the initial state: another application that puts
+    /// its own window on top afterwards goes above the pad and covers it, and
+    /// nothing brings it back - which is what "the touch and the mouse should
+    /// be on top, but they get covered" is. Re-asserting on a timer is the
+    /// usual answer; it is what the cursor overlay already does implicitly by
+    /// re-placing itself on every move.
+    ///
+    /// Order matters: putting the pad on top moves it above the cursor, so the
+    /// cursor has to be brought forward afterwards or it disappears the moment
+    /// it passes over the pad.
+    /// </summary>
+    private void EnsureTopmost()
+    {
+        try
+        {
+            var h = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            if (h == IntPtr.Zero) return;
+            SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+            // Cursor above the pad again.
+            _overlay?.BringToFront();
+        }
+        catch { }
+    }
+
     private void EnsureHidden()
     {
         // The real cursor is the cursor now, so it must stay visible.
@@ -1233,7 +1273,16 @@ public partial class PadWindow : Window
                 src?.AddHook(PadWndProc);
             }
             catch { }
+            EnsureTopmost();
         };
+        // Keep it there. Another application putting a topmost window up would
+        // otherwise cover the pad permanently.
+        _topTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(1000),
+        };
+        _topTimer.Tick += (_, _) => EnsureTopmost();
+        _topTimer.Start();
         SyncWindowSize();
         Left = SystemParameters.PrimaryScreenWidth - Width - 40;
         Top = SystemParameters.PrimaryScreenHeight - Height - 120;
