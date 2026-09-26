@@ -915,6 +915,47 @@ public partial class PadWindow : Window
         _actionHeld = "left";
         _secondConsumed = true;
         PressDown("left");
+        StartDragKeeper();
+    }
+
+    private System.Windows.Threading.DispatcherTimer? _dragKeeper;
+
+    /// <summary>
+    /// While a button is held, keep putting the cursor back on the virtual
+    /// one, about 66 times a second, independently of touch events.
+    ///
+    /// The system moves the cursor onto the live touch contact - which is on
+    /// the pad - and it does so AFTER our own SetCursorPos, so correcting on
+    /// the next move event (or even on every move event) leaves windows in
+    /// which the cursor, and any release, is on the pad. Measured in the log
+    /// as "DRAG sync DIVERGED, actual sitting on our own pad". Doing it on a
+    /// timer closes those windows and is an OUTPUT-side measure: it cannot
+    /// disturb how touch input is routed, which is what an attempt to block
+    /// the promotion itself did (pad touches stopped arriving at all).
+    /// </summary>
+    private void StartDragKeeper()
+    {
+        _dragKeeper?.Stop();
+        _dragKeeper = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(15),
+        };
+        _dragKeeper.Tick += (_, _) =>
+        {
+            if (!_session || _actionHeld == null)
+            {
+                _dragKeeper?.Stop();
+                return;
+            }
+            int tx = (int)_fakeX, ty = (int)_fakeY;
+            var (ax, ay) = InputSim.Cursor();
+            if (Math.Abs(ax - tx) <= 1 && Math.Abs(ay - ty) <= 1) return;
+            InputSim.SetCursor(tx, ty);
+            ForgetRealCursor();
+            DebugLog.Write($"DRAG keeper -> ({tx},{ty}) (was on "
+                + $"{DescribeWindowAt(ax, ay)})");
+        };
+        _dragKeeper.Start();
     }
 
     private void FirePressAction(string action, int id)
@@ -963,6 +1004,8 @@ public partial class PadWindow : Window
 
     private void PressUp(string button)
     {
+        _dragKeeper?.Stop();
+        _dragKeeper = null;
         if (_session)
         {
             // Pin the position with SetCursorPos immediately before the
@@ -1022,15 +1065,6 @@ public partial class PadWindow : Window
         Surface.PreviewTouchDown += OnTouchDown;
         Surface.PreviewTouchMove += OnTouchMove;
         Surface.PreviewTouchUp += OnTouchUp;
-        // Marking the TOUCH handled is not enough: a touch is first promoted
-        // to a STYLUS, and an unhandled stylus is promoted again to a MOUSE -
-        // and the system moves the cursor onto the contact as part of that.
-        // That yank is what dragged the cursor (and the drop) onto the pad
-        // mid-drag (logged: DRAG sync DIVERGED, actual sitting on our own
-        // pad). Swallow the promoted touch here; a real pen is left alone.
-        Surface.PreviewStylusDown += SwallowTouchStylus;
-        Surface.PreviewStylusMove += SwallowTouchStylus;
-        Surface.PreviewStylusUp += SwallowTouchStylus;
         // A contact that vanishes without TouchUp (capture stolen, driver
         // cancel) must still release: treat capture loss as a release.
         Surface.LostTouchCapture += OnTouchCaptureLost;
@@ -1589,10 +1623,6 @@ public partial class PadWindow : Window
             Fx0 = _fakeX, Fy0 = _fakeY,
         };
         _fingers[e.TouchDevice.Id] = f;
-        // Claim the contact for the whole gesture. A touch that is not
-        // captured is the one WPF promotes (to stylus, then to mouse), and
-        // the promotion is what moves the system cursor onto the pad.
-        try { Surface.CaptureTouch(e.TouchDevice); } catch { }
         if (_fingers.Count == 1)
         {
             _pressNote = "";
@@ -2304,23 +2334,6 @@ public partial class PadWindow : Window
     // pad tiles still work for a user who drives them with a mouse.
     // Synthetic output right after our own park/click is suppressed via
     // _suppressPhysicalUntil, never mistaken for physical.
-    /// <summary>
-    /// Swallow a TOUCH that WPF promoted to a stylus event. Leaving it
-    /// unhandled lets WPF promote it again to a mouse, and the system moves
-    /// the cursor onto the contact point for that - which lands on the pad,
-    /// because that is where the finger is. A real pen (TabletDeviceType
-    /// .Stylus) is passed through untouched.
-    /// </summary>
-    private static void SwallowTouchStylus(object sender, StylusEventArgs e)
-    {
-        try
-        {
-            if (e.StylusDevice?.TabletDevice?.Type == TabletDeviceType.Touch)
-                e.Handled = true;
-        }
-        catch { }
-    }
-
     private void OnMouseDown(object sender, WMouseButtonEventArgs e)
     {
         DebugLog.Write($"M-DOWN stylus={e.StylusDevice != null} fingers={_fingers.Count} suppressed={DateTime.Now < _suppressPhysicalUntil}");
