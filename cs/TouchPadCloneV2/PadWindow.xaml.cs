@@ -124,6 +124,9 @@ public partial class PadWindow : Window
                 new Point(Surface.ActualWidth, Surface.ActualHeight));
             if (x >= tl.X && x <= br.X && y >= tl.Y && y <= br.Y)
             {
+                if ((_hitTestN++ % 20) == 0)
+                    DebugLog.Write($"NCHITTEST through @({x},{y})"
+                        + $" pad=({tl.X:0},{tl.Y:0})-({br.X:0},{br.Y:0})");
                 handled = true;
                 return HTTRANSPARENT;   // -> the application underneath
             }
@@ -131,6 +134,8 @@ public partial class PadWindow : Window
         catch { }
         return IntPtr.Zero;
     }
+
+    private int _hitTestN;
 
     /// <summary>Keep the surface mouse-transparent while an injection runs.</summary>
     private void HoldMouseThrough() =>
@@ -1222,6 +1227,9 @@ public partial class PadWindow : Window
                 var src = System.Windows.Interop.HwndSource.FromHwnd(
                     new System.Windows.Interop.WindowInteropHelper(this).Handle);
                 src?.AddHook(PadWndProc);
+                DebugLog.Write(src != null
+                    ? "PAD hit-test hook installed"
+                    : "PAD hit-test hook NOT installed (FromHwnd null)");
             }
             catch { }
             EnsureTopmost();
