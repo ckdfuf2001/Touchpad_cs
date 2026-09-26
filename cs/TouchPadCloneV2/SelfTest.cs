@@ -427,15 +427,28 @@ public static class SelfTest
                     "drag press lands ON the aim point",
                     $"down@({d2.X},{d2.Y}) aim=({fx0:0},{fy0:0})");
             }
-            // One cursor: after the drag the cursor must be where the drag
-            // ENDED (the drop point), not handed back to where the physical
-            // mouse was. Handing it back was the bug the report described -
-            // the drop landed at the mouse instead of where it was dragged to.
+            // What "correct" means here depends on the mode, so assert the one
+            // that is actually configured rather than pinning yesterday's.
             var (cx, cy) = InputSim.Cursor();
             double ax = FakeX(), ay = FakeY();
-            Check(Math.Abs(cx - ax) <= 3 && Math.Abs(cy - ay) <= 3,
-                "after the drag the cursor stays at the drop point",
-                $"now=({cx},{cy}) drop=({ax:0},{ay:0}) phys=({mx},{my})");
+            bool oneCursor = (bool?)typeof(PadWindow)
+                .GetField("RealCursorOnly", BindingFlags.NonPublic
+                    | BindingFlags.Static)?.GetValue(null) ?? false;
+            if (oneCursor)
+            {
+                // One cursor: the cursor must be where the drag ENDED.
+                Check(Math.Abs(cx - ax) <= 3 && Math.Abs(cy - ay) <= 3,
+                    "after the drag the cursor stays at the drop point",
+                    $"now=({cx},{cy}) drop=({ax:0},{ay:0}) phys=({mx},{my})");
+            }
+            else
+            {
+                // Dual cursor: the drag is carried by the real cursor, which
+                // must be handed back to the physical mouse afterwards.
+                Check(Math.Abs(cx - mx) <= 3 && Math.Abs(cy - my) <= 3,
+                    "after the drag the cursor is handed back to the mouse",
+                    $"now=({cx},{cy}) want=({mx},{my}) drop=({ax:0},{ay:0})");
+            }
         }
         // ---- 4c. while a button is held, the OS cursor must be ON the
         // virtual one. A drag is carried entirely by the cursor, and a touch

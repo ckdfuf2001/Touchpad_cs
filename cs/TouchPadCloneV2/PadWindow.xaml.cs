@@ -75,26 +75,27 @@ public partial class PadWindow : Window
     private bool _cursorHidden;
 
     /// <summary>
-    /// REAL-CURSOR-ONLY MODE. The touch moves the actual system cursor, the
-    /// actual cursor is visible, and clicks/drags are delivered where it is.
+    /// One-cursor mode: the touch drives the REAL system cursor, which is then
+    /// the only cursor on screen. Kept switchable because the machinery for it
+    /// is in place, but it is OFF: this hardware fights it at the OS level and
+    /// the OS wins.
     ///
-    /// The whole dual-cursor design exists to keep the physical mouse's cursor
-    /// where the mouse left it while a separate "virtual" cursor is aimed with
-    /// the finger. Every hard bug in this area came from the two disagreeing:
-    /// the click has to be aimed at the virtual one, the drag has to move the
-    /// real one onto it, the system yanks the real one onto the touch contact,
-    /// the virtual one can sit on our own pad, and a release has to be
-    /// protected from the hand-back long enough for a drop to be processed.
-    /// With one cursor none of that can happen: what the application sees IS
-    /// what the user sees.
+    /// Measured on the device: while a finger is down the system moves the
+    /// cursor onto the touch contact - which is on the pad - and it does so
+    /// after our own SetCursorPos, repeatedly (logged: the cursor sitting on
+    /// our own pad, then pinned to (0,0) as the keeper and the pull traded
+    /// places). Reading the cursor back to drive it feeds that pull straight
+    /// into the position, and a model that ignores the read-back can only
+    /// fight it on the output side. The system also hides the cursor while a
+    /// touch is active, which is fatal when the cursor is the UI.
     ///
-    /// The cost is that touch input now displaces the physical mouse's cursor
-    /// - the two cannot be independent when there is only one cursor - and
-    /// that the cursor cannot enter the pad's own rectangle during a gesture,
-    /// because a press there would land on the pad (see ClampFake).
-    /// Flip to false to get the old dual-cursor behaviour back.
+    /// This is exactly why the project has a fake cursor at all: the real one
+    /// cannot be relied on during a touch. Making one cursor work would mean
+    /// handling raw WM_POINTER and suppressing the promotion, which must be
+    /// verified on the device - the selftest calls handlers directly and never
+    /// goes through the input pipeline, so it cannot see any of this.
     /// </summary>
-    private const bool RealCursorOnly = true;
+    private const bool RealCursorOnly = false;
 
     /// <summary>
     /// Until when the pad's touch surface must let mouse input through to the
@@ -1205,6 +1206,11 @@ public partial class PadWindow : Window
     {
         _s = settings;
         InitializeComponent();
+        // ShowCursor's counter is shared for the desktop: a previous run that
+        // hid the cursor (or the system hiding it while a touch is active) can
+        // leave it invisible for everything, not just for us. Repair it on the
+        // way in - the helper loops until the cursor is actually showing.
+        try { InputSim.RestoreCursor(); } catch { }
         Core.NoActivate.Apply(this);
         Core.TabletTweaks.DisableSystemGestures(this);
         // Make the pad's touch surface transparent to mouse input WHILE we are
