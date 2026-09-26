@@ -396,6 +396,36 @@ public static class SelfTest
             Check(Math.Abs(cx - mx) <= 2 && Math.Abs(cy - my) <= 2,
                 "real cursor back after the drag", $"now=({cx},{cy}) want=({mx},{my})");
         }
+        // ---- 4c. while a button is held, the OS cursor must be ON the
+        // virtual one. A drag is carried entirely by the cursor, and a touch
+        // drag used to leave it parked at the press point - the drag was then
+        // driven by whatever else wrote the cursor (the OS touch-to-mouse
+        // promotion, unscaled, different baseline), which is what made a
+        // touch drag come out as a shaky circle. Checked BEFORE the release,
+        // because releasing hands the cursor back to the physical mouse.
+        {
+            int n = Mark();
+            await Settle();
+            var a = new FakeTouch(id++);
+            Down(a, px, py); await Task.Delay(60); Up(a);
+            await Task.Delay(150);
+            var b = new FakeTouch(id++);
+            Down(b, px, py); await Task.Delay(150);
+            for (int i = 1; i <= 5; i++)
+            {
+                Move(b, px + 20 * i, py); await Task.Delay(30);
+            }
+            await Task.Delay(100);
+            var (cx, cy) = InputSim.Cursor();
+            double ax = FakeX(), ay = FakeY();
+            Up(b);
+            await Task.Delay(400);
+            await Drain();
+            var c = Since(n);
+            Check(Math.Abs(cx - ax) <= 2 && Math.Abs(cy - ay) <= 2,
+                "mid-drag the OS cursor rides the virtual cursor",
+                $"os=({cx},{cy}) fake=({ax:0},{ay:0}) moves={c.Count(e => e.Kind == "move")}");
+        }
         // ---- 5. the same after a DOUBLE tap: the third press must still be
         // able to grab. Reported as "no drag after a double-click". Both
         // timings matter: inside the 600ms chain window the press is a
@@ -497,9 +527,12 @@ public static class SelfTest
             await Task.Delay(400);
             await Drain();
             var c = Since(n);
-            // A travelled press owns itself until release - nothing at all.
-            Check(c.Count == 0, $"drag then park ({label}) = completely silent",
-                $"ev={c.Count}");
+            // A travelled press owns itself until release: no click, no wheel,
+            // no key. Cursor MOVES are expected and correct here - a drag has
+            // to carry the cursor - so they are not counted as actions.
+            int acts = c.Count(e => e.Kind != "move");
+            Check(acts == 0, $"drag then park ({label}) = no actions at all",
+                $"acts={acts} moves={c.Count - acts}");
         }
 
         // ---- 8. REGRESSION: a HARD one-finger scrape must move the cursor

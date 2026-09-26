@@ -276,6 +276,19 @@ public static class InputSim
         if (dx != 0 || dy != 0) Mouse(MOUSEEVENTF_MOVE, dx, dy);
     }
 
+    /// <summary>
+    /// Put the system cursor at an absolute point. Needed while a button is
+    /// held: a drag is carried entirely by the cursor, so it has to follow
+    /// the virtual one on every touch event. Absolute rather than relative
+    /// on purpose - it is idempotent, so it cannot fight another writer for
+    /// the cursor, and it cannot accumulate drift.
+    /// </summary>
+    public static void MoveTo(int x, int y)
+    {
+        Send(AbsMove(x, y));
+        Note("move", "", x, y);
+    }
+
     public static void Down(string button) => Mouse(DownFlag(button));
 
     public static void Up(string button) => Mouse(UpFlag(button));

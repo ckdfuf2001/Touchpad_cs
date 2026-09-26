@@ -124,6 +124,7 @@ public partial class PadWindow : Window
         if (!_session)
         {
             InputSim.SetCursor((int)_fakeX, (int)_fakeY);
+        ForgetRealCursor();
             _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
         }
         DebugLog.Write($"CENTER fake=({_fakeX:0},{_fakeY:0})");
@@ -181,6 +182,7 @@ public partial class PadWindow : Window
             }
             if (cx == _physX && cy == _physY) return;
             InputSim.SetCursor(_physX, _physY);
+        ForgetRealCursor();
             _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(120);
             DebugLog.Write($"PHYS restore ({_physX},{_physY}) from ({cx},{cy}) [{why}]");
         }
@@ -261,6 +263,7 @@ public partial class PadWindow : Window
                     // Only if nobody took it meanwhile: a mouse that moved
                     // in the meantime owns the cursor, not us.
                     InputSim.SetCursor((int)wantX, (int)wantY);
+                    ForgetRealCursor();
                     _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(120);
                     string tag = UnifiedPhysical ? "RE-PARK" : "PHYS re-park";
                     DebugLog.Write(
@@ -454,6 +457,41 @@ public partial class PadWindow : Window
 
     /// <summary>Peak rate in DIP/150ms, for logging.</summary>
     private static double RecentTravel(Finger f) => f.PeakRate;
+
+    private int _realSentX = int.MinValue, _realSentY = int.MinValue;
+
+    /// <summary>
+    /// Drive the system cursor onto the virtual cursor while a button is
+    /// held. Absolute, so it is idempotent: whoever wrote last wins and
+    /// nothing accumulates. The cache is dropped whenever the cursor is
+    /// parked or jumped by someone else, so the next drag re-syncs instead
+    /// of assuming the cursor is already where we left it.
+    /// </summary>
+    private void SyncRealCursorToFake()
+    {
+        int tx = (int)_fakeX, ty = (int)_fakeY;
+        if (tx == _realSentX && ty == _realSentY) return;
+        _realSentX = tx; _realSentY = ty;
+        InputSim.MoveTo(tx, ty);
+        DebugLog.Write($"DRAG sync -> ({tx},{ty})");
+    }
+
+    /// <summary>Forget where we last put the cursor (someone else moved it).</summary>
+    private void ForgetRealCursor() { _realSentX = int.MinValue; _realSentY = int.MinValue; }
+
+    /// <summary>
+    /// Is any synthetic button down right now - a drag grab (_actionHeld) or
+    /// a held button tile (Finger.HoldButton)? Only then does the OS cursor
+    /// have to follow the virtual one; while merely hovering, the physical
+    /// mouse keeps its own cursor.
+    /// </summary>
+    private bool ButtonHeld()
+    {
+        if (_actionHeld != null) return true;
+        foreach (var f in _fingers.Values)
+            if (f.HoldButton != null) return true;
+        return false;
+    }
 
     /// <summary>
     /// True while the single live press is already classified as MOVING, so
@@ -695,14 +733,22 @@ public partial class PadWindow : Window
     /// </summary>
     private void PressDown(string button)
     {
-        if (_session) InputSim.DownAt((int)_fakeX, (int)_fakeY, button);
+        if (_session)
+        {
+            InputSim.DownAt((int)_fakeX, (int)_fakeY, button);
+            ForgetRealCursor();
+        }
         else InputSim.Down(button);
         _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
     }
 
     private void PressUp(string button)
     {
-        if (_session) InputSim.UpAt((int)_fakeX, (int)_fakeY, button);
+        if (_session)
+        {
+            InputSim.UpAt((int)_fakeX, (int)_fakeY, button);
+            ForgetRealCursor();
+        }
         else InputSim.Up(button);
         _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
         // The drag is over: give the real cursor back to the physical mouse
@@ -1157,6 +1203,7 @@ public partial class PadWindow : Window
         }
         catch { }
         InputSim.ClickAt((int)px, (int)py, b);
+        ForgetRealCursor();
         _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
         // Show exactly where it landed (settles aim disputes at a glance).
         try
@@ -1574,6 +1621,15 @@ public partial class PadWindow : Window
                         _fakeY = f.Fy0 + ty * _dpi * gain;
                     }
                     ClampFake();
+                    // While a button is down the OS cursor IS the drag cursor,
+                    // so it has to follow the virtual one. It used to stay
+                    // parked at the press point for the whole gesture, and
+                    // the drag was carried by whatever else wrote the cursor -
+                    // the OS touch-to-mouse promotion, unscaled and on a
+                    // different baseline. That is why a touch drag came out
+                    // as a shaky circle while the same drag with the physical
+                    // mouse (InputSim.Move on every event) was smooth.
+                    if (ButtonHeld()) SyncRealCursorToFake();
                     // NOTE: the real cursor is deliberately NEVER chased here.
                     // It stays (hidden) where it was; only the fake roams.
                     // Clicks carry their own absolute position (see ClickAt).
