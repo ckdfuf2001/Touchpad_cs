@@ -113,23 +113,27 @@ public partial class PadWindow : Window
     private IntPtr PadWndProc(IntPtr hwnd, int msg, IntPtr wParam,
         IntPtr lParam, ref bool handled)
     {
-        if (msg != WM_NCHITTEST || !MouseThroughActive) return IntPtr.Zero;
+        if (msg != WM_NCHITTEST) return IntPtr.Zero;
         try
         {
-            // lParam is the screen point, packed as two shorts.
-            int x = unchecked((short)(long)lParam);
-            int y = unchecked((short)((long)lParam >> 16));
-            var tl = Surface.PointToScreen(new Point(0, 0));
-            var br = Surface.PointToScreen(
-                new Point(Surface.ActualWidth, Surface.ActualHeight));
-            if (x >= tl.X && x <= br.X && y >= tl.Y && y <= br.Y)
-            {
-                if ((_hitTestN++ % 20) == 0)
-                    DebugLog.Write($"NCHITTEST through @({x},{y})"
-                        + $" pad=({tl.X:0},{tl.Y:0})-({br.X:0},{br.Y:0})");
-                handled = true;
-                return HTTRANSPARENT;   // -> the application underneath
-            }
+            int sx = unchecked((short)(long)lParam);
+            int sy = unchecked((short)((long)lParam >> 16));
+            // The TOUCH SURFACE never receives mouse input - not a touch
+            // promoted to a mouse, not a synthetic drag press or release, not
+            // the physical mouse either. Everything in that rectangle belongs
+            // to the application underneath, which is the only way a drag
+            // release aimed there can reach the drag's source at the position
+            // the finger chose. Returning HTTRANSPARENT is the mechanism
+            // (WindowFromPoint skips a window that answers this way).
+            //
+            // The title bar is deliberately excluded: it is chrome, not the
+            // touch surface, and its buttons have to stay clickable.
+            var win = PointFromScreen(new Point(sx, sy));
+            if (IsChrome(InputHitTest(win))) return IntPtr.Zero;
+            if ((_hitTestN++ % 40) == 0)
+                DebugLog.Write($"NCHITTEST through @({sx},{sy})");
+            handled = true;
+            return HTTRANSPARENT;
         }
         catch { }
         return IntPtr.Zero;
