@@ -781,6 +781,10 @@ public partial class PadWindow : Window
         {
             CancelHold();
             if (!_fingers.TryGetValue(id, out _)) return;
+            // The movement already grabbed this press (StartDrag). Firing
+            // SecondHold now would press the button a SECOND time, and the
+            // release would only undo one of them - a stuck / doubled button.
+            if (_dragHold && _dragId == id) return;
             if (id == _longId) CancelLong(); // don't also fire long-press
             _secondConsumed = true;
             _dragArmId = -1;
@@ -1526,7 +1530,7 @@ public partial class PadWindow : Window
                 {
                     // Second press of a would-be double tap: NOTHING is
                     // pressed yet. It resolves on the first movement (drag,
-                    // StartDrag) or on the hold timer (G.LongPress). The
+                    // StartDrag) or on the hold timer (SecondHold). The
                     // button used to go down at this instant, which turned
                     // every chained press into a drag and made a plain
                     // hold-then-right-click impossible.
@@ -1535,21 +1539,22 @@ public partial class PadWindow : Window
                     _secondConsumed = false;
                     _thirdPress = false;
                     _thirdId = -1;
+                    // Move -> grab immediately.
                     if (G.SecondHold == "drag_hold")
                         _dragArmId = e.TouchDevice.Id;
-                    else
-                        ArmHold(e.TouchDevice.Id, G.SecondHold);
-                    // A grab-armed press does not also race a long-press. This
-                    // is the tap-press-move flow, and it sat 4ms from the
-                    // edge every time: press, pause, move, and the long-press
-                    // came due at 500ms while the movement that cancels it
-                    // crossed the threshold at 504ms (logged "long canceled
-                    // (peak 12)" against a threshold of 10). Move a little
-                    // slower and the drag became a right-click. The click has
-                    // already been delivered by the tap, so the press is
-                    // drag-only: move to drag, release to click, nothing in
-                    // between.
-                    ArmLong(e.TouchDevice.Id, G.LongPress);
+                    // Hold still -> the configured SecondHold, on the 250ms
+                    // timer. With the default drag_hold that IS the
+                    // click-and-drag the report asked for: the button goes
+                    // down and stays down, so moving drags and releasing
+                    // drops. Previously SecondHold was skipped for drag_hold
+                    // and the long-press was armed instead, so holding after a
+                    // double-click fired a RIGHT CLICK - the button was never
+                    // held, and the drag could not exist because there was no
+                    // press to move with.
+                    ArmHold(e.TouchDevice.Id, G.SecondHold);
+                    // No ArmLong here. A press that follows a tap belongs to
+                    // the drag; the long-press (right click) is the gesture of
+                    // a FRESH press and a fresh press still arms it.
                 }
                 else if (DateTime.Now < _pendingTripleUntil)
                 {
@@ -1561,13 +1566,8 @@ public partial class PadWindow : Window
                     _secondConsumed = false;
                     if (G.SecondHold == "drag_hold")
                         _dragArmId = e.TouchDevice.Id;
-                    else
-                        ArmHold(e.TouchDevice.Id, G.SecondHold);
-                    // A grab-armed press does not also race a long-press: the
-                    // third press after a double tap is the "now move it"
-                    // press, and a 500ms pause in the middle of it turned
-                    // into a right-click instead (see the plain-press branch).
-                    ArmLong(e.TouchDevice.Id, G.LongPress);
+                    ArmHold(e.TouchDevice.Id, G.SecondHold);
+                    // No ArmLong: same reason as the second press above.
                 }
                 else
                 {
@@ -1586,16 +1586,19 @@ public partial class PadWindow : Window
                     // grabs, and the arm expires on its own.
                     _dragArmId = DateTime.Now < _grabArmUntil
                         ? e.TouchDevice.Id : -1;
-                    // A press that can grab must NOT also race a long-press.
-                    // Measured: press, pause 500ms, move - the long-press came
-                    // due first and was cancelled 4ms before it fired, so the
-                    // drag only began at 527ms and nearly became a
-                    // right-click. After a double/triple tap the intent is
-                    // already established ("I picked the target, now move
-                    // it"), so the press is drag-only: move to drag, release
-                    // to click, and nothing fires in between. A fresh press
-                    // still gets the long-press.
-                    ArmLong(e.TouchDevice.Id, G.LongPress);
+                    if (_dragArmId >= 0)
+                    {
+                        // Can grab: same rule as the chained presses - move
+                        // grabs, holding runs SecondHold (drag_hold by
+                        // default), and no long-press races it.
+                        ArmHold(e.TouchDevice.Id, G.SecondHold);
+                    }
+                    else
+                    {
+                        // A fresh press with no tap in front of it: this is
+                        // where the long-press (right click) lives.
+                        ArmLong(e.TouchDevice.Id, G.LongPress);
+                    }
                 }
             }
             else if (_fingers.Count == 2)

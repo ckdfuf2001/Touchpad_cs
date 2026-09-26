@@ -570,9 +570,12 @@ public static class SelfTest
                 "a plain press+move is a pointer move, NOT a grab",
                 $"ev={ev.Count}");
         }
-        // ---- 6. click, then press and HOLD STILL: now a real hold, so the
-        // hold action (right click) must fire. It used to be swallowed and
-        // turned into a silent drag-hold instead.
+        // ---- 6. click, then press and HOLD STILL. The hold of a press that
+        // follows a tap belongs to SecondHold (drag_hold by default), NOT to
+        // the long-press. Reported: "after a double-click, holding just logs a
+        // right-click; it should be click-and-drag". The button must go down
+        // and STAY down - that is what a drag needs - so this asserts a left
+        // down that is not immediately undone, and no right click at all.
         {
             int n = Mark();
             await Settle();
@@ -580,13 +583,19 @@ public static class SelfTest
             Down(a, px, py); await Task.Delay(60); Up(a);
             await Task.Delay(150);
             var b = new FakeTouch(id++);
-            Down(b, px, py); await Task.Delay(1100); Up(b);
+            Down(b, px, py); await Task.Delay(1100);
+            int held = Dns(Since(n), "left");
+            int upWhileHeld = Since(n).Count(e => e.Kind == "up" && e.Btn == "left");
+            Up(b);
             await Task.Delay(400);
             await Drain();
             var c = Since(n);
-            int rdowns = Dns(c, "right"), ldowns = Dns(c, "left");
-            Check(rdowns == 1 && ldowns == 1, "click+hold still = click + right click",
-                $"l={ldowns} r={rdowns}");
+            int ldowns = Dns(c, "left"), rdowns = Dns(c, "right");
+            Check(rdowns == 0, "hold after a tap does NOT fire a right click",
+                $"r={rdowns} l={ldowns}");
+            Check(ldowns >= 2 && upWhileHeld == 0,
+                "hold after a tap = the button is HELD down (click-and-drag)",
+                $"l={ldowns} upsWhileHeld={upWhileHeld} heldAt1100={held}");
         }
         // ---- 7. REGRESSION: a drag that then parks must stay silent. Once
         // the press is a drag, NOTHING may fire until release - the old
