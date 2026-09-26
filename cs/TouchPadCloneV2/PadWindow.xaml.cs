@@ -117,18 +117,24 @@ public partial class PadWindow : Window
     /// True while the pad's surface must let mouse input through to the window
     /// beneath.
     ///
-    /// Held down for the WHOLE time a synthetic button is: a tail alone made
-    /// the hit test flicker. Measured as "the drag flickers between the touch
-    /// area and the virtual one, and the release lands in one of the two" -
-    /// between two moves the 120ms tail lapsed, the surface went back to
-    /// claiming the point, the pad received that move, and the next move
-    /// arming it again handed the following one to the application. The drag
-    /// was being split between two windows. The tail is only there so a lone
-    /// click - which injects down and up in one batch and then stops - stays
-    /// covered for a moment after.
+    /// Keyed on the SESSION, not on a synthetic button being held: any touch
+    /// gesture on the pad - a plain move, a move with a button down, a
+    /// double-touch drag - is covered by one condition, with no per-move
+    /// refresh to get out of step. Keying it on the button made the hit test
+    /// alternate between two moves whenever the finger paused long enough for
+    /// the tail to lapse, and the drag ended up split between our window and
+    /// the application ("it flickers between the two areas and the release
+    /// lands in one of them").
+    ///
+    /// Gating it on the session is also what makes it safe for TOUCH. Doing it
+    /// unconditionally killed the pad outright - the system picks the touch
+    /// target with the same hit test, so the surface never received the touch
+    /// that would have started a session. Once a session is running the touch
+    /// is CAPTURED, so hit testing no longer decides where it goes and the
+    /// surface can be transparent to the mouse without losing the finger.
     /// </summary>
     private bool MouseThroughActive =>
-        _actionHeld != null || DateTime.Now < _mouseThroughUntil;
+        _session || DateTime.Now < _mouseThroughUntil;
 
     private const int WM_NCHITTEST = 0x0084;
     private static readonly IntPtr HTTRANSPARENT = new(-1);
