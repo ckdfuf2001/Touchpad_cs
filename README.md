@@ -3,10 +3,9 @@
 원본: `C:\Program Files\TouchMousePointer` (Lovesummertrue, v3.0.1.2) 분석 기반 호환 클론.
 자세한 분석은 [ANALYSIS.md](ANALYSIS.md), 전체 메뉴얼·구조도는 [docs/manual.html](docs/manual.html) 참조.
 
-## 현행: v2 (C#/WPF, `cs/TouchPadCloneV2/`) — 권장
+## 현행: v2 (C#/WPF, `cs/TouchPadCloneV2/`)
 
-WPF **진짜 터치 이벤트**(손가락별 추적)로 동작. v1(Python/tkinter)은
-마우스 에뮬 기반이라 자기증폭 발진이 나서 retired — `touchpad_clone/`에 보존.
+WPF **진짜 터치 이벤트**(손가락별 추적)로 동작.
 
 ```bat
 cd cs\TouchPadCloneV2
@@ -19,14 +18,7 @@ dotnet run
 - 원본 INI 프리셋 호환 로더 — 원본 `Preset *.ini` 직접 열기 가능 (`cs/PresetCheck`로 56종 전수 검증)
 - 상단 ModeStrip(터치 시 확장), 트레이 상주, 설정 저장 (`%APPDATA%\TouchPadClone\settings.json`, v1과 공유)
 - 진단: `set TOUCHPAD_DEBUG=1` → `%TEMP%\touchpad_v2.log`에 터치 원신호 기록
-- 미구현: 커서 시각화 오버레이(v1에만 있음), 핀치 제스처, vJoy 축 에뮬, `artsize_*`
-
-## 구버전: v1 (Python, `touchpad_clone/`) — 참고용
-
-```bat
-python -m pip install -r requirements.txt
-python -m touchpad_clone.main
-```
+- 미구현: 커서 시각화 오버레이(sonar/track/fake), 핀치 제스처, vJoy 축 에뮬, `artsize_*`
 
 ## 모드 전환 (원본 대응 + 클론 확장)
 

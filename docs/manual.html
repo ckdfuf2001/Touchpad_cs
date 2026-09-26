@@ -190,9 +190,7 @@ tile004=pad,0,0,100,100          ; 입력층은 보통 마지막(최상위 z-ord
 <tr><td><code>Core/AppSettings</code></td><td><code>Load / Save</code></td><td>JSON 설정 + GestureMap (v1과 같은 파일 공유, 가속도 항목 없음=선형 고정)</td></tr>
 <tr><td><code>Core/DebugLog</code></td><td><code>Clear / Write</code></td><td><code>TOUCHPAD_DEBUG=1</code>일 때만 <code>%TEMP%\touchpad_v2.log</code> 기록</td></tr>
 </table>
-<div class="card">v1 (Python) 모듈은 <code>touchpad_clone/</code>에 보존되어 있다:
-<code>layout.py / mouse.py / pad.py / modestrip.py / overlay.py / assist.py / tray.py / settings_ui.py / config.py / vjoy.py</code>.
-동작은 하나 v1 입력 파이프라인(마우스 에뮬 기반)은 §9의 이유로 retired.</div>
+<div class="card">v1 (Python) 프로토타입은 제거되었다 (마우스 에뮬 기반의 구조적 한계, §9). 현행 코드는 v2(C#/WPF)만 유지된다.</div>
 
 <!-- ============ 6 ============ -->
 <h2 id="s6">6. 사용 메뉴얼 (v2)</h2>
