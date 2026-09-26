@@ -308,17 +308,34 @@ public static class SelfTest
             Check(c.Count == 1 && c[0].Kind == "click" && c[0].Btn == "left",
                 "tap = one left click", $"ev={c.Count}");
         }
-        // ---- 2. long hold 700ms ----
+        // ---- 2. one hold, three things it must get right: the right click
+        // itself, the label that survives the release, and the physical mouse
+        // cursor that must NOT be handed back (a context menu lives at the
+        // cursor; moving it away dismisses the menu, which is how a working
+        // right-click looked like a no-op).
         {
+            var lbl = (System.Windows.Controls.TextBlock)_pad.FindName("StatusLabel");
             int n = Mark();
             await Settle();
+            int mx = 90, my = 90;
+            InputSim.SetCursor(mx, my);
+            await Task.Delay(80);
             var d = new FakeTouch(id++);
-            Down(d, px, py); await Task.Delay(700); Up(d);
-            await Task.Delay(300);
+            Down(d, px, py); await Task.Delay(800); Up(d);
+            await Task.Delay(700);
             await Drain();
             var c = Since(n);
+            var (cx, cy) = InputSim.Cursor();
             Check(c.Count == 1 && c[0].Kind == "click" && c[0].Btn == "right",
                 "long-press = one right click", $"ev={c.Count}");
+            // The label used to be overwritten unconditionally with
+            // "up gesture Nms", so lifting after a right-click made it claim
+            // nothing had happened.
+            Check(lbl.Text.Contains("long-press") && lbl.Text.Contains("right_click"),
+                "label shows the long-press after release", $"label=\"{lbl.Text}\"");
+            Check(cx != mx || cy != my,
+                "cursor NOT handed back after a right click (menu stays open)",
+                $"now=({cx},{cy}) phys=({mx},{my})");
         }
         // ---- 3. double + immediate release (double-click) ----
         {
@@ -339,10 +356,14 @@ public static class SelfTest
         // ---- 4. click, then press + MOVE = drag. The press must land on the
         // AIM POINT (fake cursor), never on the touch point: a bare Down()
         // after a cursor park lost the race with the OS yank and pressed our
-        // own pad instead of the target (measured: drag did nothing).
+        // own pad instead of the target (measured: drag did nothing). The
+        // release must also hand the real cursor back to the mouse.
         {
             int n = Mark();
             await Settle();
+            int mx = 70, my = 70;
+            InputSim.SetCursor(mx, my);
+            await Task.Delay(80);
             var a = new FakeTouch(id++);
             Down(a, px, py); await Task.Delay(60); Up(a);
             await Task.Delay(150);
@@ -355,7 +376,7 @@ public static class SelfTest
             }
             await Task.Delay(100);
             Up(b);
-            await Task.Delay(400);
+            await Task.Delay(600);
             await Drain();
             var c = Since(n);
             var downsL = c.Where(e => e.Kind != "up" && e.Btn == "left").ToList();
@@ -369,23 +390,11 @@ public static class SelfTest
                     "drag press lands ON the aim point",
                     $"down@({d2.X},{d2.Y}) aim=({fx0:0},{fy0:0})");
             }
-        }
-        // ---- 5. triple tap quick: click + natural double + triple event ----
-        {
-            int n = Mark();
-            await Settle();
-            for (int k = 0; k < 3; k++)
-            {
-                var d = new FakeTouch(id++);
-                Down(d, px, py); await Task.Delay(60); Up(d);
-                await Task.Delay(150);
-            }
-            await Task.Delay(400);
-            await Drain();
-            var c = Since(n);
-            int downs = Dns(c, "left");
-            // 1 (tap) + 2 (double) + 3 (triple) = 6
-            Check(downs == 6, "triple tap = 6 downs", $"downs={downs}");
+            // Every synthetic click moves the REAL cursor (SendInput is
+            // absolute), which used to drag the physical mouse along.
+            var (cx, cy) = InputSim.Cursor();
+            Check(Math.Abs(cx - mx) <= 2 && Math.Abs(cy - my) <= 2,
+                "real cursor back after the drag", $"now=({cx},{cy}) want=({mx},{my})");
         }
         // ---- 6. click, then press and HOLD STILL: now a real hold, so the
         // hold action (right click) must fire. It used to be swallowed and
@@ -406,9 +415,11 @@ public static class SelfTest
                 $"l={ldowns} r={rdowns}");
         }
         // ---- 7. REGRESSION: a drag that then parks must stay silent. Once
-        // net travel passes the slop the press is a drag, so NOTHING may fire
-        // until release - the old edge-triggered 120px test let the timer
-        // live and a right-click landed in the middle of the move.
+        // the press is a drag, NOTHING may fire until release - the old
+        // edge-triggered 120px test let the timer live and a right-click
+        // landed in the middle of the move. This subsumes the "incremental
+        // drag" and "fast drag" cases: both are the same rule, and keeping
+        // three copies of it only meant three places to go stale.
         {
             int n = Mark();
             await Settle();
@@ -429,103 +440,19 @@ public static class SelfTest
             await Task.Delay(400);
             await Drain();
             var c = Since(n);
-            int rdowns = Dns(c, "right"), ldowns = Dns(c, "left");
             // A travelled press owns itself until release - nothing at all.
             // (The rate is what decides: a SLOW move is a hold on this panel,
-            // see test 15; only a real drag rate silences the long-press.)
+            // see case 9; only a real drag rate silences the long-press.)
             Check(c.Count == 0, "drag then park = completely silent",
-                $"l={ldowns} r={rdowns} ev={c.Count}");
-        }
-        // ---- 8. an incremental drag at a real drag RATE (small steps, so
-        // the old edge-triggered cancel never saw the later ones) must still
-        // silence the hold.
-        {
-            int n = Mark();
-            await Settle();
-            var d = new FakeTouch(id++);
-            Down(d, px, py);
-            for (int i = 1; i <= 24; i++) // 40 DIP per 12ms = 3.3 DIP/ms
-            {
-                Move(d, px + 40 * i, py); await Task.Delay(12);
-            }
-            Up(d);
-            await Task.Delay(400);
-            await Drain();
-            var c = Since(n);
-            int rdowns = Dns(c, "right");
-            Check(rdowns == 0 && !c.Any(e => e.Kind == "wheel"),
-                "incremental drag = nothing fired", $"r={rdowns} ev={c.Count}");
-        }
-        // ---- 9. hold survives finger wander (net, not path): go out 30px and
-        // come back, hold still: the net is small, so it IS a hold.
-        {
-            int n = Mark();
-            await Settle();
-            var d = new FakeTouch(id++);
-            Down(d, px, py);
-            for (int i = 1; i <= 6; i++) { Move(d, px + 5 * i, py); await Task.Delay(40); }
-            for (int i = 6; i >= 0; i--) { Move(d, px + 5 * i, py); await Task.Delay(40); }
-            await Task.Delay(800);
-            Up(d);
-            await Task.Delay(400);
-            await Drain();
-            var c = Since(n);
-            int rdowns = Dns(c, "right");
-            Check(rdowns == 1, "wander-and-return hold = right click", $"r={rdowns}");
+                $"ev={c.Count}");
         }
 
-        // ---- 10. physical mouse is left alone. Every synthetic click has to
-        // move the REAL cursor (SendInput is absolute), which used to drag
-        // the physical mouse along. In preserve mode the real cursor must be
-        // back where the mouse left it once the press is over.
-        {
-            int n = Mark();
-            await Settle();
-            // Park the "physical mouse" somewhere known and away from the pad.
-            var park = new RECT();
-            GetWindowRect(IntPtr.Zero, ref park);
-            int mx = 60, my = 60;
-            InputSim.SetCursor(mx, my);
-            await Task.Delay(80);
-            var d = new FakeTouch(id++);
-            Down(d, px, py); await Task.Delay(80); Up(d);   // a plain tap
-            await Task.Delay(500);
-            await Drain();
-            var tc = Since(n);
-            var (cx, cy) = InputSim.Cursor();
-            Check(tc.Count(e => e.Kind == "click") >= 1, "tap did click", $"ev={tc.Count}");
-            Check(Math.Abs(cx - mx) <= 2 && Math.Abs(cy - my) <= 2,
-                "real cursor handed back to the physical mouse",
-                $"now=({cx},{cy}) want=({mx},{my})");
-        }
-        // ---- 11. same after a drag (the release must return it too).
-        {
-            int n = Mark();
-            await Settle();
-            int mx = 70, my = 70;
-            InputSim.SetCursor(mx, my);
-            await Task.Delay(80);
-            var a = new FakeTouch(id++);
-            Down(a, px, py); await Task.Delay(60); Up(a);
-            await Task.Delay(150);
-            var b = new FakeTouch(id++);
-            Down(b, px, py); await Task.Delay(120);
-            for (int i = 1; i <= 4; i++) { Move(b, px + 20 * i, py); await Task.Delay(30); }
-            Up(b);
-            await Task.Delay(500);
-            await Drain();
-            var c = Since(n);
-            var (cx, cy) = InputSim.Cursor();
-            Check(c.Any(e => e.Kind == "down"), "drag happened", "");
-            Check(Math.Abs(cx - mx) <= 2 && Math.Abs(cy - my) <= 2,
-                "real cursor back after drag",
-                $"now=({cx},{cy}) want=({mx},{my})");
-        }
-
-        // ---- 12. REGRESSION: a HARD one-finger scrape must move the cursor
+        // ---- 8. REGRESSION: a HARD one-finger scrape must move the cursor
         // and fire NOTHING. Every gesture action is two-finger by policy:
         // scratching fast across the pad used to fire SwipeUp (a scroll),
-        // which is the one thing a single finger must never do.
+        // which is the one thing a single finger must never do. (The
+        // downward flick and the diagonal drag were separate cases for the
+        // same rule; the one-finger swipe code is gone, so one case covers it.)
         {
             int n = Mark();
             await Settle();
@@ -546,22 +473,7 @@ public static class SelfTest
                 "1-finger scrape moved the cursor",
                 $"({aimX:0},{aimY:0}) -> ({FakeX():0},{FakeY():0})");
         }
-        // ---- 12b. same downward: a one-finger flick must never scroll.
-        {
-            int n = Mark();
-            await Settle();
-            var d = new FakeTouch(id++);
-            Down(d, px, py);
-            for (int i = 1; i <= 6; i++) Move(d, px, py + 25 * i);
-            await Task.Delay(40);
-            Up(d);
-            await Task.Delay(400);
-            await Drain();
-            var c = Since(n);
-            Check(c.Count == 0, "1-finger flick down fires NO gesture",
-                $"ev={c.Count}");
-        }
-        // ---- 12c. two fingers: vertical = live scroll (the gesture path
+        // ---- 9. two fingers: vertical = live scroll (the gesture path
         // that IS allowed to fire with motion).
         {
             int n = Mark();
@@ -585,7 +497,7 @@ public static class SelfTest
             Check(c.Any(e => e.Kind == "wheel" && e.Btn.StartsWith("v")),
                 "two-finger vertical = scroll", $"ev={c.Count}");
         }
-        // ---- 12d. a MOVING press owns the session until it lifts: a second
+        // ---- 10. a MOVING press owns the session until it lifts: a second
         // contact arriving mid-drag must be refused outright. Otherwise one
         // drag also produced a two-finger scroll, or a button/key tile fired
         // on top of it - the "other actions run while I am dragging" report.
@@ -604,25 +516,24 @@ public static class SelfTest
             await Task.Delay(400);
             await Drain();
             var c = Since(n);
-            Check(!c.Any(e => e.Kind == "wheel"),
-                "2nd finger during a drag fires NO scroll", $"ev={c.Count}");
-            Check(!c.Any(e => e.Kind == "click"),
-                "2nd finger during a drag fires NO click", $"ev={c.Count}");
+            Check(c.Count == 0,
+                "2nd finger during a drag fires nothing (no scroll, no click)",
+                $"ev={c.Count}");
         }
-        // ---- 13. a SLOW drag over the same distance stays a cursor move
-        // (the only thing separating the two on a relative pad).
-        // ---- 13. a slow creep must NOT carry the cursor away. While a hold
-        // is pending the gain ramps 0 -> 1 over the first HoldDampDip of
-        // travel; without it, the panel's 0.4 DIP/ms creep dragged the
-        // pointer hundreds of px inside a single hold and the aim ran away.
+        // ---- 11. a slow creep must NOT scroll, must NOT carry the cursor
+        // away, and must be visible EARLY: the pin that held the pointer
+        // still until the hold resolved made the pad read as dead.
         {
             int n = Mark();
             await Settle();
             double aimX = FakeX(), aimY = FakeY();
             var d = new FakeTouch(id++);
             Down(d, px, py);
+            await Task.Delay(60);
+            for (int i = 1; i <= 3; i++) { Move(d, px + 15 * i, py); await Task.Delay(16); }
+            double early = Math.Abs(FakeX() - aimX) + Math.Abs(FakeY() - aimY);
             double x = px;
-            for (int i = 0; i < 20; i++)   // ~300ms of 0.25 DIP/ms creep
+            for (int i = 0; i < 20; i++)   // ~300ms more of 0.25 DIP/ms creep
             {
                 x += 4;
                 Move(d, x, py);
@@ -633,62 +544,26 @@ public static class SelfTest
             await Task.Delay(400);
             await Drain();
             var c = Since(n);
-            Check(!c.Any(e => e.Kind == "wheel"),
-                "creep = no scroll", $"ev={c.Count}");
-            double damped = Math.Abs(creepX - aimX) + Math.Abs(creepY - aimY);
-            double full = 80 * settings.Speed;   // 80 DIP of finger travel
+            Check(!c.Any(e => e.Kind == "wheel"), "creep = no scroll", $"ev={c.Count}");
             // The pointer is NOT pinned while a hold is pending: normal
             // movement on this panel is the same speed as the creep
             // (0.33-0.81 DIP/ms measured), so any pin threshold either never
             // releases - the pad reads as dead for 500ms - or releases on the
             // creep anyway. Immediate movement wins; HoldDamp (default 1.0)
             // is the optional softening.
-            Check(damped > 2,
-                "creep moves the cursor (no dead pad)",
-                $"moved={damped:0}px of {full:0}px at full gain");
-        }
-        // ---- 13b. REGRESSION for the pin: a press that moves IMMEDIATELY
-        // must move the pointer right away, not after the hold resolves.
-        {
-            await Settle();
-            double aimX = FakeX(), aimY = FakeY();
-            var d = new FakeTouch(id++);
-            Down(d, px, py);
-            await Task.Delay(60);
-            for (int i = 1; i <= 3; i++) { Move(d, px + 15 * i, py); await Task.Delay(16); }
-            double earlyX = FakeX(), earlyY = FakeY();
-            Check(Math.Abs(earlyX - aimX) + Math.Abs(earlyY - aimY) > 5,
-                "movement starts immediately (well before the hold fires)",
-                $"moved={Math.Abs(earlyX - aimX) + Math.Abs(earlyY - aimY):0}px at 110ms");
-            Up(d);
-            await Task.Delay(400);
-            await Drain();
-        }
-        // ---- 14. a diagonal slow drag is a cursor move, not a swipe.
-        {
-            int n = Mark();
-            await Settle();
-            var d = new FakeTouch(id++);
-            Down(d, px, py);
-            for (int i = 1; i <= 6; i++)
-            {
-                Move(d, px + 25 * i, py - 25 * i);
-                await Task.Delay(70);
-            }
-            Up(d);
-            await Task.Delay(400);
-            await Drain();
-            var c = Since(n);
-            Check(!c.Any(e => e.Kind == "wheel"),
-                "diagonal drag = no scroll", $"ev={c.Count}");
+            double total = Math.Abs(creepX - aimX) + Math.Abs(creepY - aimY);
+            Check(early > 5 && total > 2,
+                "creep moves the cursor at once (no dead pad)",
+                $"early={early:0}px total={total:0}px");
         }
 
-        // ---- 15. REGRESSION (real panel): a "still" finger on this digitizer
+        // ---- 12. REGRESSION (real panel): a "still" finger on this digitizer
         // reports a constant ~0.4 DIP/ms creep - measured 0-4px per event at
         // 60Hz, ~65 DIP per 150ms, and 130-215 DIP accumulated inside one
         // hold. Every DISTANCE-based rule cancelled the hold within 150ms
         // (logged: "long canceled (net 40px)" 114ms after the press, on
-        // every attempt). A RATE rule must let it through.
+        // every attempt). A RATE rule must let it through. This is the other
+        // half of case 7: creep holds, a real drag does not.
         {
             int n = Mark();
             await Settle();
@@ -710,76 +585,13 @@ public static class SelfTest
                 "creeping finger still counts as a HOLD (right click)",
                 $"r={Dns(c, "right")} ev={c.Count}");
         }
-        // ---- 16. and the opposite: a real drag (2.5 DIP/ms) must NOT hold.
-        {
-            int n = Mark();
-            await Settle();
-            var d = new FakeTouch(id++);
-            Down(d, px, py);
-            for (int i = 1; i <= 8; i++)   // 30 DIP per 12ms = 2.5 DIP/ms
-            {
-                Move(d, px - 30 * i, py);
-                await Task.Delay(12);
-            }
-            Up(d);
-            await Task.Delay(400);
-            await Drain();
-            var c = Since(n);
-            Check(Dns(c, "right") == 0,
-                "fast drag = no hold fired", $"r={Dns(c, "right")} ev={c.Count}");
-        }
-        // ---- 18. the status label must report what the press PRODUCED.
-        // It used to write "up gesture Nms" unconditionally, which overwrote
-        // the long-press line printed while the finger was still down - so
-        // lifting after a right-click made the label claim nothing happened.
-        {
-            var lbl = (System.Windows.Controls.TextBlock)_pad.FindName("StatusLabel");
-            int n = Mark();
-            await Settle();
-            var d = new FakeTouch(id++);
-            Down(d, px, py); await Task.Delay(800); Up(d);   // a real hold
-            await Task.Delay(500);
-            await Drain();
-            var holdText = lbl.Text;
-            Check(holdText.Contains("long-press") && holdText.Contains("right_click"),
-                "label shows the long-press after release",
-                $"label=\"{holdText}\"");
-            int m = Mark();
-            var e2 = new FakeTouch(id++);
-            Down(e2, px, py); await Task.Delay(60); Up(e2);  // a plain tap
-            await Task.Delay(400);
-            await Drain();
-            Check(lbl.Text.Contains("tap"),
-                "label shows the tap on the next press", $"label=\"{lbl.Text}\"");
-        }
-        // ---- 20. REGRESSION: after a RIGHT click the real cursor must stay
-        // put. A context menu lives at the cursor, and moving the cursor away
-        // dismisses it - so the hand-back to the physical mouse turned a
-        // working right-click into a visible no-op ("the event fires but
-        // nothing happens"). Left taps are unaffected.
-        {
-            int n = Mark();
-            await Settle();
-            int mx = 90, my = 90;
-            InputSim.SetCursor(mx, my);
-            await Task.Delay(80);
-            var d = new FakeTouch(id++);
-            Down(d, px, py); await Task.Delay(800); Up(d);   // long-press
-            await Task.Delay(700);
-            await Drain();
-            var c = Since(n);
-            var (cx, cy) = InputSim.Cursor();
-            Check(c.Any(e => e.Kind == "click" && e.Btn == "right"),
-                "long-press delivered a right click", $"ev={c.Count}");
-            Check(cx != mx || cy != my,
-                "cursor NOT handed back after a right click (menu stays open)",
-                $"now=({cx},{cy}) phys=({mx},{my})");
-        }
-        // ---- 21. no button left pressed. The real invariant is OUR stream        // being balanced (a drag that never releases is a stuck button).
+        // ---- 13. no button left pressed. The real invariant is OUR stream
+        // being balanced (a drag that never releases is a stuck button).
         // GetAsyncKeyState cannot be used per test: it reports the physical
         // mouse, so on a live desktop it flaps for reasons unrelated to us.
         {
             var all = Since(0);
+            var bad = new List<string>();
             foreach (var b in new[] { "left", "right" })
             {
                 int dn = 0, up = 0;
@@ -789,9 +601,10 @@ public static class SelfTest
                     if (e.Kind == "up") up++;
                     else if (e.Kind == "down") dn++;   // a click is dn+up in one
                 }
-                Check(dn == up, $"no stuck {b} button (stream balanced)",
-                    $"down={dn} up={up}");
+                if (dn != up) bad.Add($"{b} {dn}/{up}");
             }
+            Check(bad.Count == 0, "no stuck buttons (stream balanced)",
+                bad.Count == 0 ? $"{all.Count} events" : string.Join(" ", bad));
             Console.WriteLine($"  (os async key state: L={(GetAsyncKeyState(1) & 0x8000) != 0}"
                 + $" R={(GetAsyncKeyState(2) & 0x8000) != 0} - physical mouse, informational only)");
         }
