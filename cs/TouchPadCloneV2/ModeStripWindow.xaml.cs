@@ -48,6 +48,16 @@ public partial class ModeStripWindow : Window
     private System.Windows.Threading.DispatcherTimer? _tapTimer;
     private string _tapPending = "none";
 
+    /// <summary>
+    /// Block a mouse event promoted from a touch. A physical mouse has no
+    /// StylusDevice and passes through.
+    /// </summary>
+    private static void SwallowTouchMouse(object sender, MouseEventArgs e)
+    {
+        if (e.StylusDevice == null) return;
+        e.Handled = true;
+    }
+
     public ModeStripWindow(AppSettings settings)
     {
         _s = settings;
@@ -67,6 +77,12 @@ public partial class ModeStripWindow : Window
         Surface.MouseDown += OnMouseDown;
         Surface.MouseMove += OnMouseMove;
         Surface.MouseUp += OnMouseUp;
+        // Same as the pad: a touch here is promoted to a MOUSE event (and the
+        // system moves the cursor onto the contact for it). Block the promoted
+        // ones; a real mouse has StylusDevice == null and is untouched.
+        Surface.PreviewMouseDown += SwallowTouchMouse;
+        Surface.PreviewMouseMove += SwallowTouchMouse;
+        Surface.PreviewMouseUp += SwallowTouchMouse;
         Surface.LostTouchCapture += (_, e) =>
         {
             // A touch that never reports Up (capture stolen/killed) must not

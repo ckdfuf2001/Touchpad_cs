@@ -1255,6 +1255,17 @@ public partial class PadWindow : Window
         Surface.MouseDown += OnMouseDown;
         Surface.MouseMove += OnMouseMove;
         Surface.MouseUp += OnMouseUp;
+        // A touch on the pad is promoted by WPF to a stylus event and then to
+        // a MOUSE event, and the system moves the cursor onto the contact as
+        // part of that (logged: M-DOWN stylus=True mid-touch, and the cursor
+        // left at the touch, not at the pad's virtual position). Our handlers
+        // already ignore those, but ignoring is not blocking - the event still
+        // happens and the mouse still moves. Mark the promoted ones handled so
+        // a touch cannot produce a mouse event at all. A real mouse has no
+        // StylusDevice, so it is untouched.
+        Surface.PreviewMouseDown += SwallowTouchMouse;
+        Surface.PreviewMouseMove += SwallowTouchMouse;
+        Surface.PreviewMouseUp += SwallowTouchMouse;
         SizeChanged += (_, _) => Render();
         // NOTE: window drags apply DIRECTLY per move event (absolute target
         // = pointer - grab offset). This was briefly a 30Hz/60Hz timer queue
@@ -2523,6 +2534,18 @@ public partial class PadWindow : Window
     // pad tiles still work for a user who drives them with a mouse.
     // Synthetic output right after our own park/click is suppressed via
     // _suppressPhysicalUntil, never mistaken for physical.
+    /// <summary>
+    /// Block a mouse event that came from a touch (WPF promotes touch to
+    /// stylus, then to mouse). A physical mouse has StylusDevice == null and
+    /// goes through untouched; a promoted touch is marked handled so nothing -
+    /// ours or WPF's - acts on it.
+    /// </summary>
+    private static void SwallowTouchMouse(object sender, MouseEventArgs e)
+    {
+        if (e.StylusDevice == null) return;
+        e.Handled = true;
+    }
+
     private void OnMouseDown(object sender, WMouseButtonEventArgs e)
     {
         DebugLog.Write($"M-DOWN stylus={e.StylusDevice != null} fingers={_fingers.Count} suppressed={DateTime.Now < _suppressPhysicalUntil}");
