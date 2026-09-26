@@ -303,6 +303,37 @@ public partial class PadWindow : Window
         _s.Save();
     }
 
+    /// <summary>
+    /// A two-finger scroll ends with one finger usually still resting on the
+    /// pad. That finger has travelled the whole scroll distance, and the
+    /// scroll branch in OnTouchMove returns BEFORE the cursor is updated - so
+    /// the travel was never applied to the virtual cursor but stayed in
+    /// p - f.Start. The first move after the release then handed the entire
+    /// scroll distance to the cursor at once, times the gain: the cursor
+    /// jumped as soon as the scroll ended ("it does not move while scrolling,
+    /// then it moves").
+    ///
+    /// Re-anchor the survivors to where the cursor actually is. PeakRate goes
+    /// too: the scroll latched it (both fingers' rates are measured before the
+    /// two-finger branch), which left the survivor permanently "a drag" - no
+    /// long-press, and MoveOwnsSession refusing every further contact.
+    ///
+    /// Finger.Moved is deliberately NOT cleared. The finger really did travel,
+    /// and letting a leftover finger click on lift would fire a click at the
+    /// end of every scroll.
+    /// </summary>
+    private void RebaseAfterTwoFinger()
+    {
+        foreach (var f in _fingers.Values)
+        {
+            f.Start = f.Last;
+            f.Fx0 = _fakeX; f.Fy0 = _fakeY;
+            f.PeakRate = 0;
+            f.Trail.Clear();
+        }
+        _twoAccX = _twoAccY = 0;
+    }
+
     /// <summary>Call on nasty exits so the cursor is never left hidden.</summary>
     public void EmergencyRestore()
     {
@@ -2034,7 +2065,15 @@ public partial class PadWindow : Window
                 DoGesture(act);
             }
         }
-        if (_fingers.Count < 2) _twoActive = false;
+        if (_fingers.Count < 2)
+        {
+            // Only a two-finger gesture leaves travel owed to the survivors.
+            // Doing this on every lift would clear the drag state of an
+            // unrelated single-finger press that a stray second finger
+            // happened to brush.
+            if (_twoActive) RebaseAfterTwoFinger();
+            _twoActive = false;
+        }
         if (e.TouchDevice.Id == _twoId) { _twoId = -1; _twoCandidate = false; }
 
         // Deferred menu click (see OnLongTick): fire it NOW, while the

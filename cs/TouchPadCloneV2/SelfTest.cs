@@ -636,6 +636,50 @@ public static class SelfTest
             Check(c.Any(e => e.Kind == "wheel" && e.Btn.StartsWith("v")),
                 "two-finger vertical = scroll", $"ev={c.Count}");
         }
+        // ---- 9b. after a two-finger scroll, the finger that stays on the pad
+        // has travelled the whole scroll. That travel was never applied to the
+        // cursor (the scroll branch returns before the cursor update), so it
+        // sat in p - f.Start and the first move after the lift handed the
+        // ENTIRE scroll distance to the cursor at once, times the gain - the
+        // cursor jumped the moment the scroll ended. Re-anchored on release,
+        // a small move must stay small.
+        {
+            int n = Mark();
+            await Settle();
+            double aimX = FakeX(), aimY = FakeY();
+            var a = new FakeTouch(id++);
+            var b = new FakeTouch(id++);
+            Down(a, px - 40, py);
+            await Task.Delay(40);
+            Down(b, px + 40, py);
+            await Task.Delay(40);
+            for (int i = 1; i <= 4; i++)   // a vertical scroll, 120 DIP total
+            {
+                Move(a, px - 40, py - 30 * i);
+                Move(b, px + 40, py - 30 * i);
+                await Task.Delay(30);
+            }
+            double scrollX = FakeX(), scrollY = FakeY();
+            Up(a);                          // one finger stays down
+            await Task.Delay(60);
+            Move(b, px + 40, py - 130);     // a 10 DIP move from where b sits
+            await Task.Delay(120);
+            double moveX = FakeX(), moveY = FakeY();
+            Up(b);
+            await Task.Delay(400);
+            await Drain();
+            var c = Since(n);
+            double during = Math.Abs(scrollX - aimX) + Math.Abs(scrollY - aimY);
+            double after = Math.Abs(moveX - aimX) + Math.Abs(moveY - aimY);
+            Check(c.Any(e => e.Kind == "wheel"), "scroll during it still scrolls",
+                $"ev={c.Count}");
+            Check(during <= 2, "the cursor does NOT move while scrolling",
+                $"moved={during:0}px");
+            // 10 DIP x gain. The old bug applied the 120 DIP of scroll travel
+            // instead, i.e. 12x this.
+            Check(after < 60, "a small move after the scroll stays small",
+                $"after={after:0}px (bug would be ~{120 * 1.6:0})");
+        }
         // ---- 10. a MOVING press owns the session until it lifts: a second
         // contact arriving mid-drag must be refused outright. Otherwise one
         // drag also produced a two-finger scroll, or a button/key tile fired
