@@ -40,6 +40,7 @@ public partial class SettingsWindow : Window
         Speed.Value = s.Speed;
         OpacityS.Value = s.Opacity;
         LongMs.Value = s.LongPressMs;
+        MultiMs.Value = s.MultiTapMs;
         LayoutBox.ItemsSource = layouts;
         LayoutBox.SelectedItem = layouts.Contains(s.Layout) ? s.Layout : layouts.FirstOrDefault();
         CursorBox.ItemsSource = CursorStyles;
@@ -56,6 +57,7 @@ public partial class SettingsWindow : Window
         Speed.ValueChanged += (_, _) => Live();
         OpacityS.ValueChanged += (_, _) => Live();
         LongMs.ValueChanged += (_, _) => Live();
+        MultiMs.ValueChanged += (_, _) => Live();
 
         BuildGestureGrid(FloatGrid, s.Gestures, "float");
         BuildGestureGrid(ArtistGrid, s.ArtistGestures, "artist");
@@ -139,6 +141,7 @@ public partial class SettingsWindow : Window
         _s.Speed = Speed.Value;
         _s.Opacity = OpacityS.Value;
         _s.LongPressMs = (int)LongMs.Value;
+        _s.MultiTapMs = (int)MultiMs.Value;
         _onApply();
     }
 
@@ -147,6 +150,7 @@ public partial class SettingsWindow : Window
         _s.Speed = Speed.Value;
         _s.Opacity = OpacityS.Value;
         _s.LongPressMs = (int)LongMs.Value;
+        _s.MultiTapMs = (int)MultiMs.Value;
         if (LayoutBox.SelectedItem is string l) _s.Layout = l;
         if (CursorBox.SelectedItem is string c) _s.CursorStyle = c;
         _s.TapToClick = TapClick.IsChecked == true;

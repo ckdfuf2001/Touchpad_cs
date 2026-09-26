@@ -17,6 +17,8 @@
                 <CheckBox x:Name="SwapBtn" Content="좌/우 버튼 반전" Margin="0,4,0,0"/>
                 <TextBlock Text="길게 누르기 판정 (ms)" Margin="0,8,0,0"/>
                 <Slider x:Name="LongMs" Minimum="200" Maximum="1000" TickFrequency="50"/>
+                <TextBlock Text="더블/트리플 탭 판정 (ms)" Margin="0,8,0,0"/>
+                <Slider x:Name="MultiMs" Minimum="200" Maximum="1000" TickFrequency="50"/>
                 <Separator Margin="0,12,0,12"/>
                 <TextBlock Text="패드 모양" FontWeight="Bold" Foreground="#35C4FF"/>
                 <TextBlock Text="패드 투명도" Margin="0,6,0,0"/>

@@ -146,6 +146,20 @@ public static class SelfTest
     private static List<Click> Since(int n) =>
         _clicks.GetRange(n, _clicks.Count - n);
 
+    /// <summary>
+    /// Hook delivery can lag the UI thread; wait for quiescence before
+    /// counting, or events land in the next case's window.
+    /// </summary>
+    private static async Task Drain()
+    {
+        for (int i = 0; i < 12; i++)
+        {
+            int n = _clicks.Count;
+            await Task.Delay(250);
+            if (_clicks.Count == n) return;
+        }
+    }
+
     private static bool Stuck()
     {
         for (int i = 0; i < 5; i++)
@@ -229,6 +243,7 @@ public static class SelfTest
             var d = new FakeTouch(id++);
             Down(d, px, py); await Task.Delay(80); Up(d);
             await Task.Delay(300);
+            await Drain();
             var c = Since(n);
             Check(c.Count == 2 && c[0].Down && !c[1].Down && c[0].Btn == "L",
                 "tap = one left click", $"ev={c.Count}");
@@ -240,6 +255,7 @@ public static class SelfTest
             var d = new FakeTouch(id++);
             Down(d, px, py); await Task.Delay(700); Up(d);
             await Task.Delay(300);
+            await Drain();
             var c = Since(n);
             Check(c.Count == 2 && c[0].Btn == "R" && c[0].Down && !c[1].Down,
                 "long-press = one right click", $"ev={c.Count}");
@@ -254,6 +270,7 @@ public static class SelfTest
             var b = new FakeTouch(id++);
             Down(b, px, py); await Task.Delay(80); Up(b);
             await Task.Delay(400);
+            await Drain();
             var c = Since(n);
             int downs = 0;
             foreach (var e in c) if (e.Down && e.Btn == "L") downs++;
@@ -276,6 +293,7 @@ public static class SelfTest
             await Task.Delay(100);
             Up(b);
             await Task.Delay(400);
+            await Drain();
             var c = Since(n);
             int downs = 0;
             foreach (var e in c) if (e.Down && e.Btn == "L") downs++;
@@ -293,6 +311,7 @@ public static class SelfTest
                 await Task.Delay(150);
             }
             await Task.Delay(400);
+            await Drain();
             var c = Since(n);
             int downs = 0;
             foreach (var e in c) if (e.Down && e.Btn == "L") downs++;
@@ -300,6 +319,24 @@ public static class SelfTest
             Check(downs == 7, "triple tap = 7 downs incl. triple event",
                 $"downs={downs}");
             Check(!Stuck(), "triple: no stuck button");
+        }
+        // ---- 6. tap, then 2nd press HELD 1100ms: long-press must still fire
+        // (used to be hijacked as a silent drag-hold).
+        {
+            int n = _clicks.Count;
+            var a = new FakeTouch(id++);
+            Down(a, px, py); await Task.Delay(60); Up(a);
+            await Task.Delay(150);
+            var b = new FakeTouch(id++);
+            Down(b, px, py); await Task.Delay(1100); Up(b);
+            await Task.Delay(400);
+            await Drain();
+            var c = Since(n);
+            int rdowns = 0;
+            foreach (var e in c) if (e.Down && e.Btn == "R") rdowns++;
+            Check(rdowns == 1, "tap-then-hold = long-press right click",
+                $"rdowns={rdowns}");
+            Check(!Stuck(), "taphold: no stuck button");
         }
 
         UnhookWindowsHookEx(_hook);

@@ -220,6 +220,7 @@ public partial class PadWindow : Window
         public Tile? Tile;
         public string? HoldButton;
         public (int vk, int[] mods)? HoldCombo;
+        public double Fx0, Fy0; // fake cursor at press-down (tap rewind anchor)
     }
 
     // ---- Per-event gesture state machine (original §Side/Float model) ----
@@ -248,14 +249,14 @@ public partial class PadWindow : Window
     private void CancelLong() { _longTimer?.Stop(); _longTimer = null; _longId = -1; }
     private void CancelHold() { _holdTimer?.Stop(); _holdTimer = null; }
 
-    private void ArmLong(int id)
+    private void ArmLong(int id, int extraMs = 0)
     {
         CancelLong();
         _longId = id;
         _longFired = false;
         _longTimer = new System.Windows.Threading.DispatcherTimer
         {
-            Interval = TimeSpan.FromMilliseconds(Math.Max(200, _s.LongPressMs)),
+            Interval = TimeSpan.FromMilliseconds(Math.Max(200, _s.LongPressMs + extraMs)),
         };
         _longTimer.Tick += (_, _) =>
         {
@@ -265,6 +266,9 @@ public partial class PadWindow : Window
             _longFired = true;
             Status("long-press");
             DebugLog.Write("GESTURE long-press");
+            // A chained press may already hold the button (immediate drag):
+            // release it first so the long action starts clean.
+            if (_dragHold && id == _dragId) ReleaseActionButton();
             FirePressAction(G.LongPress, id);
         };
         _longTimer.Start();
@@ -281,6 +285,7 @@ public partial class PadWindow : Window
         {
             CancelHold();
             if (!_fingers.TryGetValue(id, out var f)) return;
+            if (id == _longId) CancelLong(); // don't also fire long-press
             _secondConsumed = true;
             Status("second-hold");
             DebugLog.Write("GESTURE second-hold");
@@ -770,7 +775,11 @@ public partial class PadWindow : Window
         var (tw, th) = TileArea();
         var tile = _layout == null ? null :
             PresetParser.HitTest(_layout, p.X, p.Y, tw, th);
-        var f = new Finger { Start = p, Last = p, T0 = DateTime.Now, Tile = tile };
+        var f = new Finger
+        {
+            Start = p, Last = p, T0 = DateTime.Now, Tile = tile,
+            Fx0 = _fakeX, Fy0 = _fakeY,
+        };
         _fingers[e.TouchDevice.Id] = f;
         Status($"touch {e.TouchDevice.Id} {tile?.RawKind ?? "-"} n={_fingers.Count}");
         var (ccx, ccy) = InputSim.Cursor();
@@ -809,6 +818,10 @@ public partial class PadWindow : Window
                         _dragId = e.TouchDevice.Id;
                         _actionHeld = "left";
                         _secondConsumed = true;
+                        // A chained hold can still mean long-press: arm with
+                        // grace (quick pauses before a drag must not fire it;
+                        // moves cancel it anyway). Fixes tap-then-hold hijack.
+                        ArmLong(e.TouchDevice.Id, 400);
                         DebugLog.Write("GESTURE second-hold (immediate drag)");
                     }
                     else ArmHold(e.TouchDevice.Id);
@@ -827,6 +840,7 @@ public partial class PadWindow : Window
                         _dragHold = true;
                         _dragId = e.TouchDevice.Id;
                         _actionHeld = "left";
+                        ArmLong(e.TouchDevice.Id, 400);
                         DebugLog.Write("GESTURE third-hold (immediate drag)");
                     }
                 }
@@ -994,7 +1008,11 @@ public partial class PadWindow : Window
             e.Handled = true;
             return;
         }
-        if (!_fingers.TryGetValue(e.TouchDevice.Id, out var f)) return;
+        if (!_fingers.TryGetValue(e.TouchDevice.Id, out var f))
+        {
+            DebugLog.Write($"UP-IN id={e.TouchDevice.Id} UNKNOWN keys=[{string.Join(",", _fingers.Keys)}]");
+            return;
+        }
         _fingers.Remove(e.TouchDevice.Id);
         if (e.TouchDevice.Id == _longId) CancelLong();
         double ms = (DateTime.Now - f.T0).TotalMilliseconds;
@@ -1004,6 +1022,17 @@ public partial class PadWindow : Window
         if (Math.Abs(end.X - f.Start.X) + Math.Abs(end.Y - f.Start.Y) > TapMoveDip)
             f.Moved = true;
         bool tap = !f.Moved && ms < TapMs;
+        if (tap && f.Tile?.Action == TileAction.Pad)
+        {
+            // Tap rewind: contact centroid jitters several px during even a
+            // still press, but the OS pairs double-clicks only inside a 4x4px
+            // box (measured). Rewind the fake to its press-start value so all
+            // taps of a multi-tap land on the SAME pixel and pair reliably.
+            _fakeX = f.Fx0;
+            _fakeY = f.Fy0;
+            _overlay?.MoveToPhysical(_fakeX, _fakeY);
+            DebugLog.Write($"REWIND fake=({_fakeX:0},{_fakeY:0})");
+        }
         // A held drag ends here UNLESS this release is itself a quick tap
         // (2nd-press tap completes an OS double-click in the branch below -
         // releasing early would eat the extra click).
@@ -1069,11 +1098,11 @@ public partial class PadWindow : Window
                             // on top (that would triple-click).
                             ReleaseActionButton();
                             if (_s.TapToClick) SafeClick("left");
-                            // Multi-tap windows are generous (450ms): slow
-                            // tappers otherwise fall out of the double/triple
-                            // chain and every tap degrades to a single click
+                            // Multi-tap windows are generous: slow tappers
+                            // otherwise fall out of the double/triple chain
+                            // and every tap degrades to a single click
                             // (measured user report: "needs three touches").
-                            _pendingTripleUntil = DateTime.Now.AddMilliseconds(450);
+                            _pendingTripleUntil = DateTime.Now.AddMilliseconds(_s.MultiTapMs);
                             _pendingTapUntil = DateTime.MinValue;
                         }
                         else if (!_secondConsumed)
@@ -1089,7 +1118,7 @@ public partial class PadWindow : Window
                     else if (_s.TapToClick)
                     {
                         DoGesture(G.Tap);
-                        _pendingTapUntil = DateTime.Now.AddMilliseconds(450);
+                        _pendingTapUntil = DateTime.Now.AddMilliseconds(_s.MultiTapMs);
                     }
                     break;
                 }

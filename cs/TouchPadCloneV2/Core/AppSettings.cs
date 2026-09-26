@@ -55,6 +55,8 @@ public sealed class AppSettings
     public bool FakeCursor { get; set; } = true;
     public string CursorStyle { get; set; } = "cyan";
     public int LongPressMs { get; set; } = 500;
+    /// <summary>Multi-tap chain window (tap-tap, tap-tap-tap).</summary>
+    public int MultiTapMs { get; set; } = 600;
     /// <summary>Gesture profile per layout family (settings tabs).</summary>
     public GestureMap Gestures { get; set; } = new();
     public GestureMap ArtistGestures { get; set; } = new();
