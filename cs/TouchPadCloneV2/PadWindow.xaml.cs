@@ -2087,8 +2087,19 @@ public partial class PadWindow : Window
             // made a slow, deliberate press silently do nothing.
             bool tap = !moved;
             var tile = HitMouse(_mouseStart);
-            if (tap && tile?.Action == TileAction.Pad && _s.TapToClick)
-                SafeClick("left");
+            if (tile?.Action == TileAction.Pad)
+            {
+                // The pad area is a TOUCH surface. Pressed with the physical
+                // mouse it must stay inert: the mouse is a complete input
+                // device in its own right and its click already went to the
+                // OS, so adding a synthetic one fired a second, unrelated
+                // click at the virtual cursor - the pad and the mouse both
+                // acting on one press. Button/key/sys tiles are unaffected:
+                // those exist to be operated.
+                DebugLog.Write(
+                    $"MOUSE pad press: no synthetic click (mouse=({p.X:0},{p.Y:0})"
+                    + (tap ? ", tap" : ", moved") + ")");
+            }
             else if (tile?.Action == TileAction.Sys && tile != null)
                 SysAction(tile.Kind);
         }
