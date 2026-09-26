@@ -88,6 +88,14 @@ public static class InputSim
         SendInput(1, new[] { inp }, Marshal.SizeOf<INPUT>());
     }
 
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int nIndex);
+    private const int SM_XVIRTUALSCREEN = 76;
+    private const int SM_YVIRTUALSCREEN = 77;
+    private const int SM_CXVIRTUALSCREEN = 78;
+    private const int SM_CYVIRTUALSCREEN = 79;
+    private const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
+
     public static (int X, int Y) Cursor()
     {
         GetCursorPos(out var p);
@@ -96,6 +104,63 @@ public static class InputSim
 
     public static void SetCursor(int x, int y) =>
         SetCursorPos(x, y);
+
+    /// <summary>
+    /// Atomic click at an EXACT position: absolute-move + down + absolute-move
+    /// + up in ONE SendInput batch. Measured root cause it fixes: between a
+    /// parked Down and its Up (~13ms apart with logging), Windows yanks the
+    /// system cursor back onto the live touch contact - observed 900px jumps
+    /// (down@fake, up@finger). Scattered pairs never satisfy the OS 4x4px
+    /// double-click box (singles pile up -> Explorer rename; doubles fire
+    /// twice). Inside one batch nothing interleaves; the pair always lands
+    /// on the same pixel.
+    /// </summary>
+    public static void ClickAt(int x, int y, string button)
+    {
+        int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        int nx = (int)((x - vx) * 65535.0 / Math.Max(1, vw - 1));
+        int ny = (int)((y - vy) * 65535.0 / Math.Max(1, vh - 1));
+        uint downFlags = button switch
+        {
+            "right" => MOUSEEVENTF_RIGHTDOWN,
+            "middle" => MOUSEEVENTF_MIDDLEDOWN,
+            _ => MOUSEEVENTF_LEFTDOWN,
+        };
+        uint upFlags = button switch
+        {
+            "right" => MOUSEEVENTF_RIGHTUP,
+            "middle" => MOUSEEVENTF_MIDDLEUP,
+            _ => MOUSEEVENTF_LEFTUP,
+        };
+        INPUT move = new()
+        {
+            type = INPUT_MOUSE,
+            u = new INPUTUNION { mi = new MOUSEINPUT
+            {
+                dx = nx, dy = ny, mouseData = 0,
+                dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
+                time = 0, dwExtraInfo = IntPtr.Zero
+            } }
+        };
+        INPUT dn = move;
+        dn.u.mi.dwFlags = downFlags;
+        dn.u.mi.dx = dn.u.mi.dy = 0;
+        INPUT upEv = move;
+        upEv.u.mi.dwFlags = upFlags;
+        upEv.u.mi.dx = upEv.u.mi.dy = 0;
+        var batch = new[] { move, dn, move, upEv };
+        SendInput((uint)batch.Length, batch, Marshal.SizeOf<INPUT>());
+        DebugLog.Write($"BTN click {button} @({x},{y})");
+    }
+
+    public static void Click(string button)
+    {
+        var (x, y) = Cursor();
+        ClickAt(x, y, button);
+    }
 
     [DllImport("user32.dll")]
     private static extern bool SetCursorPos(int x, int y);
@@ -135,17 +200,8 @@ public static class InputSim
         if (dx != 0 || dy != 0) Mouse(MOUSEEVENTF_MOVE, dx, dy);
     }
 
-    public static void Click(string button)
-    {
-        var (x, y) = Cursor();
-        DebugLog.Write($"BTN click {button} @({x},{y})");
-        Down(button); Up(button);
-    }
-
     public static void Down(string button)
     {
-        var (x, y) = Cursor();
-        DebugLog.Write($"BTN down {button} @({x},{y})");
         Mouse(button switch
         {
             "right" => MOUSEEVENTF_RIGHTDOWN,
@@ -156,8 +212,6 @@ public static class InputSim
 
     public static void Up(string button)
     {
-        var (x, y) = Cursor();
-        DebugLog.Write($"BTN up {button} @({x},{y})");
         Mouse(button switch
         {
             "right" => MOUSEEVENTF_RIGHTUP,

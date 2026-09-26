@@ -216,11 +216,45 @@ public partial class PadWindow : Window
     {
         public WPoint Start, Last;
         public DateTime T0;
+        public DateTime Active; // last down/move (ghost sweep)
         public bool Moved;
         public Tile? Tile;
         public string? HoldButton;
         public (int vk, int[] mods)? HoldCombo;
         public double Fx0, Fy0; // fake cursor at press-down (tap rewind anchor)
+    }
+
+    /// <summary>
+    /// Reap ghost fingers: contacts whose TouchUp never arrived (capture
+    /// stolen, driver hiccup, palm-cancel). Without this _fingers only grows,
+    /// Count stays >= 2 forever, and single-tap chains (double/triple) never
+    /// arm again while plain taps keep working - the exact reported rot.
+    /// A legit hold always moves or ends within seconds; 10s idle = ghost.
+    /// </summary>
+    private void SweepGhosts()
+    {
+        var now = DateTime.Now;
+        var dead = new List<int>();
+        foreach (var kv in _fingers)
+            if ((now - kv.Value.Active).TotalSeconds > 10)
+                dead.Add(kv.Key);
+        foreach (int id in dead)
+        {
+            if (!_fingers.TryGetValue(id, out var f)) continue;
+            _fingers.Remove(id);
+            if (f.HoldButton != null) InputSim.Up(f.HoldButton);
+            if (f.HoldCombo is { } c)
+            {
+                InputSim.HoldKey(c.vk, false);
+                foreach (int m in c.mods) InputSim.HoldKey(m, false);
+            }
+            if (id == _longId) CancelLong();
+            if (id == _dragId && _dragHold) ReleaseActionButton();
+            if (id == _secondId) { _secondPress = false; CancelHold(); }
+            if (id == _thirdId) _thirdPress = false;
+            if (id == _twoId) { _twoId = -1; _twoCandidate = false; }
+            DebugLog.Write($"SWEEP ghost id={id} (had {_fingers.Count + 1} tracked)");
+        }
     }
 
     // ---- Per-event gesture state machine (original §Side/Float model) ----
@@ -337,6 +371,9 @@ public partial class PadWindow : Window
         Surface.TouchDown += OnTouchDown;
         Surface.TouchMove += OnTouchMove;
         Surface.TouchUp += OnTouchUp;
+        // A contact that vanishes without TouchUp (capture stolen, driver
+        // cancel) must still release: treat capture loss as a release.
+        Surface.LostTouchCapture += OnTouchCaptureLost;
         Surface.MouseDown += OnMouseDown;
         Surface.MouseMove += OnMouseMove;
         Surface.MouseUp += OnMouseUp;
@@ -716,12 +753,19 @@ public partial class PadWindow : Window
 
     private void SafeClick(string button)
     {
-        ParkAtFake();
+        // Click target is the fake cursor in a session, else the cursor.
+        // Delivered as ONE atomic absolute batch (see ClickAt): between a
+        // parked Down and its Up the system yanks the cursor back onto the
+        // live touch contact (measured 900px jumps), scattering the pair
+        // outside the OS 4x4px double-click box (singles pile up, doubles
+        // fire twice, folders rename).
+        double px, py;
+        if (_session) { px = _fakeX; py = _fakeY; }
+        else { var c = InputSim.Cursor(); px = c.X; py = c.Y; }
         // A synthetic click landing on our own window would re-enter as a
         // new tap and self-sustain (~1ms press/release flood, measured).
         try
         {
-            var (px, py) = _session ? (_fakeX, _fakeY) : ToPair(InputSim.Cursor());
             var src = PresentationSource.FromVisual(this);
             double sx = src?.CompositionTarget?.TransformToDevice.M11 ?? 1;
             double sy = src?.CompositionTarget?.TransformToDevice.M22 ?? 1;
@@ -736,10 +780,9 @@ public partial class PadWindow : Window
         catch { }
         string b = (button == "left" && _s.SwapButtons) ? "right"
             : (button == "right" && _s.SwapButtons) ? "left" : button;
-        InputSim.Click(b);
+        InputSim.ClickAt((int)px, (int)py, b);
+        _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
     }
-
-    private static (double, double) ToPair((int X, int Y) p) => (p.X, p.Y);
 
     /// <summary>
     /// Park the system cursor exactly under the fake cursor before ANY
@@ -758,6 +801,7 @@ public partial class PadWindow : Window
     private void OnTouchDown(object sender, TouchEventArgs e)
     {
         if (IsChrome(e.OriginalSource)) return;
+        SweepGhosts();
         PressedAnywhere?.Invoke();
         var p = e.GetTouchPoint(Surface).Position;
         // Corner resizers beat tiles (zone test in window coords, drag in
@@ -777,7 +821,8 @@ public partial class PadWindow : Window
             PresetParser.HitTest(_layout, p.X, p.Y, tw, th);
         var f = new Finger
         {
-            Start = p, Last = p, T0 = DateTime.Now, Tile = tile,
+            Start = p, Last = p, T0 = DateTime.Now, Active = DateTime.Now,
+            Tile = tile,
             Fx0 = _fakeX, Fy0 = _fakeY,
         };
         _fingers[e.TouchDevice.Id] = f;
@@ -895,6 +940,29 @@ public partial class PadWindow : Window
         e.Handled = true; // block promotion to mouse events
     }
 
+    private void OnTouchCaptureLost(object sender, TouchEventArgs e)
+    {
+        // Same cleanup as a release, minus tap/swipe/click semantics:
+        // the finger is gone, but no gesture completes from it.
+        if (!_fingers.TryGetValue(e.TouchDevice.Id, out var f)) return;
+        _fingers.Remove(e.TouchDevice.Id);
+        if (e.TouchDevice.Id == _longId) CancelLong();
+        CancelHold();
+        if (_dragHold && e.TouchDevice.Id == _dragId) ReleaseActionButton();
+        if (f.HoldButton != null) InputSim.Up(f.HoldButton);
+        if (f.HoldCombo is { } c)
+        {
+            InputSim.HoldKey(c.vk, false);
+            foreach (int m in c.mods) InputSim.HoldKey(m, false);
+        }
+        _secondPress = false;
+        _thirdPress = false;
+        if (e.TouchDevice.Id == _twoId) { _twoId = -1; _twoCandidate = false; }
+        if (_fingers.Count == 0) EndSession();
+        DebugLog.Write($"CAPTURE-LOST id={e.TouchDevice.Id} cleaned");
+        e.Handled = true;
+    }
+
     private void OnTouchMove(object sender, TouchEventArgs e)
     {
         if (IsChrome(e.OriginalSource)) return;
@@ -909,6 +977,7 @@ public partial class PadWindow : Window
         var p = e.GetTouchPoint(Surface).Position;
         double dx = p.X - f.Last.X, dy = p.Y - f.Last.Y;
         f.Last = p;
+        f.Active = DateTime.Now;
         bool was = f.Moved;
         if (Math.Abs(p.X - f.Start.X) + Math.Abs(p.Y - f.Start.Y) > TapMoveDip)
             f.Moved = true;
