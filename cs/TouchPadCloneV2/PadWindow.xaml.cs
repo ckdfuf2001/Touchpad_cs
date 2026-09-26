@@ -815,12 +815,6 @@ public partial class PadWindow : Window
         PressDown("left");
         _pressNote = "drag (grabbed)";
         Status(_pressNote);
-        // Take the arrow down for the rest of the drag: it sits on the
-        // cursor's hotspot by design, and a layered window's mouse pass-through
-        // covers its transparent area, not the opaque glyph. A click survives
-        // it (one atomic batch), a drag does not - the arrow is re-placed on
-        // every move, so the moves land on the arrow instead of the target.
-        _overlay?.Suspend();
         // Who actually receives this press? If it is the overlay, or an
         // unfocused window (whose activation click eats the drag), the log
         // says so here instead of the symptom being "the drag event fired
@@ -900,9 +894,6 @@ public partial class PadWindow : Window
         DebugLog.Write($"DRAG end @({_fakeX:0},{_fakeY:0}) net={netDip:0}px"
             + $" path={_dragPathDip:0}DIP under {DescribeWindowAt(_fakeX, _fakeY)}");
         _dragFromX = _dragFromY = -1e9;
-        // The drag is over: the arrow may come back and the real cursor goes
-        // back to the physical mouse.
-        _overlay?.Resume();
         _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
         // The drag is over: give the real cursor back to the physical mouse
         // so a virtual drag never leaves it parked under the fake one.
