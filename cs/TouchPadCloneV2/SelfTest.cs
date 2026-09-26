@@ -222,7 +222,7 @@ public static class SelfTest
             FakeCursor = true,
             ShowFakeArrow = true,
             LongPressMs = 500,
-            MultiTapMs = 600,
+            MultiTapMs = 900,   // the shipped default - see AppSettings
             HoldCancelDip = 10,
         };
         _pad = new PadWindow(settings);
@@ -389,6 +389,28 @@ public static class SelfTest
                 "a grab-armed press holds 700ms without firing a long-press",
                 $"r={Dns(ev, "right")} l={Dns(ev, "left")}");
         }
+        // ---- 3b. the same at HUMAN speed. Measured on the device: a natural
+        // double tap goes down 700-900ms after the first one lifts, and the
+        // window was 600ms, so almost every double tap came out as two
+        // separate single clicks - one session's log had not a single
+        // double_click in it. The window is 900ms now and this is the case
+        // that says so.
+        {
+            int n = Mark();
+            await Settle();
+            var a = new FakeTouch(id++);
+            Down(a, px, py); await Task.Delay(70); Up(a);
+            await Task.Delay(700);
+            var b = new FakeTouch(id++);
+            Down(b, px, py); await Task.Delay(70); Up(b);
+            await Task.Delay(400);
+            await Drain();
+            var c = Since(n);
+            int downs = Dns(c, "left");
+            Check(downs == 3,
+                "a double tap 700ms apart (human speed) = click + double",
+                $"downs={downs} (want 3)");
+        }
         // ---- 4. click, then press + MOVE = drag. The press must land on the
         // AIM POINT (fake cursor), never on the touch point: a bare Down()
         // after a cursor park lost the race with the OS yank and pressed our
@@ -541,7 +563,7 @@ public static class SelfTest
         foreach (var (label, gap) in new[]
         {
             ("inside the chain window", 120),
-            ("after the chain window", 900),
+            ("after the chain window", 1400),
         })
         {
             int n = Mark();

@@ -93,8 +93,17 @@ public sealed class AppSettings
     ///   (one cursor identity, hover follows the virtual cursor).
     /// </summary>
     public string PhysicalMouseMode { get; set; } = "preserve";
-    /// <summary>Multi-tap chain window (tap-tap, tap-tap-tap).</summary>
-    public int MultiTapMs { get; set; } = 600;
+    /// <summary>
+    /// Multi-tap chain window (tap-tap, tap-tap-tap).
+    ///
+    /// 900 rather than the 600 it was: measured on the device, a natural
+    /// double tap lands 700-900ms apart (UP of the first to DOWN of the
+    /// second), so 600 missed almost every one and a double tap came out as
+    /// two separate single clicks - "double touch produces no events at all",
+    /// with not one double_click in a whole session's log. A touch pad should
+    /// be more forgiving than a mouse button, which is what this window is.
+    /// </summary>
+    public int MultiTapMs { get; set; } = 900;
     /// <summary>Gesture profile per layout family (settings tabs).</summary>
     public GestureMap Gestures { get; set; } = new();
     public GestureMap ArtistGestures { get; set; } = new();
