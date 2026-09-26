@@ -1022,7 +1022,18 @@ public partial class PadWindow : Window
         _holdId = id;
         _holdTimer = new System.Windows.Threading.DispatcherTimer
         {
-            Interval = TimeSpan.FromMilliseconds(250),
+            // The same deadline as the long press, not a shorter one of its
+            // own. At 250ms a slightly slow TAP was hijacked into a chained
+            // hold - measured: TOUCHDOWN, then "GESTURE second-hold" 251ms
+            // later, so a tap of 251ms fired a click-and-hold and never
+            // completed as a tap. That is the "click release is judged
+            // wrongly" report, and it also broke the double tap, because a
+            // second tap slower than the hold deadline resolved as a hold
+            // instead of as the second tap of the chain. A movement still
+            // grabs immediately, so this timer only decides how long a
+            // STATIONARY chained press has to be held to become SecondHold.
+            Interval = TimeSpan.FromMilliseconds(
+                Math.Max(300, _s.LongPressMs)),
         };
         _holdTimer.Tick += (_, _) =>
         {
