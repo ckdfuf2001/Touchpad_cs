@@ -25,6 +25,11 @@ public partial class PadWindow : Window
 {
     private const double TapMs = 220;
     private const double TapMoveDip = 12;
+    /// <summary>
+    /// Deadzone: sub-threshold tremor never moves the fake cursor.
+    /// (User request + fixes aim drift that broke long-press menus.)
+    /// </summary>
+    private const double DeadDip = 6;
     private const double SwipeDip = 60;
     private const int MaxStepPx = 256;
     private const int VkTabTip = 0x09;
@@ -49,6 +54,11 @@ public partial class PadWindow : Window
     private FakeCursorOverlay? _overlay;
     private bool _session;
     private double _fakeX, _fakeY;
+    private double _drawnX = -1e9, _drawnY = -1e9; // force first draw
+    private double _chaseX = -1e9, _chaseY = -1e9;
+    private long _lastChaseTick, _lastDrawTick;
+    private int _moveLogN;
+    private DateTime _lastStatus = DateTime.MinValue;
     private bool _fakeInit;
     private DateTime _suppressPhysicalUntil = DateTime.MinValue;
     // ShowCursor is a global counter: HideCursor must be called exactly
@@ -109,7 +119,8 @@ public partial class PadWindow : Window
         var (cx, cy) = PrimaryCenter();
         _fakeX = cx; _fakeY = cy;
         ClampFake();
-        ShowFake();
+        if (ArrowOn) ShowFake();
+        else try { _overlay?.Hide(); } catch { }
         if (!_session)
         {
             InputSim.SetCursor((int)_fakeX, (int)_fakeY);
@@ -146,12 +157,16 @@ public partial class PadWindow : Window
     {
         if (!_session) return;
         _session = false;
-        // Park the system cursor exactly under the fake one and STAY hidden:
-        // trackpad mode shows a single cursor identity (the fake one).
+        // Park the system cursor exactly under the fake one.
         InputSim.SetCursor((int)_fakeX, (int)_fakeY);
-        EnsureHidden();
+        if (ArrowOn)
+        {
+            // Single cursor identity: keep it hidden, arrow stays.
+            EnsureHidden();
+            ShowFake();
+        }
+        else EnsureVisible();
         _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
-        ShowFake();
         DebugLog.Write($"SESSION end fake=({_fakeX:0},{_fakeY:0})");
         // ... (lift-yank re-park timer below)
         double parkX = _fakeX, parkY = _fakeY;
@@ -193,9 +208,10 @@ public partial class PadWindow : Window
     {
         var (cx, cy) = InputSim.Cursor();
         _fakeX = cx; _fakeY = cy;
+        _chaseX = cx; _chaseY = cy;
         _fakeInit = true;
         ClampFake();
-        if (_overlay != null && _overlay.IsVisible)
+        if (ArrowOn && _overlay != null && _overlay.IsVisible)
             _overlay.MoveToPhysical(_fakeX, _fakeY);
     }
 
@@ -222,6 +238,7 @@ public partial class PadWindow : Window
         public string? HoldButton;
         public (int vk, int[] mods)? HoldCombo;
         public double Fx0, Fy0; // fake cursor at press-down (tap rewind anchor)
+        public readonly List<(DateTime t, double x, double y)> Trail = new();
     }
 
     /// <summary>
@@ -295,8 +312,29 @@ public partial class PadWindow : Window
         _longTimer.Tick += (_, _) =>
         {
             CancelLong();
-            if (!_fingers.TryGetValue(id, out var f) || f.Moved) return;
-            if (_fingers.Count != 1) return;
+            if (!_fingers.TryGetValue(id, out var f) || _fingers.Count != 1)
+            {
+                DebugLog.Write("GESTURE long-press skipped (gone/pair)");
+                return;
+            }
+            // Dwell check, not cumulative drift: a hold always wanders
+            // (measured 60-110px), but a drag keeps MOVING. Fire when the
+            // last 350ms stayed within a small box.
+            double bx = f.Last.X, by = f.Last.Y, span = 0;
+            var now = DateTime.Now;
+            double x0 = bx, x1 = bx, y0 = by, y1 = by;
+            foreach (var (t, x, y) in f.Trail)
+            {
+                if ((now - t).TotalMilliseconds > 350) continue;
+                if (x < x0) x0 = x; if (x > x1) x1 = x;
+                if (y < y0) y0 = y; if (y > y1) y1 = y;
+            }
+            span = (x1 - x0) + (y1 - y0);
+            if (span > 40)
+            {
+                DebugLog.Write($"GESTURE long-press skipped (moving {span:0}px/350ms)");
+                return;
+            }
             _longFired = true;
             Status("long-press");
             DebugLog.Write("GESTURE long-press");
@@ -334,6 +372,15 @@ public partial class PadWindow : Window
     /// </summary>
     private void FirePressAction(string action, int id)
     {
+        // Rewind to the press-start aim point: tremor during the hold would
+        // otherwise land timer-fired actions (long-press menu!) off-target.
+        if (_fingers.TryGetValue(id, out var ff))
+        {
+            _fakeX = ff.Fx0;
+            _fakeY = ff.Fy0;
+            ClampFake();
+            _overlay?.MoveToPhysical(_fakeX, _fakeY);
+        }
         if (action == "drag_hold")
         {
             _dragHold = true;
@@ -414,7 +461,11 @@ public partial class PadWindow : Window
     /// <summary>
     /// Trackpad mode: fake cursor persistently visible, system cursor parked
     /// under it and hidden. Called on show/load and after settings apply.
+    /// With ShowFakeArrow off there is no arrow and no hiding: the chased
+    /// real cursor is the only cursor.
     /// </summary>
+    private bool ArrowOn => _s.FakeCursor && _s.ShowFakeArrow;
+
     public void EnterPersistentFake()
     {
         if (!_s.FakeCursor) return;
@@ -426,8 +477,16 @@ public partial class PadWindow : Window
             _fakeInit = true;
         }
         ClampFake();
-        ShowFake();
-        EnsureHidden();
+        if (ArrowOn)
+        {
+            ShowFake();
+            EnsureHidden();
+        }
+        else
+        {
+            try { _overlay?.Hide(); } catch { }
+            EnsureVisible();
+        }
         _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
     }
 
@@ -856,6 +915,11 @@ public partial class PadWindow : Window
                         // zone): the button is down from this instant, moves
                         // drag at once. Quick release completes an OS-level
                         // double-click naturally (see release path).
+                        // NOTE: no long-press timer on chained presses: a
+                        // tap-then-hold is a DRAG by definition (user matrix),
+                        // and firing right-click on top leaves a drag
+                        // selection + menu combo that feels "stuck pressed".
+                        // Single (chain-free) holds still long-fire.
                         ParkAtFake();
                         InputSim.Down("left");
                         _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
@@ -863,10 +927,6 @@ public partial class PadWindow : Window
                         _dragId = e.TouchDevice.Id;
                         _actionHeld = "left";
                         _secondConsumed = true;
-                        // A chained hold can still mean long-press: arm with
-                        // grace (quick pauses before a drag must not fire it;
-                        // moves cancel it anyway). Fixes tap-then-hold hijack.
-                        ArmLong(e.TouchDevice.Id, 400);
                         DebugLog.Write("GESTURE second-hold (immediate drag)");
                     }
                     else ArmHold(e.TouchDevice.Id);
@@ -885,7 +945,6 @@ public partial class PadWindow : Window
                         _dragHold = true;
                         _dragId = e.TouchDevice.Id;
                         _actionHeld = "left";
-                        ArmLong(e.TouchDevice.Id, 400);
                         DebugLog.Write("GESTURE third-hold (immediate drag)");
                     }
                 }
@@ -965,6 +1024,33 @@ public partial class PadWindow : Window
 
     private void OnTouchMove(object sender, TouchEventArgs e)
     {
+        long t0 = Environment.TickCount64;
+        try
+        {
+            OnTouchMoveInner(sender, e);
+        }
+        finally
+        {
+            // Perf probe: handler cost over a drag (avg/max per 200 events).
+            // If avg grows with drag length, something in here accumulates.
+            _pmSum += Environment.TickCount64 - t0;
+            _pmN++;
+            if (_pmN >= 200)
+            {
+                DebugLog.Write($"PERF move x{_pmN} avg={_pmSum / (double)_pmN:0.00}ms max={_pmMax}ms");
+                _pmSum = 0; _pmN = 0; _pmMax = 0;
+            }
+            else if (Environment.TickCount64 - t0 > _pmMax)
+                _pmMax = Environment.TickCount64 - t0;
+        }
+    }
+
+    private long _pmSum;
+    private int _pmN;
+    private long _pmMax;
+
+    private void OnTouchMoveInner(object sender, TouchEventArgs e)
+    {
         if (IsChrome(e.OriginalSource)) return;
         if (_resizeMode != null && e.TouchDevice.Id == _rsTouchId)
         {
@@ -978,13 +1064,21 @@ public partial class PadWindow : Window
         double dx = p.X - f.Last.X, dy = p.Y - f.Last.Y;
         f.Last = p;
         f.Active = DateTime.Now;
+        f.Trail.Add((f.Active, p.X, p.Y));
+        while (f.Trail.Count > 2 &&
+               (f.Active - f.Trail[0].t).TotalMilliseconds > 1200)
+            f.Trail.RemoveAt(0);
         bool was = f.Moved;
         if (Math.Abs(p.X - f.Start.X) + Math.Abs(p.Y - f.Start.Y) > TapMoveDip)
             f.Moved = true;
         if (f.Moved && !was)
         {
             // Any real motion kills tap-class gestures for everyone held.
-            if (e.TouchDevice.Id == _longId) CancelLong();
+            // Long-press is NOT canceled here (only on fast definite drags
+            // below): holds wander, the fire-time dwell check decides.
+            if (e.TouchDevice.Id == _longId &&
+                Math.Abs(p.X - f.Start.X) + Math.Abs(p.Y - f.Start.Y) > 120)
+                CancelLong();
             if (_fingers.Count >= 2) _twoCandidate = false;
             // (drag_hold begins at 2nd-press DOWN now, not here.)
         }
@@ -1012,14 +1106,49 @@ public partial class PadWindow : Window
                 // fully independent of the OS cursor, so no feedback loop.
                 if (_session)
                 {
-                    // Roam the fake cursor; the hidden system cursor is
-                    // being yanked toward the finger by Windows, ignore it.
-                    _fakeX += dx * _dpi * _s.Speed;
-                    _fakeY += dy * _dpi * _s.Speed;
+                    // Absolute from press baseline (like window dragging):
+                    // fake = press-start fake + finger travel × gain.
+                    // Recomputed fresh every event - nothing accumulates,
+                    // nothing drifts, nothing stutters.
+                    // Deadzone first: sub-threshold tremor never moves fake.
+                    double tx = p.X - f.Start.X, ty = p.Y - f.Start.Y;
+                    if (Math.Abs(tx) + Math.Abs(ty) >= DeadDip)
+                    {
+                        _fakeX = f.Fx0 + tx * _dpi * _s.Speed;
+                        _fakeY = f.Fy0 + ty * _dpi * _s.Speed;
+                    }
                     ClampFake();
-                    ShowFake();
-                    DebugLog.Write($"FAKE d=({dx:0},{dy:0}) -> ({_fakeX:0},{_fakeY:0})");
-                    Status($"fake ({_fakeX:0},{_fakeY:0})");
+                    // Chase: drag the hidden real cursor along behind the
+                    // fake one. Hover/rollover UI (tooltips, menu expansion)
+                    // only reacts to the REAL cursor, and clicks alone leave
+                    // it parked at the finger. Absolute set per move would
+                    // fight the touch-yank visibly; a trailing chase keeps it
+                    // close enough for hover while clicks stay atomic-exact.
+                    // Gated by distance AND time (60Hz max): syscall/DWM churn
+                    // per touch event is what backs the queue up into lag.
+                    long nowT = Environment.TickCount64;
+                    if ((Math.Abs(_fakeX - _chaseX) >= 5 ||
+                        Math.Abs(_fakeY - _chaseY) >= 5) &&
+                        nowT - _lastChaseTick >= 16)
+                    {
+                        _lastChaseTick = nowT;
+                        _chaseX = _fakeX; _chaseY = _fakeY;
+                        InputSim.SetCursor((int)_fakeX, (int)_fakeY);
+                    }
+                    // Draw at most on visible change AND 60Hz max.
+                    if (ArrowOn && (Math.Abs(_fakeX - _drawnX) >= 2.5 ||
+                        Math.Abs(_fakeY - _drawnY) >= 2.5) &&
+                        nowT - _lastDrawTick >= 16)
+                    {
+                        _lastDrawTick = nowT;
+                        _drawnX = _fakeX; _drawnY = _fakeY;
+                        ShowFake();
+                    }
+                    // Move lines sampled: per-event file I/O is the heaviest
+                    // thing left in this path and backs the queue up.
+                    // (On-pad readout skips moves entirely by request: too noisy.)
+                    if ((_moveLogN++ % 8) == 0)
+                        DebugLog.Write($"FAKE d=({dx:0},{dy:0}) -> ({_fakeX:0},{_fakeY:0})");
                 }
                 else
                 {
@@ -1027,7 +1156,6 @@ public partial class PadWindow : Window
                     int ay = ClampStep((int)(dy * _dpi * _s.Speed));
                     InputSim.Move(ax, ay);
                     DebugLog.Write($"TOUCHMOVE id={e.TouchDevice.Id} d=({dx:0},{dy:0}) -> ({ax},{ay})");
-                    Status($"move d=({dx:0},{dy:0}) -> ({ax},{ay})");
                 }
                 break;
             }
@@ -1296,6 +1424,7 @@ public partial class PadWindow : Window
     // suppressed via _suppressPhysicalUntil, never mistaken for physical.
     private void OnMouseDown(object sender, WMouseButtonEventArgs e)
     {
+        DebugLog.Write($"M-DOWN stylus={e.StylusDevice != null} fingers={_fingers.Count} suppressed={DateTime.Now < _suppressPhysicalUntil}");
         if (IsChrome(e.OriginalSource)) return;
         if (e.StylusDevice != null || _fingers.Count > 0) return;
         if (DateTime.Now < _suppressPhysicalUntil) return;
@@ -1349,6 +1478,10 @@ public partial class PadWindow : Window
             e.Handled = true;
             return;
         }
+        if (e.LeftButton != MouseButtonState.Released ||
+            e.RightButton != MouseButtonState.Released ||
+            e.MiddleButton != MouseButtonState.Released)
+            DebugLog.Write($"M-MOVE buttons stylus={e.StylusDevice != null} fingers={_fingers.Count}");
         // Hover cursor over the grips.
         string? hz = ResizerAt(hp.X, hp.Y);
         Cursor = hz == "left" ? Cursors.SizeNESW

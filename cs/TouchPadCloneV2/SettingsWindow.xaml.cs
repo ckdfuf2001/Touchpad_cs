@@ -53,6 +53,7 @@ public partial class SettingsWindow : Window
         };
         TapClick.IsChecked = s.TapToClick;
         FakeCur.IsChecked = s.FakeCursor;
+        ShowArrow.IsChecked = s.ShowFakeArrow;
         SwapBtn.IsChecked = s.SwapButtons;
         Speed.ValueChanged += (_, _) => Live();
         OpacityS.ValueChanged += (_, _) => Live();
@@ -155,6 +156,7 @@ public partial class SettingsWindow : Window
         if (CursorBox.SelectedItem is string c) _s.CursorStyle = c;
         _s.TapToClick = TapClick.IsChecked == true;
         _s.FakeCursor = FakeCur.IsChecked == true;
+        _s.ShowFakeArrow = ShowArrow.IsChecked == true;
         _s.SwapButtons = SwapBtn.IsChecked == true;
         var sg = _s.StripGestures;
         string SGet(string k) => _gestures.TryGetValue("strip:" + k, out var c)

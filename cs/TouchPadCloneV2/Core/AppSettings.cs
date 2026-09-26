@@ -54,6 +54,7 @@ public sealed class AppSettings
     public bool SwapButtons { get; set; } = false;
     public bool FakeCursor { get; set; } = true;
     public string CursorStyle { get; set; } = "cyan";
+    public bool ShowFakeArrow { get; set; } = true;
     public int LongPressMs { get; set; } = 500;
     /// <summary>Multi-tap chain window (tap-tap, tap-tap-tap).</summary>
     public int MultiTapMs { get; set; } = 600;

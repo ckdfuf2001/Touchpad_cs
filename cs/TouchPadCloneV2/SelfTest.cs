@@ -320,8 +320,9 @@ public static class SelfTest
                 $"downs={downs}");
             Check(!Stuck(), "triple: no stuck button");
         }
-        // ---- 6. tap, then 2nd press HELD 1100ms: long-press must still fire
-        // (used to be hijacked as a silent drag-hold).
+        // ---- 6. tap, then 2nd press HELD 1100ms: chained holds are DRAGs,
+        // never long-press (long-fire on top left selection+menu combos).
+        // Expect: immediate left down, clean up, no right click, no stuck.
         {
             int n = _clicks.Count;
             var a = new FakeTouch(id++);
@@ -332,10 +333,14 @@ public static class SelfTest
             await Task.Delay(400);
             await Drain();
             var c = Since(n);
-            int rdowns = 0;
-            foreach (var e in c) if (e.Down && e.Btn == "R") rdowns++;
-            Check(rdowns == 1, "tap-then-hold = long-press right click",
-                $"rdowns={rdowns}");
+            int rdowns = 0, ldowns = 0;
+            foreach (var e in c)
+            {
+                if (e.Down && e.Btn == "R") rdowns++;
+                if (e.Down && e.Btn == "L") ldowns++;
+            }
+            Check(rdowns == 0 && ldowns == 2, "tap-then-hold = silent drag-hold",
+                $"l={ldowns} r={rdowns}");
             Check(!Stuck(), "taphold: no stuck button");
         }
 

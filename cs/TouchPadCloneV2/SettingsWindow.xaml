@@ -14,6 +14,7 @@
                 <ComboBox x:Name="CursorBox"/>
                 <CheckBox x:Name="TapClick" Content="탭 = 클릭 (끄면 탭 무시)" Margin="0,8,0,0"/>
                 <CheckBox x:Name="FakeCur" Content="터치 중 시스템 커서 숨김 (Fake cursor)" Margin="0,4,0,0"/>
+                <CheckBox x:Name="ShowArrow" Content="가상 화살표 표시 (끄면 실커서만)" Margin="0,4,0,0"/>
                 <CheckBox x:Name="SwapBtn" Content="좌/우 버튼 반전" Margin="0,4,0,0"/>
                 <TextBlock Text="길게 누르기 판정 (ms)" Margin="0,8,0,0"/>
                 <Slider x:Name="LongMs" Minimum="200" Maximum="1000" TickFrequency="50"/>
