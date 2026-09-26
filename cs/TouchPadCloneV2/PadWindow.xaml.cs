@@ -1052,6 +1052,11 @@ public partial class PadWindow : Window
             FirePressAction(action, id);
         };
         _holdTimer.Start();
+        // Log the deadline: a "second-hold" line arriving sooner than this
+        // would mean the timer is not the one firing (seen once at 265ms while
+        // the interval was 500).
+        DebugLog.Write($"GESTURE arm hold id={id} -> {action} in"
+            + $" {(int)(_holdTimer.Interval.TotalMilliseconds)}ms");
     }
 
     /// <summary>

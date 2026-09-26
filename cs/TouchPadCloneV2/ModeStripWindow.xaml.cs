@@ -63,8 +63,16 @@ public partial class ModeStripWindow : Window
             int sx = unchecked((short)(long)lParam);
             int sy = unchecked((short)((long)lParam >> 16));
             var win = PointFromScreen(new Point(sx, sy));
-            if (InputHitTest(win) is System.Windows.Controls.Button)
-                return IntPtr.Zero;
+            // A Button's content is a TextBlock, so hit testing returns that,
+            // not the Button - walk up to see whether the point is inside one.
+            // Testing `is Button` directly let the buttons fall through.
+            System.Windows.DependencyObject? d = InputHitTest(win) as
+                System.Windows.DependencyObject;
+            while (d != null)
+            {
+                if (d is System.Windows.Controls.Button) return IntPtr.Zero;
+                d = System.Windows.Media.VisualTreeHelper.GetParent(d);
+            }
             handled = true;
             return new IntPtr(-1);   // HTTRANSPARENT
         }
@@ -116,12 +124,12 @@ public partial class ModeStripWindow : Window
         Surface.MouseDown += OnMouseDown;
         Surface.MouseMove += OnMouseMove;
         Surface.MouseUp += OnMouseUp;
-        // Same as the pad: a touch here is promoted to a MOUSE event (and the
-        // system moves the cursor onto the contact for it). Block the promoted
-        // ones; a real mouse has StylusDevice == null and is untouched.
-        Surface.PreviewMouseDown += SwallowTouchMouse;
-        Surface.PreviewMouseMove += SwallowTouchMouse;
-        Surface.PreviewMouseUp += SwallowTouchMouse;
+        // NOT SwallowTouchMouse here, unlike the pad: this bar is made of
+        // BUTTONS, and a WPF Button's Click comes from the mouse events that a
+        // touch is promoted into. Swallowing them made the close button
+        // unpressable by touch ("the close on the strip does not close"). The
+        // rule that a touch must not produce mouse events is about the pad's
+        // touch surface, not about this control bar.
         Surface.LostTouchCapture += (_, e) =>
         {
             // A touch that never reports Up (capture stolen/killed) must not
