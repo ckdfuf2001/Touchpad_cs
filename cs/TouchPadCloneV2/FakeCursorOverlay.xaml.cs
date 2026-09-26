@@ -38,6 +38,9 @@ public partial class FakeCursorOverlay : Window
     private double _pendX, _pendY;
     private bool _hasPend;
 
+    private const int WM_NCHITTEST = 0x0084;
+    private static readonly IntPtr HTTRANSPARENT = new(-1);
+
     public FakeCursorOverlay()
     {
         InitializeComponent();
@@ -47,6 +50,15 @@ public partial class FakeCursorOverlay : Window
             int st = GetWindowLong(_hwnd, GWL_EXSTYLE);
             SetWindowLong(_hwnd, GWL_EXSTYLE,
                 st | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW);
+            // WS_EX_TRANSPARENT alone does NOT reliably pass mouse input
+            // through a top-level window: the default hit test still claims
+            // every point of the window rectangle. The arrow is drawn exactly
+            // where the OS cursor is parked during a drag, so any point that
+            // landed on it was swallowed and the application under the
+            // cursor saw a button press with no motion - the drag "event"
+            // fired and nothing was dragged.
+            if (HwndSource.FromHwnd(_hwnd) is { } src)
+                src.AddHook(NcHitTest);
             if (_hasPend) Place(_pendX, _pendY);
         };
         var arrow = new Polygon
@@ -106,6 +118,18 @@ public partial class FakeCursorOverlay : Window
         SetWindowPos(_hwnd, HWND_TOPMOST,
             (int)Math.Round(physX) - 2, (int)Math.Round(physY) - 2,
             0, 0, SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+
+    /// <summary>
+    /// Click-through, for real. HTTRANSPARENT tells the system to keep
+    /// looking for the window underneath, so the overlay can sit on top of
+    /// the cursor without ever being the thing that receives a click.
+    /// </summary>
+    private IntPtr NcHitTest(IntPtr hwnd, int msg, IntPtr wParam,
+        IntPtr lParam, ref bool handled)
+    {
+        if (msg == WM_NCHITTEST) { handled = true; return HTTRANSPARENT; }
+        return IntPtr.Zero;
     }
 
     public new void Hide()

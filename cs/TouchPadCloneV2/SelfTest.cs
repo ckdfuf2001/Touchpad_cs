@@ -353,6 +353,32 @@ public static class SelfTest
             Check(downs == 3, "double-tap quick = click + double (3 downs)",
                 $"downs={downs}");
         }
+        // ---- 3b. a grab-armed press must not also race a long-press. Real
+        // press after a double-click, pause, then move: the long-press came
+        // due first (500ms) and was cancelled 4ms before firing, so the drag
+        // only began at 527ms and nearly became a right-click. Post-multi-tap
+        // presses are drag-only.
+        {
+            int n = Mark();
+            await Settle();
+            var a = new FakeTouch(id++);
+            Down(a, px, py); await Task.Delay(60); Up(a);
+            await Task.Delay(120);
+            var b = new FakeTouch(id++);
+            Down(b, px, py); await Task.Delay(60); Up(b);
+            await Task.Delay(900);            // past the chain window
+            var c = new FakeTouch(id++);
+            Down(c, px, py);
+            await Task.Delay(700);            // the pause that used to lose it
+            for (int i = 1; i <= 4; i++) { Move(c, px + 25 * i, py); await Task.Delay(30); }
+            Up(c);
+            await Task.Delay(500);
+            await Drain();
+            var ev = Since(n);
+            Check(Dns(ev, "right") == 0,
+                "a grab-armed press holds 700ms without firing a long-press",
+                $"r={Dns(ev, "right")} l={Dns(ev, "left")}");
+        }
         // ---- 4. click, then press + MOVE = drag. The press must land on the
         // AIM POINT (fake cursor), never on the touch point: a bare Down()
         // after a cursor park lost the race with the OS yank and pressed our
@@ -425,6 +451,31 @@ public static class SelfTest
             Check(Math.Abs(cx - ax) <= 2 && Math.Abs(cy - ay) <= 2,
                 "mid-drag the OS cursor rides the virtual cursor",
                 $"os=({cx},{cy}) fake=({ax:0},{ay:0}) moves={c.Count(e => e.Kind == "move")}");
+        }
+        // ---- 4d. THE flow: tap, press, move. The press is the chained second
+        // one, it can grab, and it must NOT also race a long-press - that
+        // race sat 4ms from the edge on real hardware (press, pause, move:
+        // "long canceled (peak 12)" against a threshold of 10, so the drag
+        // only started because the cancel won by 4ms). A pause of any length
+        // has to stay a pause.
+        {
+            int n = Mark();
+            await Settle();
+            var a = new FakeTouch(id++);
+            Down(a, px, py); await Task.Delay(60); Up(a);      // the click
+            await Task.Delay(150);
+            var b = new FakeTouch(id++);
+            Down(b, px, py);
+            await Task.Delay(700);                             // the pause
+            for (int i = 1; i <= 4; i++) { Move(b, px + 25 * i, py); await Task.Delay(30); }
+            Up(b);
+            await Task.Delay(500);
+            await Drain();
+            var ev = Since(n);
+            // 1 click from the tap, then the grab - and no right-click.
+            Check(Dns(ev, "right") == 0 && Dns(ev, "left") == 2,
+                "tap, press, pause 700ms, move = drag and never a right-click",
+                $"l={Dns(ev, "left")} (want 2) r={Dns(ev, "right")}");
         }
         // ---- 5. the same after a DOUBLE tap: the third press must still be
         // able to grab. Reported as "no drag after a double-click". Both

@@ -19,9 +19,9 @@ public sealed class GestureMap
 
     public static readonly string[] Actions =
     [
-        "none", "left_click", "right_click", "middle_click", "double_click",
-        "triple_click", "drag_hold", "wheel_up", "wheel_down",
-        "browser_back", "browser_forward", "assist_pad",
+    "none", "left_click", "right_click", "middle_click", "double_click",
+    "triple_click", "drag_hold", "wheel_up", "wheel_down",
+    "browser_back", "browser_forward", "assist_pad", "toggle_fake",
     ];
 }
 
@@ -37,7 +37,7 @@ public sealed class StripGestureMap
     [
         "none", "prev_layout", "next_layout", "show_modes", "toggle_modes",
         "open_settings", "toggle_fullscreen", "show_assist", "toggle_pad",
-        "center_fake",
+        "center_fake", "toggle_fake",
     ];
 }
 

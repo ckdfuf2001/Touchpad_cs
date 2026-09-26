@@ -275,6 +275,34 @@ public partial class PadWindow : Window
         }
     }
 
+    /// <summary>
+    /// Hide/show the roaming virtual cursor. This used to have no gesture to
+    /// bind to at all - the pad list had nothing but clicks, wheels and
+    /// browser keys, and the strip list had "center_fake" but no toggle - so
+    /// the only way to get it was to unbind something, and the natural
+    /// candidate (a swipe) came pre-bound to wheel_up, i.e. a scroll.
+    /// </summary>
+    public void ToggleFakeCursor()
+    {
+        bool on = !(_s.ShowFakeArrow && _s.FakeCursor);
+        _s.ShowFakeArrow = on;
+        _s.FakeCursor = on;
+        if (on)
+        {
+            ShowFake();
+            DebugLog.Write("VIRTUAL CURSOR shown");
+        }
+        else
+        {
+            try { _overlay?.Hide(); } catch { }
+            // With no virtual cursor on screen the system one must be back,
+            // or the desktop is left with an invisible pointer.
+            EnsureVisible();
+            DebugLog.Write("VIRTUAL CURSOR hidden");
+        }
+        _s.Save();
+    }
+
     /// <summary>Call on nasty exits so the cursor is never left hidden.</summary>
     public void EmergencyRestore()
     {
@@ -376,6 +404,7 @@ public partial class PadWindow : Window
     private string _longAction = "none";
     private DateTime _longDue = DateTime.MinValue;
     private bool _longFired;
+    private bool _longGraceUsed;
     private int _holdId = -1;
     private DateTime _pendingTapUntil = DateTime.MinValue;
     private DateTime _pendingTripleUntil = DateTime.MinValue;
@@ -402,6 +431,8 @@ public partial class PadWindow : Window
     /// double-click is much longer than the gap between two taps.
     /// </summary>
     private DateTime _grabArmUntil = DateTime.MinValue;
+    /// <summary>A click has been delivered since the current press began.</summary>
+    private bool _clickSincePress;
     private int _twoId = -1;        // second concurrent finger
     private bool _twoCandidate;
     private bool _twoActive;        // a two-finger gesture is/was in flight
@@ -473,8 +504,20 @@ public partial class PadWindow : Window
         if (tx == _realSentX && ty == _realSentY) return;
         _realSentX = tx; _realSentY = ty;
         InputSim.MoveTo(tx, ty);
-        DebugLog.Write($"DRAG sync -> ({tx},{ty})");
+        // Read the cursor back now and then. The log line records what we
+        // ASKED for; this records what the system actually did with it. If
+        // the two diverge, something else is writing the cursor during the
+        // gesture - and the symptom is exactly "the drag event fired at the
+        // right coordinates and nothing was dragged".
+        if ((_syncProbeN++ % 12) == 0)
+        {
+            var (ax, ay) = InputSim.Cursor();
+            DebugLog.Write($"DRAG sync -> ({tx},{ty}) actual=({ax},{ay})"
+                + (Math.Abs(ax - tx) > 2 || Math.Abs(ay - ty) > 2 ? " DIVERGED" : ""));
+        }
     }
+
+    private int _syncProbeN;
 
     /// <summary>Forget where we last put the cursor (someone else moved it).</summary>
     private void ForgetRealCursor() { _realSentX = int.MinValue; _realSentY = int.MinValue; }
@@ -517,6 +560,12 @@ public partial class PadWindow : Window
     private string _pressNote = "";
 
     private const int HoldWindowMs = 150;
+    /// <summary>
+    /// Extra wait before a long-press commits, spent once per press (see
+    /// OnLongTick). A press that is going to hold pays it; a press that
+    /// pauses and then drags does not.
+    /// </summary>
+    private const int LongGraceMs = 300;
     /// <summary>Net travel that is certainly a drag (see HoldIsDragging).</summary>
     /// <summary>
     /// Net travel from the press point that is certainly deliberate, whatever
@@ -576,6 +625,7 @@ public partial class PadWindow : Window
         _longId = id;
         _longAction = action;
         _longFired = false;
+        _longGraceUsed = false;      // one grace per press, see OnLongTick
         _longDue = DateTime.Now.AddMilliseconds(
             Math.Max(200, _s.LongPressMs));
         if (_longTimer == null)
@@ -612,8 +662,32 @@ public partial class PadWindow : Window
                 $"GESTURE long deferred (peak {RecentTravel(f):0}DIP/{HoldWindowMs}ms)");
             return;
         }
+        // Grace, ONCE per press - and only for a press that can still become
+        // a drag. "Press, pause, move" and "press and hold" are
+        // indistinguishable at the deadline: the finger is simply not moving
+        // yet in both, so the deadline cannot be the commit point. Measured on
+        // real hardware: the user presses, waits 405ms, then moves, and the
+        // drag threshold is crossed at 504ms - four milliseconds after the
+        // long-press came due (logged "long canceled (peak 12)" against a
+        // threshold of 10). Move any slower and the drag silently became a
+        // right-click.
+        //
+        // Only where it is needed: a press that can grab already has its
+        // click delivered, so waiting costs nothing and it may yet be a
+        // drag. A plain press has no click before it, so its long-press is
+        // the primary action and must stay punctual.
+        if (!_longGraceUsed && _dragArmId >= 0)
+        {
+            _longGraceUsed = true;
+            _longDue = DateTime.Now.AddMilliseconds(LongGraceMs);
+            DebugLog.Write($"GESTURE long grace {LongGraceMs}ms"
+                + $" (peak {RecentTravel(f):0}DIP/{HoldWindowMs}ms)");
+            return;
+        }
         CancelLong();
         _longFired = true;
+        // A grab-armed press can legitimately long-fire here (press and hold
+        // IS a right-click), so nothing to assert.
         _dragArmId = -1;   // the press is resolved: no drag after a hold
         string note = $"long-press {(int)(DateTime.Now - f.T0).TotalMilliseconds}ms"
             + $" → {_longAction}";
@@ -685,10 +759,25 @@ public partial class PadWindow : Window
         ClampFake();
         _overlay?.MoveToPhysical(_fakeX, _fakeY);
         f.Start = f.Last;
+        // Ordering note: a grab only carries anything if the click before it
+        // landed, and it always does - a chained press is armed BY a tap that
+        // already clicked, and the post-multi-tap grab window is only open
+        // because a double/triple tap clicked. An earlier version delivered
+        // an extra click here "to be safe" and double-fired every drag; the
+        // selftest caught it. The flag is kept for the log line below,
+        // because "was the click delivered before this grab" is exactly what
+        // makes the difference between a working drag and a dead one.
         PressDown("left");
         _pressNote = "drag (grabbed)";
         Status(_pressNote);
-        DebugLog.Write($"GESTURE drag armed id={id} @({_fakeX:0},{_fakeY:0})");
+        // Who actually receives this press? If it is the overlay, or an
+        // unfocused window (whose activation click eats the drag), the log
+        // says so here instead of the symptom being "the drag event fired
+        // and nothing was dragged".
+        DebugLog.Write($"GESTURE drag armed id={id} @({_fakeX:0},{_fakeY:0})"
+            + $" under {DescribeWindowAt(_fakeX, _fakeY)}"
+            + $" | foreground {DescribeWindow(GetForegroundWindow())}"
+            + $" | clickFirst={_clickSincePress}");
     }
 
     /// <summary>
@@ -1204,6 +1293,7 @@ public partial class PadWindow : Window
         catch { }
         InputSim.ClickAt((int)px, (int)py, b);
         ForgetRealCursor();
+        _clickSincePress = true;
         _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
         // Show exactly where it landed (settles aim disputes at a glance).
         try
@@ -1220,6 +1310,8 @@ public partial class PadWindow : Window
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern IntPtr WindowFromPoint(NativePoint p);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
     [System.Runtime.InteropServices.DllImport(
         "user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
     private static extern int GetClassName(IntPtr h, System.Text.StringBuilder s, int n);
@@ -1240,7 +1332,16 @@ public partial class PadWindow : Window
     {
         try
         {
-            IntPtr h = WindowFromPoint(new NativePoint { X = (int)x, Y = (int)y });
+            return DescribeWindow(WindowFromPoint(
+                new NativePoint { X = (int)x, Y = (int)y }));
+        }
+        catch (Exception e) { return "(?" + e.GetType().Name + ")"; }
+    }
+
+    private string DescribeWindow(IntPtr h)
+    {
+        try
+        {
             if (h == IntPtr.Zero) return "(no window)";
             var cls = new System.Text.StringBuilder(128);
             GetClassName(h, cls, cls.Capacity);
@@ -1249,11 +1350,16 @@ public partial class PadWindow : Window
             string t = txt.ToString();
             if (t.Length > 40) t = t[..40];
             return $"[{cls}] '{t}'"
-                + (h.ToInt64() == new System.Windows.Interop.WindowInteropHelper(this).Handle
+                + (h == _overlayHandle ? " <<< OUR CURSOR OVERLAY" : "")
+                + (h == new System.Windows.Interop.WindowInteropHelper(this).Handle
                     ? " <<< OUR OWN PAD" : "");
         }
         catch (Exception e) { return "(?" + e.GetType().Name + ")"; }
     }
+
+    private IntPtr _overlayHandle =>
+        _overlay == null ? IntPtr.Zero
+            : new System.Windows.Interop.WindowInteropHelper(_overlay).Handle;
 
     private FlashOverlay? _flash;
     /// <summary>Polls the real cursor back after the lift-yank.</summary>
@@ -1358,6 +1464,16 @@ public partial class PadWindow : Window
                         _dragArmId = e.TouchDevice.Id;
                     else
                         ArmHold(e.TouchDevice.Id, G.SecondHold);
+                    // A grab-armed press does not also race a long-press. This
+                    // is the tap-press-move flow, and it sat 4ms from the
+                    // edge every time: press, pause, move, and the long-press
+                    // came due at 500ms while the movement that cancels it
+                    // crossed the threshold at 504ms (logged "long canceled
+                    // (peak 12)" against a threshold of 10). Move a little
+                    // slower and the drag became a right-click. The click has
+                    // already been delivered by the tap, so the press is
+                    // drag-only: move to drag, release to click, nothing in
+                    // between.
                     ArmLong(e.TouchDevice.Id, G.LongPress);
                 }
                 else if (DateTime.Now < _pendingTripleUntil)
@@ -1372,6 +1488,10 @@ public partial class PadWindow : Window
                         _dragArmId = e.TouchDevice.Id;
                     else
                         ArmHold(e.TouchDevice.Id, G.SecondHold);
+                    // A grab-armed press does not also race a long-press: the
+                    // third press after a double tap is the "now move it"
+                    // press, and a 500ms pause in the middle of it turned
+                    // into a right-click instead (see the plain-press branch).
                     ArmLong(e.TouchDevice.Id, G.LongPress);
                 }
                 else
@@ -1391,6 +1511,15 @@ public partial class PadWindow : Window
                     // grabs, and the arm expires on its own.
                     _dragArmId = DateTime.Now < _grabArmUntil
                         ? e.TouchDevice.Id : -1;
+                    // A press that can grab must NOT also race a long-press.
+                    // Measured: press, pause 500ms, move - the long-press came
+                    // due first and was cancelled 4ms before it fired, so the
+                    // drag only began at 527ms and nearly became a
+                    // right-click. After a double/triple tap the intent is
+                    // already established ("I picked the target, now move
+                    // it"), so the press is drag-only: move to drag, release
+                    // to click, and nothing fires in between. A fresh press
+                    // still gets the long-press.
                     ArmLong(e.TouchDevice.Id, G.LongPress);
                 }
             }
@@ -1956,6 +2085,7 @@ public partial class PadWindow : Window
             case "browser_back": InputSim.TapKey(0xA6); break;
             case "browser_forward": InputSim.TapKey(0xA7); break;
             case "assist_pad": RequestAssist?.Invoke(); break;
+            case "toggle_fake": ToggleFakeCursor(); break;
         }
     }
 
