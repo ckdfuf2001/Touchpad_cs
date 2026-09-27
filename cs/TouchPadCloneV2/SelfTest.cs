@@ -346,8 +346,17 @@ public static class SelfTest
                 $"leftDowns={downs} ev={c.Count}");
             Check(lbl.Text.Contains("hold"),
                 "the label says what the hold did", $"label=\"{lbl.Text}\"");
-            Check(cx != mx || cy != my,
-                "cursor NOT handed back while the grab is held",
+            // The cursor contract differs by mode, so assert the one that is
+            // configured: one cursor keeps it at the grab (there is no physical
+            // position to return to); dual cursor hands it back to the mouse
+            // once the drag ends.
+            bool oneCursor = (bool?)typeof(PadWindow)
+                .GetField("RealCursorOnly", BindingFlags.NonPublic
+                    | BindingFlags.Static)?.GetValue(null) ?? false;
+            Check(oneCursor ? (cx != mx || cy != my) : (cx == mx && cy == my),
+                oneCursor
+                    ? "cursor NOT handed back while the grab is held"
+                    : "cursor handed back to the mouse after the grab",
                 $"now=({cx},{cy}) phys=({mx},{my})");
         }
         // ---- 3. double + immediate release (double-click) ----

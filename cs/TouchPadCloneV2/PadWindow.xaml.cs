@@ -142,7 +142,7 @@ public partial class PadWindow : Window
     private static readonly bool SelftestMode =
         Environment.GetEnvironmentVariable("TOUCHPAD_SELFTEST") == "1";
 
-    private static readonly bool RealCursorOnly = true;
+    private static readonly bool RealCursorOnly = false;
 
     /// <summary>
     /// The drag grab - OUR gesture. (Briefly switched off to isolate it; that
@@ -2570,12 +2570,17 @@ public partial class PadWindow : Window
                     // It stays (hidden) where it was; only the fake roams.
                     // Clicks carry their own absolute position (see ClickAt).
                     // Draw at most on visible change AND 60Hz max.
-                    long nowT = Environment.TickCount64;
-                    if (ArrowOn && (Math.Abs(_fakeX - _drawnX) >= 2.5 ||
-                        Math.Abs(_fakeY - _drawnY) >= 2.5) &&
-                        nowT - _lastDrawTick >= 16)
+                    // Draw on EVERY change, unthrottled. The old rule - at
+                    // most 60Hz and only after 2.5 px - was the lag: the
+                    // visible pointer fell behind the finger (the handler
+                    // itself measures 0.15ms) while the reference moves its
+                    // own cursor on every event. This is also why a fake
+                    // cursor is needed at all: Windows reports
+                    // CURSOR_SUPPRESSED (0x2) while a touch is active, so the
+                    // system cursor cannot be shown during a gesture however
+                    // often ShowCursor is called - measured on this device.
+                    if (ArrowOn && (_fakeX != _drawnX || _fakeY != _drawnY))
                     {
-                        _lastDrawTick = nowT;
                         _drawnX = _fakeX; _drawnY = _fakeY;
                         ShowFake();
                     }
