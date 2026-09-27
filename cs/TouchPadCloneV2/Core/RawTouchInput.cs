@@ -154,6 +154,7 @@ public sealed class RawTouchInput
     private readonly Dictionary<int, bool> _down = new();
     private bool _registered;
     private int _seen;
+    private readonly int[] _typeCounts = new int[4];
 
     /// <summary>Ask for the digitizer's reports, including when we are not focused.</summary>
     public bool Register(IntPtr hwnd)
@@ -210,12 +211,22 @@ public sealed class RawTouchInput
                 }
                 if (got == uint.MaxValue || got == 0) return false;
                 var rawHeader = Marshal.PtrToStructure<RAWINPUTHEADER>(buf);
-                if (_seen <= 5)
+                // Count by type. WPF registers raw input for the mouse as well,
+                // so this window sees a flood of mouse messages too and the log
+                // was unreadable with a "first five" rule.
+                _typeCounts[Math.Min(3, (int)rawHeader.dwType)]++;
+                if ((_seen % 500) == 0)
                 {
-                    DebugLog.Write($"RAWINPUT type={rawHeader.dwType}"
-                        + $" size={rawHeader.dwSize} dev={rawHeader.hDevice}");
+                    DebugLog.Write($"RAWINPUT types: mouse={_typeCounts[0]}"
+                        + $" kbd={_typeCounts[1]} hid={_typeCounts[2]}"
+                        + $" other={_typeCounts[3]}");
                 }
                 if (rawHeader.dwType != RIM_TYPEHID) return false;
+                if (_typeCounts[2] <= 3)
+                {
+                    DebugLog.Write($"RAWINPUT HID report size={rawHeader.dwSize}"
+                        + $" dev={rawHeader.hDevice}");
+                }
                 var hid = Marshal.PtrToStructure<RAWHID>(
                     IntPtr.Add(buf, (int)header));
                 if (hid.dwSizeHid == 0) return false;
@@ -250,7 +261,12 @@ public sealed class RawTouchInput
         if (_devices.TryGetValue(hDevice, out var cached)) return cached;
         uint size = 0;
         GetRawInputDeviceInfo(hDevice, RIDI_PREPARSEDDATA, IntPtr.Zero, ref size);
-        if (size == 0) return null;
+        if (size == 0)
+        {
+            DebugLog.Write($"RAWINPUT hid={hDevice} has no preparsed data"
+                + " - not a HID device, or the report cannot be parsed");
+            return null;
+        }
         IntPtr prep = Marshal.AllocHGlobal((int)size);
         if (GetRawInputDeviceInfo(hDevice, RIDI_PREPARSEDDATA, prep, ref size) == 0)
         {
