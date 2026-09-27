@@ -28,8 +28,14 @@ public partial class PadWindow : Window
     /// <summary>
     /// Deadzone: sub-threshold tremor never moves the fake cursor.
     /// (User request + fixes aim drift that broke long-press menus.)
+    ///
+    /// 2, not 6: the gate is measured against the PRESS POINT, so at 6 DIP the
+    /// cursor sat still for the first 6 DIP of a stroke and then jumped
+    /// 6 x gain pixels at once - the stutter at the start of every movement
+    /// that makes this feel laggy next to the reference, which simply moves
+    /// the cursor on every event. 2 DIP still absorbs the panel's 1px tremor.
     /// </summary>
-    private const double DeadDip = 6;
+    private const double DeadDip = 2;
     /// <summary>
     /// Per-event deadzone, used only in one-cursor mode where each event is
     /// applied as a delta rather than measured against the press point. Much
@@ -136,7 +142,7 @@ public partial class PadWindow : Window
     private static readonly bool SelftestMode =
         Environment.GetEnvironmentVariable("TOUCHPAD_SELFTEST") == "1";
 
-    private static readonly bool RealCursorOnly = false;
+    private static readonly bool RealCursorOnly = true;
 
     /// <summary>
     /// The drag grab - OUR gesture. (Briefly switched off to isolate it; that
@@ -585,7 +591,7 @@ public partial class PadWindow : Window
         // One cursor: fight the system's pull onto the touch contact from the
         // first event, not only while a button is held - it moves the cursor
         // when it feels like it, and a plain move is just as vulnerable.
-        if (RealCursorOnly && !UseRawPointer) StartDragKeeper();
+        if (RealCursorOnly) StartDragKeeper();
         DebugLog.Write($"SESSION begin fake=({_fakeX:0},{_fakeY:0}) phys=({_physX},{_physY})");
     }
 
