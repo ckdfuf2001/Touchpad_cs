@@ -873,6 +873,23 @@ public partial class PadWindow : Window
     /// <summary>A click has been delivered since the current press began.</summary>
     private bool _clickSincePress;
     private bool _keepCursorOnce;
+
+    /// <summary>
+    /// Arm the grab for the next press. Called when a tap completes AND when a
+    /// drag or a long-press ends.
+    ///
+    /// The end-of-action case is what made "double tap then drag, again" fail:
+    /// the press after the first drag was a plain one (logged "GESTURE arm
+    /// long" instead of "arm hold -> drag"), because the window opened by the
+    /// preceding tap had closed - measured at 1.3s after the drag ended, inside
+    /// no window at all. After manipulating one thing the user goes on
+    /// manipulating, so the next press belongs to the drag again.
+    /// </summary>
+    private void ArmGrab(string why)
+    {
+        _grabArmUntil = DateTime.Now.AddMilliseconds(_s.MultiTapMs * 3);
+        DebugLog.Write($"GESTURE grab armed for the next press ({why})");
+    }
     /// <summary>
     /// How long the cursor must stay at the drop point after a synthetic
     /// release, before anything may hand it back to the physical mouse. A
@@ -1184,6 +1201,9 @@ public partial class PadWindow : Window
         // A grab-armed press can legitimately long-fire here (press and hold
         // IS a right-click), so nothing to assert.
         _dragArmId = -1;   // the press is resolved: no drag after a hold
+        // After a right-click the user usually goes on manipulating, so the
+        // next press is a drag again. See ArmGrab.
+        ArmGrab("long-press fired");
         string note = $"long-press {(int)(DateTime.Now - f.T0).TotalMilliseconds}ms"
             + $" → {_longAction}";
         _pressNote = note;
@@ -1413,6 +1433,10 @@ public partial class PadWindow : Window
             PressUp(_actionHeld);
             _dragHold = false;
             _actionHeld = null;
+            // A drag just finished: the next press belongs to the drag again,
+            // so the user can move one thing and then another without tapping
+            // in between. See ArmGrab.
+            ArmGrab("drag ended");
         }
     }
 
