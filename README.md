@@ -5,7 +5,26 @@
 
 ## 현행: v2 (C#/WPF, `cs/TouchPadCloneV2/`)
 
-WPF **진짜 터치 이벤트**(손가락별 추적)로 동작.
+**입력은 Raw Input으로 디지타이저를 직접 읽습니다** (`Core/RawTouchInput.cs`).
+원본 `TouchMousePointer.exe`가 `RegisterRawInputDevices`/`GetRawInputData`/`GetRawInputDeviceInfoW`로
+디지타이저를 직접 읽는 것과 같은 계열입니다. 이유와 경위:
+
+- **WPF 터치는 승격(promotion)됩니다** — 프레임워크가 터치를 스타일러스로, 다시 마우스로 승격하고,
+  그 과정에서 시스템이 **커서를 접촉점으로 끌어당깁니다.** 이 프로젝트의 어려운 문제 대부분이 여기서 나옵니다:
+  드래그 중 커서가 패드로 끌려감, 유령 마우스 이벤트, 드래그가 두 창으로 갈라짐, 가상 커서가 필요해진 이유.
+- **Raw Input은 hit-test와 무관하게 전달됩니다**(`RIDEV_INPUTSINK`). 그래서 "창을 click-through로 두고
+  입력은 그대로 받는" 원본의 구조가 가능해집니다. hit-test로 입력을 받으면 창을 투명하게 만들 수 없습니다.
+- **커서 이동은 `SetPhysicalCursorPos`(물리 픽셀), 클릭은 `mouse_event`** — 원본이 쓰는 프리미티브 그대로입니다
+  (`SendInput` 아님). 주입 입력에는 태그(`dwExtraInfo`)를 붙여 자기 입력임을 구분합니다(원본은 `GetMessageExtraInfo`).
+- 디지타이저 HID 리포트는 `HidP_GetCaps`/`HidP_GetValueCaps`/`HidP_GetUsageValue`로 파싱합니다
+  (Contact Identifier `0x51`, Tip Switch `0x42`, In Range `0x32`, X `0x30`, Y `0x31`).
+  **주의: `RAWHID.bRawData`는 포인터가 아니라 내장 배열(`BYTE[1]`)** — 리포트 바이트는 `dwSizeHid`/`dwCount` 뒤
+  오프셋 8에서 시작합니다. 포인터로 선언하면 리포트 내용을 주소로 읽어 접근 위반(0xc0000005)으로 죽습니다.
+- 좌표: 터치 **스크린**(usage `0x04`)은 절대 좌표 → 화면 px, 터치 **패드**(usage `0x05`)는 자체 0..1 표면 →
+  패드 사각형에 배치합니다.
+
+WPF **터치 이벤트**(손가락별 추적) 경로도 남아 있습니다(`UseRawPointer`) — raw input이 실기에서
+검증되면 그때부터 창을 상시 click-through로 만들고 컨트롤을 투명 영역 밖에 배치할 수 있습니다.
 
 ```bat
 cd cs\TouchPadCloneV2

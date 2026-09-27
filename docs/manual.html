@@ -75,7 +75,8 @@ TouchMousePointer는 Windows 8.1/10/11 태블릿·컨버터블용 <b>가상 트�
 <table><tr><th>항목</th><th>값</th></tr>
 <tr><td>위치</td><td><code>cs/TouchPadCloneV2</code></td></tr>
 <tr><td>언어/의존성</td><td>C# · .NET 10 + WPF + WinForms(트레이만)</td></tr>
-<tr><td>입력</td><td>WPF 진짜 터치 이벤트 (손가락별 추적, §9)</td></tr>
+<tr><td>입력</td><td><b>Raw Input</b>으로 디지타이저를 직접 읽음 (<code>Core/RawTouchInput.cs</code>): Digitizer usage page <code>0x0D</code>(터치스크린 <code>0x04</code>/터치패드 <code>0x05</code>)를 <code>RIDEV_INPUTSINK</code>로 등록하고 HID 리포트를 <code>HidP_*</code>로 파싱 (Contact ID <code>0x51</code>, Tip <code>0x42</code>, X <code>0x30</code>, Y <code>0x31</code>). 원본 <code>TouchMousePointer.exe</code>가 <code>RegisterRawInputDevices</code>/<code>GetRawInputData</code>를 쓰는 것과 같은 이유 — <b>WPF 터치의 승격(스타일러스→마우스)과 그에 따른 커서 끌어당김을 피하기 위함</b>. WPF 터치 경로(<code>UseRawPointer</code>)도 병존</td></tr>
+<tr><td>커서/클릭</td><td>원본과 동일한 프리미티브: <code>SetPhysicalCursorPos</code>(물리 픽셀) + <code>mouse_event</code>, 주입 태그 <code>dwExtraInfo</code></td></tr>
 <tr><td>실행</td><td><code>dotnet run</code> 또는 빌드된 <code>TouchPadCloneV2.exe</code></td></tr>
 <tr><td>설정 저장</td><td><code>%APPDATA%\TouchPadClone\settings.json</code> (v1과 공유)</td></tr>
 <tr><td>진단 로그</td><td><code>%TEMP%\touchpad_v2.log</code> (<code>TOUCHPAD_DEBUG=1</code>일 때)</td></tr>

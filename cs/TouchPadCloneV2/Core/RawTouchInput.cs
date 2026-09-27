@@ -70,12 +70,21 @@ public sealed class RawTouchInput
         public IntPtr hDevice, wParam;
     }
 
+    /// <summary>
+    /// The first two fields of RAWHID. bRawData is NOT a pointer - the C
+    /// declaration is "BYTE bRawData[1]", an inline array - so the report
+    /// bytes start right after dwSizeHid and dwCount, at offset 8. Declaring
+    /// it as IntPtr read the first eight bytes of the REPORT as an address and
+    /// handed that to HidP_GetUsageValue, which is what crashed the app with
+    /// an access violation (event log: 0xc0000005 in HidP_GetUsageValue).
+    /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     private struct RAWHID
     {
         public uint dwSizeHid, dwCount;
-        public IntPtr bRawData;
     }
+
+    private const int RAWHID_DATA_OFFSET = 8;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct HIDP_CAPS
@@ -208,13 +217,21 @@ public sealed class RawTouchInput
                 }
                 if (rawHeader.dwType != RIM_TYPEHID) return false;
                 var hid = Marshal.PtrToStructure<RAWHID>(
-                    buf + Marshal.SizeOf<RAWINPUTHEADER>());
+                    IntPtr.Add(buf, (int)header));
                 if (hid.dwSizeHid == 0) return false;
                 var device = Resolve(rawHeader.hDevice);
                 if (device == null) return false;
-                for (uint i = 0; i < Math.Max(1u, hid.dwCount); i++)
+                IntPtr data = IntPtr.Add(buf, (int)header + RAWHID_DATA_OFFSET);
+                uint count = hid.dwCount == 0 ? 1 : hid.dwCount;
+                for (uint i = 0; i < count; i++)
                 {
-                    IntPtr report = hid.bRawData + (int)(i * hid.dwSizeHid);
+                    int off = (int)header + RAWHID_DATA_OFFSET
+                        + (int)(i * hid.dwSizeHid);
+                    // Stay inside the buffer we were given: a native call with
+                    // a pointer past the end is an access violation, and those
+                    // cannot be caught in managed code - the app just dies.
+                    if (off + (int)hid.dwSizeHid > (int)need) break;
+                    IntPtr report = IntPtr.Add(buf, off);
                     Parse(device, report, hid.dwSizeHid);
                 }
                 return true;
