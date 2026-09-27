@@ -219,27 +219,12 @@ public partial class PadWindow : Window
             // a WPF hit test (that one walked the visual tree per message and
             // the pad felt slow and stuttery).
             //
-            // While a touch gesture is running NOTHING here is exempt. The
-            // reference does it at the OS level instead - it creates its window
-            // with SetWindowLong styles so the window is click-through and
-            // reads input with raw input, which does not need hit testing at
-            // all (measured: TouchMousePointer3012.dll imports CreateWindowExW,
-            // SetWindowLongPtrW/W, RegisterRawInputDevices, GetRawInputData,
-            // mouse_event, SetPhysicalCursorPos, GetMessageExtraInfo). Its
-            // synthetic events therefore can never land on it.
-            //
-            // We take input from WM_POINTER, which IS delivered by hit testing,
-            // so the window cannot be transparent the whole time or the touch
-            // that starts the session would never arrive. During a session it
-            // can be: the touch is captured by then. And that is exactly when
-            // our own synthetic press and release are in flight - they used to
-            // land on the pad whenever the aim crossed its title bar or a
-            // corner resizer, because those two were exempt.
-            if (_session)
-            {
-                handled = true;
-                return HTTRANSPARENT;
-            }
+            // The title bar and the corner resizers are exempt, and they must
+            // stay exempt: making the WHOLE window transparent for the duration
+            // of a gesture stopped the pointer input that a gesture needs (a
+            // drag after a touch stopped working entirely). The input arrives
+            // by hit testing, so the window has to keep answering for the parts
+            // a gesture runs over.
             var screen = new Point(sx, sy);
             if (IsOverChrome(screen)) return IntPtr.Zero;
             var win = PointFromScreen(screen);
