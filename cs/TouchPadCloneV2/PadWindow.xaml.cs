@@ -111,6 +111,22 @@ public partial class PadWindow : Window
     private static readonly bool UseRawPointer = true;
 
     /// <summary>
+    /// Take touches from RAW INPUT as well, the way the working reference does.
+    /// It is what makes a click-through window possible at all: raw input is
+    /// delivered no matter which window is under the finger, so the pad no
+    /// longer has to stay hittable for the touch, and therefore our own
+    /// synthetic clicks cannot land on it.
+    ///
+    /// While this is on the pointer path is left alone - both feed the same
+    /// handlers, and the raw one is logged in full (device caps, ranges, first
+    /// contacts) so a real run can confirm the coordinate mapping before the
+    /// window is made click-through.
+    /// </summary>
+    private static readonly bool UseRawInput = true;
+
+    private readonly Core.RawTouchInput _rawTouch = new();
+
+    /// <summary>
     /// The selftest drives the touch handlers itself, so it must NOT also
     /// receive the pointer bridge's input: a real touch during a run fed the
     /// same state machine on top of the scripted ones and the counts went wild
@@ -167,8 +183,11 @@ public partial class PadWindow : Window
     private IntPtr PadWndProc(IntPtr hwnd, int msg, IntPtr wParam,
         IntPtr lParam, ref bool handled)
     {
-        // Pointer input first: a touch arrives here when the window is not
-        // registered for touch, and it must be CONSUMED or WPF promotes it.
+        // Raw input first: it is what will let this window be click-through.
+        if (UseRawInput && !SelftestMode && msg == 0x00FF)
+            _rawTouch.HandleMessage(lParam);
+        // Pointer input: a touch arrives here when the window is not registered
+        // for touch, and it must be CONSUMED or WPF promotes it.
         if (UseRawPointer && !SelftestMode)
         {
             if (msg == Core.RawPointer.WM_POINTERCAPTURECHANGED)
@@ -284,6 +303,7 @@ public partial class PadWindow : Window
     }
 
     private readonly Dictionary<uint, RawTouchDevice> _rawDevices = new();
+    private readonly Dictionary<int, bool> _rawTouchDown = new();
 
     /// <summary>
     /// Turn a pointer message into the touch handler the gesture code expects.
@@ -1499,6 +1519,41 @@ public partial class PadWindow : Window
                     bool ok = Core.RawPointer.UnregisterTouchWindow(h);
                     DebugLog.Write($"PAD unregister touch window = {ok}"
                         + " (WM_POINTER expected)");
+                }
+                if (UseRawInput)
+                {
+                    _rawTouch.PadRectProvider = () =>
+                    {
+                        var tl = PointToScreen(new Point(0, 0));
+                        var src = PresentationSource.FromVisual(this);
+                        double sx = src?.CompositionTarget?.TransformToDevice.M11 ?? 1;
+                        double sy = src?.CompositionTarget?.TransformToDevice.M22 ?? 1;
+                        return (tl.X, tl.Y, ActualWidth * sx, ActualHeight * sy);
+                    };
+                    _rawTouch.Contact = (id, sx, sy, down) =>
+                    {
+                        // Ids are kept apart from the pointer bridge's, so the
+                        // two sources cannot be mistaken for one contact.
+                        uint dev = unchecked((uint)(id + 1000));
+                        bool known = _rawTouchDown.ContainsKey(id);
+                        var at = new Point(sx, sy);
+                        if (down && !known)
+                        {
+                            _rawTouchDown[id] = true;
+                            ForwardRawTouch(dev, down: true, up: false, at);
+                        }
+                        else if (down)
+                        {
+                            ForwardRawTouch(dev, down: false, up: false, at);
+                        }
+                        else if (known)
+                        {
+                            _rawTouchDown.Remove(id);
+                            ForwardRawTouch(dev, down: false, up: true, at);
+                        }
+                    };
+                    _rawTouch.Register(
+                        new System.Windows.Interop.WindowInteropHelper(this).Handle);
                 }
             }
             catch { }
