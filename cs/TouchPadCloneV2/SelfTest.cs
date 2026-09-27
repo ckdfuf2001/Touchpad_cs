@@ -359,6 +359,26 @@ public static class SelfTest
                     : "cursor handed back to the mouse after the grab",
                 $"now=({cx},{cy}) phys=({mx},{my})");
         }
+        // ---- 2b. the reference's right click, and the only right click left
+        // in its model: a TWO-FINGER TAP (its log shows R-down/R-up for that
+        // gesture). Nothing was covering it, which is why "the right click does
+        // not work" - the long press is the drag now, so this has to be the one
+        // that fires.
+        {
+            int n = Mark();
+            await Settle();
+            var a = new FakeTouch(id++);
+            var b = new FakeTouch(id++);
+            Down(a, px - 30, py); await Task.Delay(50);
+            Down(b, px + 30, py); await Task.Delay(60);
+            Up(b); Up(a);
+            await Task.Delay(400);
+            await Drain();
+            var c = Since(n);
+            Check(c.Any(e => e.Kind == "click" && e.Btn == "right"),
+                "two-finger tap = right click (the reference's right click)",
+                $"ev={c.Count}");
+        }
         // ---- 3. double + immediate release (double-click) ----
         {
             int n = Mark();

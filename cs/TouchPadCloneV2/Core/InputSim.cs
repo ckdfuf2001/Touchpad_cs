@@ -274,17 +274,28 @@ public static class InputSim
     }
 
     private const uint CURSOR_SHOWING = 0x00000001;
+    /// <summary>
+    /// Windows hiding the pointer for a live touch. ShowCursor cannot clear
+    /// this - only the end of the touch can - and the old restore loop kept
+    /// calling ShowCursor(true) 500 times trying, which drained the shared
+    /// counter so far that the cursor could never be hidden again. Measured on
+    /// the reference: suppression is transient, the pointer comes back
+    /// visible on its own while the finger is still down.
+    /// </summary>
+    private const uint CURSOR_SUPPRESSED = 0x00000002;
 
     public static void HideCursor() => ShowCursor(false);
 
     /// <summary>Emergency restore: force the cursor visible again.</summary>
     public static void RestoreCursor()
     {
-        for (int i = 0; i < 500; i++)
+        for (int i = 0; i < 8; i++)
         {
             var ci = new CURSORINFO { cbSize = (uint)Marshal.SizeOf<CURSORINFO>() };
             if (GetCursorInfo(out ci) && (ci.flags & CURSOR_SHOWING) != 0)
                 return;
+            if ((ci.flags & CURSOR_SUPPRESSED) != 0)
+                return;   // nothing to do: the system clears it by itself
             ShowCursor(true);
         }
     }

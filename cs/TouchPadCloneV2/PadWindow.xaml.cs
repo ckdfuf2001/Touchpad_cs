@@ -142,7 +142,7 @@ public partial class PadWindow : Window
     private static readonly bool SelftestMode =
         Environment.GetEnvironmentVariable("TOUCHPAD_SELFTEST") == "1";
 
-    private static readonly bool RealCursorOnly = false;
+    private static readonly bool RealCursorOnly = true;
 
     /// <summary>
     /// The drag grab - OUR gesture. (Briefly switched off to isolate it; that
