@@ -346,17 +346,13 @@ public static class SelfTest
                 $"leftDowns={downs} ev={c.Count}");
             Check(lbl.Text.Contains("hold"),
                 "the label says what the hold did", $"label=\"{lbl.Text}\"");
-            // The cursor contract differs by mode, so assert the one that is
-            // configured: one cursor keeps it at the grab (there is no physical
-            // position to return to); dual cursor hands it back to the mouse
-            // once the drag ends.
-            bool oneCursor = (bool?)typeof(PadWindow)
-                .GetField("RealCursorOnly", BindingFlags.NonPublic
-                    | BindingFlags.Static)?.GetValue(null) ?? false;
-            Check(oneCursor ? (cx != mx || cy != my) : (cx == mx && cy == my),
-                oneCursor
-                    ? "cursor NOT handed back while the grab is held"
-                    : "cursor handed back to the mouse after the grab",
+            // The cursor is NEVER handed back any more - that hand-back is what
+            // made our event stream oscillate between the aim and the parked
+            // physical position, measured with the same low-level probe beside
+            // the reference's, which never does it. Whatever owns the cursor
+            // owns it until the physical mouse is moved.
+            Check(cx != mx || cy != my,
+                "cursor NOT handed back after the grab",
                 $"now=({cx},{cy}) phys=({mx},{my})");
         }
         // ---- 2b. the reference's right click, and the only right click left
@@ -482,28 +478,15 @@ public static class SelfTest
                     "drag press lands ON the aim point",
                     $"down@({d2.X},{d2.Y}) aim=({fx0:0},{fy0:0})");
             }
-            // What "correct" means here depends on the mode, so assert the one
-            // that is actually configured rather than pinning yesterday's.
+            // The cursor stays where the drag ended, in every mode: the
+            // hand-back was removed because it oscillated the cursor between
+            // the aim and the parked physical position mid-gesture (measured
+            // beside the reference, which never does it).
             var (cx, cy) = InputSim.Cursor();
             double ax = FakeX(), ay = FakeY();
-            bool oneCursor = (bool?)typeof(PadWindow)
-                .GetField("RealCursorOnly", BindingFlags.NonPublic
-                    | BindingFlags.Static)?.GetValue(null) ?? false;
-            if (oneCursor)
-            {
-                // One cursor: the cursor must be where the drag ENDED.
-                Check(Math.Abs(cx - ax) <= 3 && Math.Abs(cy - ay) <= 3,
-                    "after the drag the cursor stays at the drop point",
-                    $"now=({cx},{cy}) drop=({ax:0},{ay:0}) phys=({mx},{my})");
-            }
-            else
-            {
-                // Dual cursor: the drag is carried by the real cursor, which
-                // must be handed back to the physical mouse afterwards.
-                Check(Math.Abs(cx - mx) <= 3 && Math.Abs(cy - my) <= 3,
-                    "after the drag the cursor is handed back to the mouse",
-                    $"now=({cx},{cy}) want=({mx},{my}) drop=({ax:0},{ay:0})");
-            }
+            Check(Math.Abs(cx - ax) <= 3 && Math.Abs(cy - ay) <= 3,
+                "after the drag the cursor stays at the drop point",
+                $"now=({cx},{cy}) drop=({ax:0},{ay:0}) phys=({mx},{my})");
         }
         // ---- 4c. while a button is held, the OS cursor must be ON the
         // virtual one. A drag is carried entirely by the cursor, and a touch

@@ -218,6 +218,19 @@ public partial class PadWindow : Window
                 {
                     var screen = new Point(pi.ptPixelLocation.x,
                                            pi.ptPixelLocation.y);
+                    // Every contact is worth a line: two-finger gestures do
+                    // nothing on the device while the selftest (which injects
+                    // the contacts directly) passes, so the question is whether
+                    // the SECOND contact ever reaches this window at all.
+                    // Down/up are rare enough to log unconditionally.
+                    if (msg != Core.RawPointer.WM_POINTERUPDATE)
+                    {
+                        DebugLog.Write($"POINTER"
+                            + $" {(msg == Core.RawPointer.WM_POINTERDOWN ? "DOWN" : "UP")}"
+                            + $" id={pid} flags=0x{pi.pointerFlags:X}"
+                            + $" at=({screen.X:0},{screen.Y:0})"
+                            + $" tracked=[{string.Join(",", _rawDevices.Keys)}]");
+                    }
                     handled = true;
                     ForwardRawTouch(pid,
                         down: msg == Core.RawPointer.WM_POINTERDOWN,
@@ -533,49 +546,23 @@ public partial class PadWindow : Window
     /// </summary>
     private void RestorePhysicalCursor(string why)
     {
-        // One cursor: there is no separate physical position to hand back to,
-        // and moving the cursor here is exactly what used to make a drop land
-        // at the mouse instead of where it was dragged to.
-        if (RealCursorOnly) return;
-        // A one-shot: the click that opens a drag_hold must NOT hand the
-        // cursor back between itself and the hold. The application would see
-        // the cursor leave the target and come back, which is exactly the
-        // motion that cancels a drag.
-        if (_keepCursorOnce)
-        {
-            _keepCursorOnce = false;
-            DebugLog.Write($"PHYS keep cursor for {why} (drag_hold click)");
-            return;
-        }
-        // A drop is in flight. The release has to land, and be read by the
-        // application, at the virtual cursor - and a drop is not always
-        // processed synchronously with the button-up. Handing the cursor back
-        // at once (measured: the same millisecond as the BTN up line) is what
-        // made a drag drop at the PHYSICAL mouse position instead of where it
-        // was dragged to. Nothing may move the cursor until the grace has
-        // passed.
-        if (DateTime.Now < _cursorFreeAt)
-        {
-            DebugLog.Write($"PHYS defer restore for {why}"
-                + $" ({(int)(_cursorFreeAt - DateTime.Now).TotalMilliseconds}ms left)");
-            return;
-        }
-        if (UnifiedPhysical || _physX == int.MinValue) return;
-        try
-        {
-            var (cx, cy) = InputSim.Cursor();
-            if (Math.Abs(cx - _fakeX) > 2 || Math.Abs(cy - _fakeY) > 2)
-            {
-                DebugLog.Write($"PHYS skip restore ({cx},{cy}) not ours");
-                return;
-            }
-            if (cx == _physX && cy == _physY) return;
-            InputSim.SetCursor(_physX, _physY);
-        ForgetRealCursor();
-            _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(120);
-            DebugLog.Write($"PHYS restore ({_physX},{_physY}) from ({cx},{cy}) [{why}]");
-        }
-        catch { }
+        // NEVER hand the cursor back. This is the one difference that made our
+        // event stream oscillate and the reference's not - measured with the
+        // same low-level probe, ours alternated between the aim point and the
+        // parked physical position on every action:
+        //
+        //   OUR:  L-down (1979,1083) ... L-up (540,240) ... L-down (540,240)
+        //   REF:  L-down (1601,157)  ... moves ... L-up (1077,700)
+        //
+        // Every action moved the cursor to the target and the hand-back moved
+        // it straight back to the pad, so a drag was split between two windows
+        // mid-gesture and a drop landed by whichever position won that instant.
+        // That is the "works sometimes and not others". The reference has no
+        // such thing: the cursor stays where it was put, and the physical mouse
+        // simply carries on from there. Preserve mode still means the physical
+        // mouse does not STEER the virtual cursor (see OnMouseMove); it just no
+        // longer re-parks it.
+        DebugLog.Write($"PHYS no hand-back ({why})");
     }
 
     /// <summary>
@@ -638,7 +625,12 @@ public partial class PadWindow : Window
                 RestorePhysicalCursor("session end (no arrow)");
         }
         _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(250);
-        DebugLog.Write($"SESSION end fake=({_fakeX:0},{_fakeY:0}) phys=({_physX},{_physY})");
+        // One line that says what the whole gesture produced. "It works
+        // sometimes" is then a matter of reading the outcome of the runs that
+        // did not, instead of guessing which branch was taken - the same
+        // reason the reference was measured rather than inferred.
+        DebugLog.Write($"SESSION OUTCOME \"{_pressNote}\""
+            + $" fake=({_fakeX:0},{_fakeY:0}) phys=({_physX},{_physY})");
         // Lift-yank: Windows moves the cursor onto the contact point as the
         // finger leaves, i.e. AFTER we handed it back - and the delay is not
         // fixed (measured anywhere from ~0 to several hundred ms), so a
@@ -653,56 +645,13 @@ public partial class PadWindow : Window
         // dragged the cursor (and a drop) off the target a moment after the
         // release. Leave the cursor where the gesture put it.
         if (RealCursorOnly) return;
-        // A context menu is still up: the cursor must STAY on it. Every
-        // SetCursorPos away from an open menu dismisses it, which is why a
-        // right-click appeared to do nothing - the event fired, the menu
-        // opened, and the hand-back closed it again a moment later.
-        if (!_menuClick && wantX != int.MinValue)
-        {
-            int tries = 6;    // covers DropGraceMs plus a few polls
-            _rePark?.Stop();
-            _rePark = new System.Windows.Threading.DispatcherTimer
-            {
-                Interval = TimeSpan.FromMilliseconds(100),
-            };
-            var timer = _rePark;
-            timer.Tick += (_, _) =>
-            {
-                try
-                {
-                    if (--tries <= 0) { timer.Stop(); return; }
-                    if (_session || !_s.FakeCursor) { timer.Stop(); return; }
-                    // A drop is in flight: the release must land, and be
-                    // SEEN, at the virtual cursor. Moving the cursor back
-                    // before the application has processed it made the drop
-                    // land at the physical mouse instead. Keep polling, just
-                    // do not move yet.
-                    if (DateTime.Now < _cursorFreeAt) return;
-                    var (cx, cy) = InputSim.Cursor();
-                    if (Math.Abs(cx - wantX) <= 2 && Math.Abs(cy - wantY) <= 2)
-                    {
-                        timer.Stop();
-                        return;
-                    }
-                    // Only if nobody took it meanwhile: a mouse that moved
-                    // in the meantime owns the cursor, not us.
-                    InputSim.SetCursor((int)wantX, (int)wantY);
-                    ForgetRealCursor();
-                    _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(120);
-                    // Log only a real lift-yank. Every poll used to log - 71
-                    // lines in one session - which buries everything else when
-                    // the log is read back.
-                    if (Math.Abs(cx - wantX) + Math.Abs(cy - wantY) > 40)
-                    {
-                        string tag = UnifiedPhysical ? "RE-PARK" : "PHYS re-park";
-                        DebugLog.Write(
-                            $"{tag} to ({wantX:0},{wantY:0}), was ({cx},{cy})");
-                    }
-                }
-                catch { }
-            };
-            timer.Start();
-        }
+        // The re-park timer is gone with the hand-back: it moved the cursor to
+        // the physical position up to six times over 600ms after every
+        // gesture, which is the other half of the oscillation the probe showed
+        // (ours alternating between the aim and the pad while the reference's
+        // stream never does). Whatever owns the cursor now owns it until the
+        // user moves the physical mouse.
+        DebugLog.Write("PHYS no re-park (removed with the hand-back)");
     }
 
     /// <summary>
@@ -2456,6 +2405,15 @@ public partial class PadWindow : Window
         // A chained press that starts moving is a drag, not a hold.
         if (net > TapMoveDip && _dragArmId == e.TouchDevice.Id)
             StartDrag(e.TouchDevice.Id);
+        else if (_dragArmId == e.TouchDevice.Id && (_moveLogN % 8) == 0)
+        {
+            // Logged while it is still on its way to the drag threshold: with
+            // the arm but not yet StartDrag, "the drag does not work" is a
+            // question of whether the finger ever travels far enough, and that
+            // has to be visible rather than assumed.
+            DebugLog.Write($"GESTURE drag pending id={e.TouchDevice.Id}"
+                + $" net={net:0}/{TapMoveDip:0}DIP");
+        }
 
         // Gesture policy: EVERY gesture action needs TWO contacts. A single
         // finger is the pointer and nothing else - one-finger swipe actions
@@ -2861,6 +2819,20 @@ public partial class PadWindow : Window
             _pressNote = $"2-finger tap → {G.TwoFingerTap}";
             Status(_pressNote);
             DoGesture(G.TwoFingerTap);
+        }
+        else if (_twoCandidate || _twoActive)
+        {
+            // Log WHY the two-finger tap did not fire instead of leaving the
+            // "right click works sometimes" to guesswork, the same way the
+            // reference was measured rather than inferred. Every condition is
+            // reported with its value.
+            DebugLog.Write($"GESTURE two-finger-tap NOT fired"
+                + $" tap={tap} (moved={f.Moved} longFired={_longFired}"
+                + $" dragHold={_dragHold})"
+                + $" id={e.TouchDevice.Id} twoId={_twoId}"
+                + $" candidate={_twoCandidate} active={_twoActive}"
+                + $" tile={f.Tile?.RawKind ?? "null"} n={_fingers.Count}"
+                + $" acc=({_twoAccX:0},{_twoAccY:0})");
         }
         // Two-finger release: horizontal-dominant total = swipe-nav.
         if (_twoActive && _fingers.Count >= 1)
