@@ -898,6 +898,8 @@ public static class SelfTest
         // is missing or unreachable would pass parsing and do nothing.
         (double W, double H) SurfaceSize() =>
             (_surface!.ActualWidth, _surface.ActualHeight);
+        var mHit = typeof(PadWindow).GetMethod("HitMouse", NF);
+        var mResize = typeof(PadWindow).GetMethod("ResizerAt", NF);
         (double X, double Y)? FindPadPoint(Layout layout, double w, double h)
         {
             for (int iy = 1; iy <= 9; iy++)
@@ -910,6 +912,14 @@ public static class SelfTest
                 }
             return null;
         }
+        // Where the mouse path finds each layout's tiles and resizer zones.
+        // The gesture tests above prove the touch path; this proves the MOUSE
+        // path reaches the same layout, which is what matters when the layout
+        // is switched from Settings and used with the physical mouse.
+        Tile? MouseHitAt(double x, double y) =>
+            (Tile?)mHit?.Invoke(_pad, new object[] { new System.Windows.Point(x, y) });
+        string? ResizerAtPoint(double x, double y) =>
+            (string?)mResize?.Invoke(_pad, new object[] { x, y });
         if (presets != null)
         {
             foreach (var kv in presets)
@@ -934,6 +944,18 @@ public static class SelfTest
                     continue;
                 }
                 var p0 = at.Value;
+                // The MOUSE path has to reach the same layout: a tile at the
+                // point, and the corner resizer zone still where it belongs.
+                // That is what matters after switching layout in Settings and
+                // using the physical mouse.
+                var mh = MouseHitAt(p0.X, p0.Y);
+                Check(mh != null,
+                    $"layout {kv.Key}: mouse path finds a tile",
+                    $"at=({p0.X:0},{p0.Y:0}) tile={mh?.RawKind ?? "null"}");
+                string? rz = ResizerAtPoint(4, sh - 4);
+                Check(rz == "left",
+                    $"layout {kv.Key}: corner resizer works with the mouse",
+                    $"bottom-left -> {rz ?? "null"}");
                 var d = new FakeTouch(id++);
                 Down(d, p0.X, p0.Y); await Task.Delay(60); Up(d);
                 await Task.Delay(300);
