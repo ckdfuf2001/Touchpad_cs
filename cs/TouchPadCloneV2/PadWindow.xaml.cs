@@ -631,7 +631,7 @@ public partial class PadWindow : Window
         // opened, and the hand-back closed it again a moment later.
         if (!_menuClick && wantX != int.MinValue)
         {
-            int tries = 12;   // covers DropGraceMs plus a few polls
+            int tries = 6;    // covers DropGraceMs plus a few polls
             _rePark?.Stop();
             _rePark = new System.Windows.Threading.DispatcherTimer
             {
@@ -661,9 +661,15 @@ public partial class PadWindow : Window
                     InputSim.SetCursor((int)wantX, (int)wantY);
                     ForgetRealCursor();
                     _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(120);
-                    string tag = UnifiedPhysical ? "RE-PARK" : "PHYS re-park";
-                    DebugLog.Write(
-                        $"{tag} to ({wantX:0},{wantY:0}), was ({cx},{cy})");
+                    // Log only a real lift-yank. Every poll used to log - 71
+                    // lines in one session - which buries everything else when
+                    // the log is read back.
+                    if (Math.Abs(cx - wantX) + Math.Abs(cy - wantY) > 40)
+                    {
+                        string tag = UnifiedPhysical ? "RE-PARK" : "PHYS re-park";
+                        DebugLog.Write(
+                            $"{tag} to ({wantX:0},{wantY:0}), was ({cx},{cy})");
+                    }
                 }
                 catch { }
             };

@@ -144,6 +144,7 @@ public sealed class RawTouchInput
     private readonly Dictionary<IntPtr, Device> _devices = new();
     private readonly Dictionary<int, bool> _down = new();
     private bool _registered;
+    private int _seen;
 
     /// <summary>Ask for the digitizer's reports, including when we are not focused.</summary>
     public bool Register(IntPtr hwnd)
@@ -178,14 +179,33 @@ public sealed class RawTouchInput
     {
         try
         {
-            uint size = (uint)Marshal.SizeOf<RAWINPUTHEADER>() + 64;
-            IntPtr buf = Marshal.AllocHGlobal((int)size);
+            _seen++;
+            uint header = (uint)Marshal.SizeOf<RAWINPUTHEADER>();
+            // Two calls, the standard way: ask how much room the report needs.
+            // A fixed 88-byte buffer was too small for this device's HID report
+            // (it wanted 106) and GetRawInputData returned -1 without setting
+            // an error, which is exactly what the log showed as data=0xFFFFFFFF
+            // with size=106 - the size it needed.
+            uint need = 0;
+            GetRawInputData(lParam, RID_INPUT, IntPtr.Zero, ref need, header);
+            if (need == 0) need = header + 512;
+            IntPtr buf = Marshal.AllocHGlobal((int)need);
             try
             {
-                uint header = (uint)Marshal.SizeOf<RAWINPUTHEADER>();
+                uint size = need;
                 uint got = GetRawInputData(lParam, RID_INPUT, buf, ref size, header);
+                if (_seen <= 5 || (_seen % 200) == 0)
+                {
+                    DebugLog.Write($"RAWINPUT msg #{_seen} data={got}"
+                        + $" need={need} size={size} err={Marshal.GetLastWin32Error()}");
+                }
                 if (got == uint.MaxValue || got == 0) return false;
                 var rawHeader = Marshal.PtrToStructure<RAWINPUTHEADER>(buf);
+                if (_seen <= 5)
+                {
+                    DebugLog.Write($"RAWINPUT type={rawHeader.dwType}"
+                        + $" size={rawHeader.dwSize} dev={rawHeader.hDevice}");
+                }
                 if (rawHeader.dwType != RIM_TYPEHID) return false;
                 var hid = Marshal.PtrToStructure<RAWHID>(
                     buf + Marshal.SizeOf<RAWINPUTHEADER>());
