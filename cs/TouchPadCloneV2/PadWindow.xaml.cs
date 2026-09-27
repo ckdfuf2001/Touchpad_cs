@@ -95,6 +95,21 @@ public partial class PadWindow : Window
     /// verified on the device - the selftest calls handlers directly and never
     /// goes through the input pipeline, so it cannot see any of this.
     /// </summary>
+    /// <summary>
+    /// Read touches from the pointer API instead of WPF's touch pipeline.
+    ///
+    /// A WPF touch is promoted to a stylus and then to a mouse event, and the
+    /// system moves the cursor onto the contact as part of that - the source of
+    /// the cursor being dragged onto the pad, the phantom mouse events, the
+    /// flickering drag and the need for a fake cursor at all. A window that has
+    /// not registered for touch receives WM_POINTER instead of WM_TOUCH, so
+    /// unregistering and handling the pointer messages gives us the touches
+    /// untouched. The working reference on this machine (TouchMousePointer)
+    /// sidesteps the same thing with Raw Input. Flip to false to go back to the
+    /// WPF touch handlers.
+    /// </summary>
+    private static readonly bool UseRawPointer = true;
+
     private static readonly bool RealCursorOnly = false;
 
     /// <summary>
@@ -142,6 +157,40 @@ public partial class PadWindow : Window
     private IntPtr PadWndProc(IntPtr hwnd, int msg, IntPtr wParam,
         IntPtr lParam, ref bool handled)
     {
+        // Pointer input first: a touch arrives here when the window is not
+        // registered for touch, and it must be CONSUMED or WPF promotes it.
+        if (UseRawPointer)
+        {
+            if (msg == Core.RawPointer.WM_POINTERCAPTURECHANGED)
+            {
+                uint lost = Core.RawPointer.IdFromWParam(wParam);
+                if (_rawDevices.ContainsKey(lost))
+                {
+                    handled = true;
+                    ForwardRawTouch(lost, down: false, up: true,
+                        new Point(0, 0));
+                }
+                return IntPtr.Zero;
+            }
+            if (msg is Core.RawPointer.WM_POINTERDOWN
+                    or Core.RawPointer.WM_POINTERUPDATE
+                    or Core.RawPointer.WM_POINTERUP)
+            {
+                uint pid = Core.RawPointer.IdFromWParam(wParam);
+                if (Core.RawPointer.GetPointerType(pid, out int ptype)
+                    && ptype == Core.RawPointer.PT_TOUCH
+                    && Core.RawPointer.GetPointerInfo(pid, out var pi))
+                {
+                    var screen = new Point(pi.ptPixelLocation.x,
+                                           pi.ptPixelLocation.y);
+                    handled = true;
+                    ForwardRawTouch(pid,
+                        down: msg == Core.RawPointer.WM_POINTERDOWN,
+                        up: msg == Core.RawPointer.WM_POINTERUP, screen);
+                    return IntPtr.Zero;
+                }
+            }
+        }
         if (msg != WM_NCHITTEST || !MouseThroughActive) return IntPtr.Zero;
         try
         {
@@ -172,6 +221,85 @@ public partial class PadWindow : Window
     }
 
     private int _hitTestN;
+
+    /// <summary>
+    /// A WPF touch device we drive ourselves, so the pointer input can go
+    /// through the same gesture handlers WPF's touches used to reach. The
+    /// selftest has done exactly this all along with its FakeTouch, so the
+    /// handlers are already known to work this way.
+    /// </summary>
+    private sealed class RawTouchDevice : System.Windows.Input.TouchDevice
+    {
+        public Point Screen;
+        public RawTouchDevice(int id) : base(id) { }
+
+        private Point Local(IInputElement relativeTo) =>
+            (relativeTo as Visual)?.PointFromScreen(Screen) ?? Screen;
+
+        public override System.Windows.Input.TouchPoint GetTouchPoint(
+            IInputElement relativeTo)
+        {
+            var p = Local(relativeTo);
+            return new System.Windows.Input.TouchPoint(
+                this, p, new Rect(p, new Size(1, 1)),
+                System.Windows.Input.TouchAction.Move);
+        }
+
+        public override System.Windows.Input.TouchPointCollection
+            GetIntermediateTouchPoints(IInputElement relativeTo)
+        {
+            var c = new System.Windows.Input.TouchPointCollection();
+            c.Add(GetTouchPoint(relativeTo));
+            return c;
+        }
+    }
+
+    private readonly Dictionary<uint, RawTouchDevice> _rawDevices = new();
+
+    /// <summary>
+    /// Turn a pointer message into the touch handler the gesture code expects.
+    /// Down and Move are dispatched; Up releases and forgets the contact, so a
+    /// pointer id that goes away without an UP (capture changed) cannot leave a
+    /// finger stuck down.
+    /// </summary>
+    private void ForwardRawTouch(uint pointerId, bool down, bool up, Point screen)
+    {
+        try
+        {
+            if (down && !_rawDevices.TryGetValue(pointerId, out var dev))
+            {
+                dev = new RawTouchDevice(unchecked((int)pointerId));
+                _rawDevices[pointerId] = dev;
+            }
+            if (!_rawDevices.TryGetValue(pointerId, out dev))
+            {
+                if (up) return;   // an Up for a contact we never saw
+                return;
+            }
+            if (!up) dev.Screen = screen;
+            var args = new TouchEventArgs(dev, Environment.TickCount);
+            if (down)
+            {
+                args.RoutedEvent = UIElement.TouchDownEvent;
+                OnTouchDown(Surface, args);
+            }
+            else if (up)
+            {
+                args.RoutedEvent = UIElement.TouchUpEvent;
+                OnTouchUp(Surface, args);
+                _rawDevices.Remove(pointerId);
+            }
+            else
+            {
+                args.RoutedEvent = UIElement.TouchMoveEvent;
+                OnTouchMove(Surface, args);
+            }
+        }
+        catch (Exception ex)
+        {
+            DebugLog.Write($"RAWTOUCH forward failed: {ex.GetType().Name}");
+        }
+    }
 
     /// <summary>Keep the surface mouse-transparent while an injection runs.</summary>
     private void HoldMouseThrough() =>
@@ -1319,6 +1447,18 @@ public partial class PadWindow : Window
                 DebugLog.Write(src != null
                     ? "PAD hit-test hook installed"
                     : "PAD hit-test hook NOT installed (FromHwnd null)");
+                if (UseRawPointer)
+                {
+                    // Registering for touch is what makes Windows send
+                    // WM_TOUCH (and WPF promote it to a mouse). Unregister to
+                    // get WM_POINTER instead - the pointer path needs the
+                    // window NOT to be touch-registered.
+                    var h = new System.Windows.Interop.WindowInteropHelper(this)
+                        .Handle;
+                    bool ok = Core.RawPointer.UnregisterTouchWindow(h);
+                    DebugLog.Write($"PAD unregister touch window = {ok}"
+                        + " (WM_POINTER expected)");
+                }
             }
             catch { }
             EnsureTopmost();
