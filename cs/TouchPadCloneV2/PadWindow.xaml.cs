@@ -411,6 +411,17 @@ public partial class PadWindow : Window
 
     private void EnsureVisible()
     {
+        // In one-cursor mode the real cursor IS the cursor and nothing of ours
+        // ever hides it - but the system hides the pointer while a touch is
+        // active, and _cursorHidden never became true, so the old guard made
+        // this a no-op and the pointer could stay invisible for good
+        // ("the mouse is not visible"). Restore unconditionally; the helper
+        // returns at once when it is already showing.
+        if (RealCursorOnly)
+        {
+            InputSim.RestoreCursor();
+            return;
+        }
         if (!_cursorHidden) return;
         InputSim.RestoreCursor();
         _cursorHidden = false;
@@ -591,7 +602,13 @@ public partial class PadWindow : Window
         // One cursor: fight the system's pull onto the touch contact from the
         // first event, not only while a button is held - it moves the cursor
         // when it feels like it, and a plain move is just as vulnerable.
-        if (RealCursorOnly) StartDragKeeper();
+        // NOT with the pointer input path: the keeper exists to fight the system
+// pulling the cursor onto the touch contact, and it does that by writing the
+// cursor 125 times a second - with one cursor that is a tug of war (the
+// system pulls to the finger, the keeper pulls back), which is exactly the
+// "the gesture comes alive and then gets blocked" report. Without it the
+// pointer path's single SetPhysicalCursorPos per event simply wins.
+        if (RealCursorOnly && !UseRawPointer) StartDragKeeper();
         DebugLog.Write($"SESSION begin fake=({_fakeX:0},{_fakeY:0}) phys=({_physX},{_physY})");
     }
 
