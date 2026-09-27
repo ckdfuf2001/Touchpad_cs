@@ -212,17 +212,17 @@ public partial class PadWindow : Window
             //
             // ONLY while injecting. Doing this unconditionally made the pad
             // transparent to TOUCH as well - the system picks the touch target
-            // with the same hit test - and the surface went dead: the log had
-            // 108 "NCHITTEST through" and not one touch session. That is also
-            // why the cursor seemed to vanish: with no touch there is no
-            // session, so nothing draws it.
-            var win = PointFromScreen(new Point(sx, sy));
-            // Chrome (title bar buttons) and the corner resizers are not the
-            // touch surface: they must stay usable with the mouse.
-            if (IsChrome(InputHitTest(win))) return IntPtr.Zero;
+            // with the same hit test - and the surface went dead.
+            //
+            // Cheap on purpose: WM_NCHITTEST arrives many times per second and
+            // this runs on the UI thread, so it is a rectangle comparison, not
+            // a WPF hit test (that one walked the visual tree per message and
+            // the pad felt slow and stuttery). Chrome and the corner resizers
+            // are not the touch surface and stay usable with the mouse.
+            var screen = new Point(sx, sy);
+            if (IsOverChrome(screen)) return IntPtr.Zero;
+            var win = PointFromScreen(screen);
             if (ResizerAt(win.X, win.Y) != null) return IntPtr.Zero;
-            if ((_hitTestN++ % 40) == 0)
-                DebugLog.Write($"NCHITTEST through @({sx},{sy})");
             handled = true;
             return HTTRANSPARENT;
         }
@@ -230,7 +230,20 @@ public partial class PadWindow : Window
         return IntPtr.Zero;
     }
 
-    private int _hitTestN;
+    /// <summary>Rectangle test against the title bar - cheap, unlike a hit test.</summary>
+    private bool IsOverChrome(Point screen)
+    {
+        try
+        {
+            if (TitleBar.ActualWidth <= 0) return false;
+            var tl = TitleBar.PointToScreen(new Point(0, 0));
+            var br = TitleBar.PointToScreen(new Point(
+                TitleBar.ActualWidth, TitleBar.ActualHeight));
+            return screen.X >= tl.X && screen.X <= br.X
+                && screen.Y >= tl.Y && screen.Y <= br.Y;
+        }
+        catch { return false; }
+    }
 
     /// <summary>
     /// A WPF touch device we drive ourselves, so the pointer input can go
@@ -546,7 +559,7 @@ public partial class PadWindow : Window
         // One cursor: fight the system's pull onto the touch contact from the
         // first event, not only while a button is held - it moves the cursor
         // when it feels like it, and a plain move is just as vulnerable.
-        if (RealCursorOnly) StartDragKeeper();
+        if (RealCursorOnly && !UseRawPointer) StartDragKeeper();
         DebugLog.Write($"SESSION begin fake=({_fakeX:0},{_fakeY:0}) phys=({_physX},{_physY})");
     }
 
@@ -948,9 +961,12 @@ public partial class PadWindow : Window
         {
             var (ax, ay) = InputSim.Cursor();
             bool off = Math.Abs(ax - tx) > 2 || Math.Abs(ay - ty) > 2;
+            // No window lookup here: it costs three user32 calls plus string
+            // work on a path that runs many times a second, and the pad felt
+            // slow because of it. The divergence flag is the part that matters;
+            // the window under the drop is reported once, at DRAG end.
             DebugLog.Write($"DRAG sync -> ({tx},{ty}) actual=({ax},{ay})"
-                + (off ? " DIVERGED" : "")
-                + $" under {DescribeWindowAt(ax, ay)}");
+                + (off ? " DIVERGED" : ""));
             // Put it straight back. The yank happens AFTER our SetCursorPos
             // (the system moves the cursor when it processes the touch), so
             // waiting for the next move event leaves the cursor - and, if the
@@ -1285,7 +1301,11 @@ public partial class PadWindow : Window
         _actionHeld = "left";
         _secondConsumed = true;
         PressDown("left");
-        StartDragKeeper();
+        // The keeper exists to fight the system moving the cursor onto the
+        // touch contact. The pointer path never promotes a touch, so nothing
+        // moves it and 125 wakeups a second are pure cost - only the old
+        // WPF-touch path needs the keeper.
+        if (!UseRawPointer) StartDragKeeper();
     }
 
     private System.Windows.Threading.DispatcherTimer? _dragKeeper;
@@ -1325,8 +1345,9 @@ public partial class PadWindow : Window
             if (Math.Abs(ax - tx) <= 1 && Math.Abs(ay - ty) <= 1) return;
             InputSim.SetCursor(tx, ty);
             ForgetRealCursor();
-            DebugLog.Write($"DRAG keeper -> ({tx},{ty}) (was on "
-                + $"{DescribeWindowAt(ax, ay)})");
+            // No window lookup and no log line per correction: this runs 125
+            // times a second while a drag is in flight and the lookups alone
+            // made it stutter.
         };
         _dragKeeper.Start();
     }
