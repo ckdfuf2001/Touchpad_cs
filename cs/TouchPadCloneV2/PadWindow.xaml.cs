@@ -110,6 +110,16 @@ public partial class PadWindow : Window
     /// </summary>
     private static readonly bool UseRawPointer = true;
 
+    /// <summary>
+    /// The selftest drives the touch handlers itself, so it must NOT also
+    /// receive the pointer bridge's input: a real touch during a run fed the
+    /// same state machine on top of the scripted ones and the counts went wild
+    /// (measured: a duplicate-tap case reporting l=7 where 4 was expected, and
+    /// a hold case seeing a right click that no scripted press asked for).
+    /// </summary>
+    private static readonly bool SelftestMode =
+        Environment.GetEnvironmentVariable("TOUCHPAD_SELFTEST") == "1";
+
     private static readonly bool RealCursorOnly = false;
 
     /// <summary>
@@ -159,7 +169,7 @@ public partial class PadWindow : Window
     {
         // Pointer input first: a touch arrives here when the window is not
         // registered for touch, and it must be CONSUMED or WPF promotes it.
-        if (UseRawPointer)
+        if (UseRawPointer && !SelftestMode)
         {
             if (msg == Core.RawPointer.WM_POINTERCAPTURECHANGED)
             {
@@ -802,6 +812,12 @@ public partial class PadWindow : Window
     /// </summary>
     private int _dragArmId = -1;
     /// <summary>
+    /// Whether the configured hold action can become a drag. The original
+    /// distinguishes press-and-hold Drag from click-then-hold L-click and
+    /// drag; both move, but only the latter sends its own click.
+    /// </summary>
+    private bool DragActionArmed() => G.SecondHold is "drag" or "drag_hold";
+    /// <summary>
     /// A completed double/triple tap leaves the grab armed for one more
     /// press (see the plain-press branch in OnTouchDown). Twice MultiTapMs:
     /// the chain window itself is deliberately short so a slow third tap
@@ -1174,7 +1190,7 @@ public partial class PadWindow : Window
             if (id == _longId) CancelLong(); // don't also fire long-press
             _secondConsumed = true;
             _dragArmId = -1;
-            _pressNote = $"hold 250ms → {action}";
+            _pressNote = $"hold → {action}";
             Status(_pressNote);
             DebugLog.Write("GESTURE second-hold");
             FirePressAction(action, id);
@@ -1216,14 +1232,9 @@ public partial class PadWindow : Window
         ClampFake();
         _overlay?.MoveToPhysical(_fakeX, _fakeY);
         f.Start = f.Last;
-        // Same order as the hold timer's drag_hold (see GrabHold): the click
-        // is the push that picks the item up, then the button stays held. Both
-        // routes to a drag now do the same thing - an earlier version clicked
-        // here "to be safe" and double-fired every drag, but it did NOT click
-        // on the hold route, and the two disagreeing is what made "click a
-        // file then drag" behave differently depending on how the press
-        // started.
-        GrabHold(id);
+        // Both drag routes press and hold the same way; only an explicit
+        // click-then-hold action adds its own click first. See GrabHold.
+        GrabHold(id, G.SecondHold == "drag_hold");
         _pressNote = "drag (grabbed)";
         Status(_pressNote);
         // Who actually receives this press? If it is the overlay, or an
@@ -1237,17 +1248,14 @@ public partial class PadWindow : Window
     }
 
     /// <summary>
-    /// Actions that trigger while the finger is DOWN (long-press, 2nd hold).
-    /// drag_hold presses the button until release; the rest fire once.
+    /// Begin a press-and-hold drag at the aim point. The held button is what
+    /// carries the drag; its release stays with the lifting finger and is not
+    /// part of the grab. The original maps "2nd tap and hold" to Drag, not to
+    /// click-then-drag, so the default path sends no push click: the tap that
+    /// armed it already clicked. Only an explicit "drag_hold" action reproduces
+    /// the old click-then-hold behavior.
     /// </summary>
-    /// <summary>
-    /// Begin a drag_hold: deliver a COMPLETE click at the aim point, then
-    /// press and keep holding. The click is the "push" - without it the
-    /// application has nothing picked up, so the drag has nothing to carry -
-    /// and the release is deliberately NOT part of it: only the click's own up
-    /// happens here, the held button stays down until the finger lifts.
-    /// </summary>
-    private void GrabHold(int id)
+    private void GrabHold(int id, bool pushClick)
     {
         if (!DragEnabled)
         {
@@ -1261,15 +1269,17 @@ public partial class PadWindow : Window
         _dragFromX = _fakeX; _dragFromY = _fakeY;
         _dragPathDip = 0;
         // A press must not land on the pad's own rectangle: the pad is on top,
-        // so the click or the drag would be delivered to us instead of the
-        // The press must not land on the pad, and neither must the moves or
-        // the release that follow it. The surface is made mouse-transparent
-        // for the injection instead of moving the aim, so the press and the
-        // drop stay exactly where the finger put them (moving the aim put them
-        // a pixel off the pad's edge instead).
+        // so the press or the drag would be delivered to us instead of the
+        // target. The surface is made mouse-transparent for the injection
+        // instead of moving the aim, so the press and the drop stay exactly
+        // where the finger put them (moving the aim put them a pixel off the
+        // pad's edge instead).
         HoldMouseThrough();
-        _keepCursorOnce = true;        // no hand-back between click and hold
-        SafeClick("left");
+        if (pushClick)
+        {
+            _keepCursorOnce = true;    // no hand-back between click and hold
+            SafeClick("left");
+        }
         _dragHold = true;
         _dragId = id;
         _actionHeld = "left";
@@ -1332,9 +1342,13 @@ public partial class PadWindow : Window
             ClampFake();
             _overlay?.MoveToPhysical(_fakeX, _fakeY);
         }
-        if (action == "drag_hold")
+        if (action == "drag")
         {
-            GrabHold(id);
+            GrabHold(id, pushClick: false);
+        }
+        else if (action == "drag_hold")
+        {
+            GrabHold(id, pushClick: true);
         }
         else DoGesture(action);
     }
@@ -2065,17 +2079,15 @@ public partial class PadWindow : Window
                     _thirdPress = false;
                     _thirdId = -1;
                     // Move -> grab immediately.
-                    if (G.SecondHold == "drag_hold")
+                    if (DragActionArmed())
                         _dragArmId = e.TouchDevice.Id;
-                    // Hold still -> the configured SecondHold, on the 250ms
-                    // timer. With the default drag_hold that IS the
-                    // click-and-drag the report asked for: the button goes
-                    // down and stays down, so moving drags and releasing
-                    // drops. Previously SecondHold was skipped for drag_hold
-                    // and the long-press was armed instead, so holding after a
-                    // double-click fired a RIGHT CLICK - the button was never
-                    // held, and the drag could not exist because there was no
-                    // press to move with.
+                    // Hold still -> the configured SecondHold, on the hold timer.
+                    // With the default drag that IS the press-and-drag the
+                    // report asked for: the button goes down and stays down, so
+                    // moving drags and releasing drops. Like the original's
+                    // "2nd tap and hold: Drag", it sends no extra click; the
+                    // tap that armed it already clicked. The old click-then-hold
+                    // remains available as the explicit "drag_hold" action.
                     ArmHold(e.TouchDevice.Id, G.SecondHold);
                     // No ArmLong here. A press that follows a tap belongs to
                     // the drag; the long-press (right click) is the gesture of
@@ -2089,7 +2101,7 @@ public partial class PadWindow : Window
                     _secondPress = false;
                     _secondId = -1;
                     _secondConsumed = false;
-                    if (G.SecondHold == "drag_hold")
+                    if (DragActionArmed())
                         _dragArmId = e.TouchDevice.Id;
                     ArmHold(e.TouchDevice.Id, G.SecondHold);
                     // No ArmLong: same reason as the second press above.
@@ -2104,7 +2116,7 @@ public partial class PadWindow : Window
                     // happened. Without that arm, press+move is a plain
                     // pointer move and the release emits nothing - which is
                     // what "no drag after a double-click" looked like: a
-                    // person needs more than the 600ms chain window between
+                    // person needs more than the tap-chain window between
                     // the double and the next press, and then the grab was
                     // silently unavailable. Arming it does NOT break cursor
                     // movement: a quick press still clicks, only press+move
@@ -2114,8 +2126,8 @@ public partial class PadWindow : Window
                     if (_dragArmId >= 0)
                     {
                         // Can grab: same rule as the chained presses - move
-                        // grabs, holding runs SecondHold (drag_hold by
-                        // default), and no long-press races it.
+                        // grabs, holding runs SecondHold (drag by default),
+                        // and no long-press races it.
                         ArmHold(e.TouchDevice.Id, G.SecondHold);
                     }
                     else
@@ -2561,18 +2573,23 @@ public partial class PadWindow : Window
                     if (id == _longId) CancelLong();
                     if (id == _thirdId && _thirdPress)
                     {
-                        // Third press released right away: triple-tap event.
-                        // (Held-down was a hold; Up ends it silently.)
+                        // Third press released right away: triple-tap event -
+                        // UNLESS the hold timer already resolved this press.
+                        // A hold ends silently on release; firing the triple
+                        // click on top of a held drag would add a stray click.
                         _thirdPress = false;
                         ClearChains();
                         if (_dragHold && id == _dragId)
                             ReleaseActionButton();
-                        DoGesture(G.TripleTap);
-                        // Leave the grab armed for the next press: a
-                        // triple-click is a "select this line" intent, and
-                        // what the user does next is usually grab and move.
-                        _grabArmUntil = DateTime.Now.AddMilliseconds(
-                            _s.MultiTapMs * 2);
+                        if (!_secondConsumed)
+                        {
+                            DoGesture(G.TripleTap);
+                            // Leave the grab armed for the next press: a
+                            // triple-click is a "select this line" intent, and
+                            // what the user does next is usually grab and move.
+                            _grabArmUntil = DateTime.Now.AddMilliseconds(
+                                _s.MultiTapMs * 2);
+                        }
                     }
                     else if (id == _secondId && _secondPress)
                     {
@@ -2582,10 +2599,10 @@ public partial class PadWindow : Window
                         _secondPress = false;
                         if (_dragHold && id == _dragId)
                         {
-                            // Release only. The push click already happened at
-                            // grab time (see GrabHold) and the release must NOT
-                            // carry a click of its own: it would fire at the
-                            // drop point, which is not part of a drag.
+                            // Release only. The grab already pressed the button
+                            // and the release must NOT carry a click of its own:
+                            // it would fire at the drop point, which is not part
+                            // of a drag.
                             ReleaseActionButton();
                         }
                         else if (!_secondConsumed)
@@ -2615,7 +2632,7 @@ public partial class PadWindow : Window
                 // A single tap arms the grab too, not just a double/triple
                 // tap. The flow is "tap the thing, then press and move it",
                 // and those two are a second or more apart at human speed: the
-                // 600ms chain window has closed by then, so the press was read
+                // tap-chain window has closed by then, so the press was read
                 // as a plain one, no grab was armed, and the drag produced NO
                 // button at all - the cursor roamed and nothing was pressed or
                 // released. Logged: TOUCHDOWN, long canceled, cursor moves,
@@ -2743,6 +2760,7 @@ public partial class PadWindow : Window
             case "double_click": SafeClick("left"); SafeClick("left"); break;
             case "triple_click":
                 SafeClick("left"); SafeClick("left"); SafeClick("left"); break;
+            case "drag": SafeClick("left"); break; // release-context fallback
             case "drag_hold": SafeClick("left"); break; // release-context fallback
             case "wheel_up": FireWheel(_s.WheelStep); break;
             case "wheel_down": FireWheel(-_s.WheelStep); break;

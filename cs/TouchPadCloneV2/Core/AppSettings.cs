@@ -10,7 +10,10 @@ public sealed class GestureMap
     public string DoubleTap { get; set; } = "double_click";
     public string TripleTap { get; set; } = "triple_click";
     public string LongPress { get; set; } = "right_click";
-    public string SecondHold { get; set; } = "drag_hold";
+    // The original distinguishes Drag (press and hold, no extra click) from
+    // L-click and drag (click, then press and hold). The default follows the
+    // original's "2nd tap and hold: Drag" selection.
+    public string SecondHold { get; set; } = "drag";
     public string TwoFingerTap { get; set; } = "right_click";
     public string SwipeUp { get; set; } = "wheel_up";
     public string SwipeDown { get; set; } = "wheel_down";
@@ -20,7 +23,7 @@ public sealed class GestureMap
     public static readonly string[] Actions =
     [
     "none", "left_click", "right_click", "middle_click", "double_click",
-    "triple_click", "drag_hold", "wheel_up", "wheel_down",
+    "triple_click", "drag", "drag_hold", "wheel_up", "wheel_down",
     "browser_back", "browser_forward", "assist_pad", "toggle_fake",
     ];
 }
@@ -137,6 +140,22 @@ public sealed class AppSettings
         catch { }
     }
 
+    /// <summary>
+    /// The old default stored "drag_hold" in SecondHold slots. That setting
+    /// meant click-then-hold, while the intended default is the original's
+    /// press-and-hold Drag. Move legacy SecondHold selections forward; a user
+    /// can still explicitly select "drag_hold" for click-then-hold.
+    /// </summary>
+    private static void MigrateLegacySecondHold(AppSettings settings)
+    {
+        foreach (var map in new[]
+            { settings.Gestures, settings.ArtistGestures, settings.VirtualGestures })
+        {
+            if (map != null && map.SecondHold == "drag_hold")
+                map.SecondHold = "drag";
+        }
+    }
+
     public static AppSettings Load()
     {
         try
@@ -150,6 +169,7 @@ public sealed class AppSettings
                     s.ArtistGestures ??= new();
                     s.VirtualGestures ??= new();
                     s.StripGestures ??= new();
+                    MigrateLegacySecondHold(s);
                     return s;
                 }
             }

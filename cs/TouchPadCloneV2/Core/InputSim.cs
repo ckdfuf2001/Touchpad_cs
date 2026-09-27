@@ -128,7 +128,7 @@ public static class InputSim
     }
 
     public static void SetCursor(int x, int y) =>
-        SetCursorPos(x, y);
+        SetPhysicalCursorPos(x, y);
 
     private static uint DownFlag(string button) => button switch
     {
@@ -169,57 +169,49 @@ public static class InputSim
         SendInput((uint)batch.Length, batch, Marshal.SizeOf<INPUT>());
 
     /// <summary>
-    /// Atomic click at an EXACT position: absolute-move + down + absolute-move
-    /// + up in ONE SendInput batch. Measured root cause it fixes: between a
-    /// parked Down and its Up (~13ms apart with logging), Windows yanks the
-    /// system cursor back onto the live touch contact - observed 900px jumps
-    /// (down@fake, up@finger). Scattered pairs never satisfy the OS 4x4px
-    /// double-click box (singles pile up -> Explorer rename; doubles fire
-    /// twice). Inside one batch nothing interleaves; the pair always lands
-    /// on the same pixel.
+    /// Click at an EXACT position, the way the working reference does it: put
+    /// the cursor there physically, then inject down and up with mouse_event.
+    /// The pair still lands on the same pixel because the cursor is parked
+    /// first and nothing else runs between the two calls.
     /// </summary>
     public static void ClickAt(int x, int y, string button)
     {
-        Send(AbsMove(x, y), Button(DownFlag(button), x, y),
-             AbsMove(x, y), Button(UpFlag(button), x, y));
+        SetPhysicalCursorPos(x, y);
+        mouse_event(DownFlag(button), 0, 0, 0, InjectTag);
+        mouse_event(UpFlag(button), 0, 0, 0, InjectTag);
         DebugLog.Write($"BTN click {button} @({x},{y})");
         Note("click", button, x, y);
     }
 
     /// <summary>
-    /// Absolute-move + button-down in ONE batch. The drag hold needs the
-    /// exact same guarantee as ClickAt: a bare Down() after SetCursorPos
-    /// loses the race against the OS yanking the cursor onto the live touch
-    /// contact, so the press landed on OUR OWN pad instead of the target
-    /// (measured symptom: click-then-hold never moved anything).
+    /// Park the cursor at the point, then press - the reference's way.
     /// </summary>
     public static void DownAt(int x, int y, string button)
     {
-        Send(AbsMove(x, y), Button(DownFlag(button), x, y));
+        SetPhysicalCursorPos(x, y);
+        mouse_event(DownFlag(button), 0, 0, 0, InjectTag);
         DebugLog.Write($"BTN down {button} @({x},{y})");
         Note("down", button, x, y);
     }
 
-    /// <summary>Absolute-move + button-up in ONE batch (mirror of DownAt).</summary>
+    /// <summary>Mirror of DownAt for the release.</summary>
     public static void UpAt(int x, int y, string button)
     {
-        Send(AbsMove(x, y), Button(UpFlag(button), x, y));
+        SetPhysicalCursorPos(x, y);
+        mouse_event(UpFlag(button), 0, 0, 0, InjectTag);
         DebugLog.Write($"BTN up {button} @({x},{y})");
         Note("up", button, x, y);
     }
 
     /// <summary>
-    /// Absolute-move + wheel in ONE batch: wheel messages go to the window
-    /// under the SYSTEM cursor, which mid-touch is yanked onto our pad.
+    /// Park the cursor, then wheel. Wheel messages go to the window under the
+    /// cursor, which is why the position is set first.
     /// </summary>
     public static void WheelAt(int x, int y, int delta, bool horizontal)
     {
-        INPUT w = AbsMove(x, y);
-        INPUT ev = w;
-        ev.u.mi.dwFlags = horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL;
-        ev.u.mi.dx = ev.u.mi.dy = 0;
-        ev.u.mi.mouseData = (uint)delta;
-        Send(w, ev);
+        SetPhysicalCursorPos(x, y);
+        mouse_event(horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL,
+            0, 0, unchecked((uint)delta), InjectTag);
         Note("wheel", (horizontal ? "h" : "v") + delta, x, y);
     }
 
@@ -240,6 +232,32 @@ public static class InputSim
 
     [DllImport("user32.dll")]
     private static extern bool SetCursorPos(int x, int y);
+
+    /// <summary>
+    /// Cursor move in PHYSICAL pixels - the same call the working reference on
+    /// this machine uses (TouchMousePointer). SetCursorPos is the logical
+    /// variant and differs under DPI virtualisation; physical is unambiguous.
+    /// </summary>
+    [DllImport("user32.dll")]
+    private static extern bool SetPhysicalCursorPos(int x, int y);
+
+    /// <summary>
+    /// Click injection, the same primitive the reference uses - NOT SendInput.
+    /// Measured in a minimal harness: a drag built from SendInput absolute
+    /// moves selected nothing, while the same drag built from the reference's
+    /// calls did.
+    /// </summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern void mouse_event(uint dwFlags, int dx, int dy,
+        uint dwData, IntPtr dwExtraInfo);
+
+    /// <summary>
+    /// Tag our own injections so they can be told apart from real input, the
+    /// way the reference does with GetMessageExtraInfo. The signature is the
+    /// convention: 0xFF515700 | (thread id &amp; 0xFF).
+    /// </summary>
+    private static readonly IntPtr InjectTag = new(
+        unchecked((int)(0xFF515700 | (uint)(Environment.CurrentManagedThreadId & 0xFF))));
 
     [DllImport("user32.dll")]
     private static extern int ShowCursor(bool bShow);
@@ -277,15 +295,13 @@ public static class InputSim
     }
 
     /// <summary>
-    /// Put the system cursor at an absolute point. Needed while a button is
-    /// held: a drag is carried entirely by the cursor, so it has to follow
-    /// the virtual one on every touch event. Absolute rather than relative
-    /// on purpose - it is idempotent, so it cannot fight another writer for
-    /// the cursor, and it cannot accumulate drift.
+    /// Put the cursor at an absolute point, in physical pixels, the way the
+    /// reference does. Idempotent, so it cannot fight another writer and cannot
+    /// accumulate drift.
     /// </summary>
     public static void MoveTo(int x, int y)
     {
-        Send(AbsMove(x, y));
+        SetPhysicalCursorPos(x, y);
         Note("move", "", x, y);
     }
 
