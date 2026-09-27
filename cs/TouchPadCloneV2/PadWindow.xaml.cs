@@ -617,6 +617,11 @@ public partial class PadWindow : Window
         if (!_session) return;
         _session = false;
         SessionActive = false;
+        // Backstop: no finger is on the pad any more, so nothing can be
+        // holding a synthetic button. A grab whose release was missed would
+        // otherwise leave the left button down for the whole desktop (the
+        // stream-balance check caught exactly that: 8 downs, 7 ups).
+        if (_dragHold) ReleaseActionButton();
         if (ArrowOn)
         {
             // Single cursor identity: keep it hidden, arrow stays.
@@ -1273,7 +1278,16 @@ public partial class PadWindow : Window
         _holdTimer.Tick += (_, _) =>
         {
             CancelHold();
-            if (!_fingers.TryGetValue(id, out _)) return;
+            if (!_fingers.TryGetValue(id, out var held)) return;
+            // A finger that has already MOVED is a cursor move, not a hold:
+            // the hold action (drag) must only claim a press that stayed put.
+            // Without this, "touch and move" would grab mid-stroke and the
+            // pointer could never be moved.
+            if (held.Moved)
+            {
+                DebugLog.Write($"GESTURE hold skipped id={id} (the press moved)");
+                return;
+            }
             // The movement already grabbed this press (StartDrag). Firing
             // SecondHold now would press the button a SECOND time, and the
             // release would only undo one of them - a stuck / doubled button.
@@ -2247,29 +2261,31 @@ public partial class PadWindow : Window
                     _thirdPress = false;
                     _secondId = -1;
                     _thirdId = -1;
-                    // A plain press can only be a grab if a multi-tap just
-                    // happened. Without that arm, press+move is a plain
-                    // pointer move and the release emits nothing - which is
-                    // what "no drag after a double-click" looked like: a
-                    // person needs more than the tap-chain window between
-                    // the double and the next press, and then the grab was
-                    // silently unavailable. Arming it does NOT break cursor
-                    // movement: a quick press still clicks, only press+move
-                    // grabs, and the arm expires on its own.
-                    _dragArmId = DateTime.Now < _grabArmUntil
-                        ? e.TouchDevice.Id : -1;
-                    if (_dragArmId >= 0)
+                    // Two ways in, both wanted:
+                    //  - a press right after a tap (grab armed) grabs on
+                    //    movement, which is the tap-then-drag flow the report
+                    //    chose;
+                    //  - a BARE press that stays put grabs on the HOLD timer
+                    //    (SecondHold, "drag"), which is the reference's model:
+                    //    its log shows L-down arriving after the hold, then the
+                    //    moves, then L-up at the drop. Its right click is the
+                    //    two-finger tap, not a single-finger long press.
+                    // Movement alone never grabs, or the pointer could not be
+                    // moved at all: the hold timer bails when the finger has
+                    // moved (see ArmHold).
+                    bool tapArmed = DateTime.Now < _grabArmUntil;
+                    if (DragActionArmed())
                     {
-                        // Can grab: same rule as the chained presses - move
-                        // grabs, holding runs SecondHold (drag by default),
-                        // and no long-press races it.
+                        _dragArmId = tapArmed ? e.TouchDevice.Id : -1;
                         ArmHold(e.TouchDevice.Id, G.SecondHold);
                     }
                     else
                     {
-                        // A fresh press with no tap in front of it: this is
-                        // where the long-press (right click) lives.
-                        ArmLong(e.TouchDevice.Id, G.LongPress);
+                        _dragArmId = tapArmed ? e.TouchDevice.Id : -1;
+                        if (_dragArmId >= 0)
+                            ArmHold(e.TouchDevice.Id, G.SecondHold);
+                        else
+                            ArmLong(e.TouchDevice.Id, G.LongPress);
                     }
                 }
             }
@@ -2597,18 +2613,27 @@ public partial class PadWindow : Window
     }
 
     private double _wheelCarry;
+    private double _wheelCarryH;
     private void DoWheel(double amount, bool horizontal)
     {
         // Wheel messages route to the window under the SYSTEM cursor, which
         // mid-touch is yanked onto our own pad (scrolls nothing). Move and
         // wheel in ONE atomic batch so nothing can interleave.
-        _wheelCarry += amount;
-        while (Math.Abs(_wheelCarry) >= _s.WheelStep)
+        //
+        // Proportional, NOT quantised into WheelStep chunks. Measured on the
+        // reference: its two-finger scroll emits a stream of deltas that vary
+        // with the movement (-156, -168, -132, -108, -300 ...) rather than
+        // repeating one fixed 120 step, which is what makes it feel smooth.
+        // Ours accumulated to a full 120 before sending anything.
+        double carry = horizontal ? _wheelCarryH : _wheelCarry;
+        carry += amount;
+        int d = (int)carry;
+        if (d != 0)
         {
-            int d = _wheelCarry > 0 ? _s.WheelStep : -_s.WheelStep;
+            carry -= d;
             FireWheel(d, horizontal);
-            _wheelCarry -= d;
         }
+        if (horizontal) _wheelCarryH = carry; else _wheelCarry = carry;
         // The wheel burst is done: the real cursor goes back to the physical
         // mouse (the wheel itself was routed by the atomic move+wheel pair).
         RestorePhysicalCursor("wheel");
@@ -2650,7 +2675,12 @@ public partial class PadWindow : Window
             // half of the original "long press does nothing" report. A press
             // that never moved and whose long-press has not fired is a tap,
             // however long it was held.
-            bool tap = !f.Moved && !_longFired;
+            // A press that is still HOLDING a button is not a tap: the hold
+            // action (SecondHold = drag) put the left button down, and calling
+            // this a tap skipped the release path entirely, leaving the button
+            // down for the whole desktop. Measured by the stream-balance check:
+            // 10 downs against 8 ups.
+            bool tap = !f.Moved && !_longFired && !_dragHold;
         if (tap && f.Tile?.Action == TileAction.Pad)
         {
             // Tap rewind: contact centroid jitters several px during even a

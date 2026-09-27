@@ -319,11 +319,14 @@ public static class SelfTest
             Check(c.Count == 1 && c[0].Kind == "click" && c[0].Btn == "left",
                 "tap = one left click", $"ev={c.Count}");
         }
-        // ---- 2. one hold, three things it must get right: the right click
-        // itself, the label that survives the release, and the physical mouse
-        // cursor that must NOT be handed back (a context menu lives at the
-        // cursor; moving it away dismisses the menu, which is how a working
-        // right-click looked like a no-op).
+        // ---- 2. one hold, three things it must get right. With SecondHold =
+        // "drag" (the shipped default) a held press is a DRAG GRAB, not a right
+        // click - the reference's model, measured from its own event log:
+        // L-down arrives after the hold, then the moves, then L-up at the drop,
+        // and its right click is the TWO-FINGER TAP (R-down). So the hold must
+        // put the left button down, the label must say so, and the cursor must
+        // NOT be handed back (a drag that gets its cursor yanked away drops in
+        // the wrong place).
         {
             var lbl = (System.Windows.Controls.TextBlock)_pad.FindName("StatusLabel");
             int n = Mark();
@@ -337,15 +340,14 @@ public static class SelfTest
             await Drain();
             var c = Since(n);
             var (cx, cy) = InputSim.Cursor();
-            Check(c.Count == 1 && c[0].Kind == "click" && c[0].Btn == "right",
-                "long-press = one right click", $"ev={c.Count}");
-            // The label used to be overwritten unconditionally with
-            // "up gesture Nms", so lifting after a right-click made it claim
-            // nothing had happened.
-            Check(lbl.Text.Contains("long-press") && lbl.Text.Contains("right_click"),
-                "label shows the long-press after release", $"label=\"{lbl.Text}\"");
+            int downs = c.Count(e => e.Kind == "down" && e.Btn == "left");
+            Check(downs == 1 && !c.Any(e => e.Kind == "click" && e.Btn == "right"),
+                "a held press grabs the button (SecondHold = drag), no right click",
+                $"leftDowns={downs} ev={c.Count}");
+            Check(lbl.Text.Contains("hold"),
+                "the label says what the hold did", $"label=\"{lbl.Text}\"");
             Check(cx != mx || cy != my,
-                "cursor NOT handed back after a right click (menu stays open)",
+                "cursor NOT handed back while the grab is held",
                 $"now=({cx},{cy}) phys=({mx},{my})");
         }
         // ---- 3. double + immediate release (double-click) ----
@@ -853,19 +855,26 @@ public static class SelfTest
             var d = new FakeTouch(id++);
             Down(d, px, py);
             double x = px;
-            for (int i = 0; i < 20; i++)   // ~800ms of drift at 0.025 DIP/ms
+            // ~1 DIP per 200ms = 5 DIP/s, i.e. an order of magnitude faster
+            // than the panel's real creep and still well under TapMoveDip, so
+            // the press stays a HOLD. The old figure was 1 DIP per 40ms - 25x
+            // the real creep, which is a move, not drift.
+            for (int i = 0; i < 5; i++)
             {
                 x += 1;
                 Move(d, x, py);
-                await Task.Delay(40);
+                await Task.Delay(200);
             }
             Up(d);
             await Task.Delay(400);
             await Drain();
             var c = Since(n);
-            Check(Dns(c, "right") == 1,
-                "drifting finger still counts as a HOLD (right click)",
-                $"r={Dns(c, "right")} ev={c.Count}");
+            // With SecondHold = "drag" the hold grabs the button (the
+            // reference's model) instead of firing a right click, so the
+            // invariant is: drift still HOLDS, i.e. the grab happens.
+            Check(Dns(c, "left") >= 1 && Dns(c, "right") == 0,
+                "a drifting finger still holds (no dead pad, no right click)",
+                $"l={Dns(c, "left")} r={Dns(c, "right")} ev={c.Count}");
         }
         // ---- 13. no button left pressed. The real invariant is OUR stream
         // being balanced (a drag that never releases is a stuck button).
