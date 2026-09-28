@@ -346,13 +346,17 @@ public static class SelfTest
                 $"leftDowns={downs} ev={c.Count}");
             Check(lbl.Text.Contains("hold"),
                 "the label says what the hold did", $"label=\"{lbl.Text}\"");
-            // The cursor is NEVER handed back any more - that hand-back is what
-            // made our event stream oscillate between the aim and the parked
-            // physical position, measured with the same low-level probe beside
-            // the reference's, which never does it. Whatever owns the cursor
-            // owns it until the physical mouse is moved.
-            Check(cx != mx || cy != my,
-                "cursor NOT handed back after the grab",
+            // The cursor contract differs by mode, so assert the one that is
+            // configured: one cursor keeps it at the grab (there is no physical
+            // position to return to); dual cursor hands it back to the mouse
+            // once the drag ends.
+            bool oneCursor = (bool?)typeof(PadWindow)
+                .GetField("RealCursorOnly", BindingFlags.NonPublic
+                    | BindingFlags.Static)?.GetValue(null) ?? false;
+            Check(oneCursor ? (cx != mx || cy != my) : (cx == mx && cy == my),
+                oneCursor
+                    ? "cursor NOT handed back while the grab is held"
+                    : "cursor handed back to the mouse after the grab",
                 $"now=({cx},{cy}) phys=({mx},{my})");
         }
         // ---- 2b. the reference's right click, and the only right click left
@@ -466,11 +470,11 @@ public static class SelfTest
             await Drain();
             var c = Since(n);
             var downsL = c.Where(e => e.Kind != "up" && e.Btn == "left").ToList();
-            // tap click + the held press. Like the original's Drag action, the
-            // grab sends no extra push click.
-            Check(downsL.Count == 2, "click+move = click then drag (2 L downs)",
+            // tap click + hold click + grab (SecondHold = drag_hold:
+            // click-then-hold, the agreed default - not the old press-hold).
+            Check(downsL.Count == 3, "click+move = click, hold-click, grab (3 L downs)",
                 $"downs={downsL.Count}");
-            if (downsL.Count == 2)
+            if (downsL.Count == 3)
             {
                 var d2 = downsL[^1];   // the held press, after the click
                 double ddx = d2.X - fx0, ddy = d2.Y - fy0;
@@ -478,15 +482,28 @@ public static class SelfTest
                     "drag press lands ON the aim point",
                     $"down@({d2.X},{d2.Y}) aim=({fx0:0},{fy0:0})");
             }
-            // The cursor stays where the drag ended, in every mode: the
-            // hand-back was removed because it oscillated the cursor between
-            // the aim and the parked physical position mid-gesture (measured
-            // beside the reference, which never does it).
+            // What "correct" means here depends on the mode, so assert the one
+            // that is actually configured rather than pinning yesterday's.
             var (cx, cy) = InputSim.Cursor();
             double ax = FakeX(), ay = FakeY();
-            Check(Math.Abs(cx - ax) <= 3 && Math.Abs(cy - ay) <= 3,
-                "after the drag the cursor stays at the drop point",
-                $"now=({cx},{cy}) drop=({ax:0},{ay:0}) phys=({mx},{my})");
+            bool oneCursor = (bool?)typeof(PadWindow)
+                .GetField("RealCursorOnly", BindingFlags.NonPublic
+                    | BindingFlags.Static)?.GetValue(null) ?? false;
+            if (oneCursor)
+            {
+                // One cursor: the cursor must be where the drag ENDED.
+                Check(Math.Abs(cx - ax) <= 3 && Math.Abs(cy - ay) <= 3,
+                    "after the drag the cursor stays at the drop point",
+                    $"now=({cx},{cy}) drop=({ax:0},{ay:0}) phys=({mx},{my})");
+            }
+            else
+            {
+                // Dual cursor: the drag is carried by the real cursor, which
+                // must be handed back to the physical mouse afterwards.
+                Check(Math.Abs(cx - mx) <= 3 && Math.Abs(cy - my) <= 3,
+                    "after the drag the cursor is handed back to the mouse",
+                    $"now=({cx},{cy}) want=({mx},{my}) drop=({ax:0},{ay:0})");
+            }
         }
         // ---- 4c. while a button is held, the OS cursor must be ON the
         // virtual one. A drag is carried entirely by the cursor, and a touch
@@ -538,10 +555,10 @@ public static class SelfTest
             await Task.Delay(500);
             await Drain();
             var ev = Since(n);
-            // tap click, then the held press (no extra push click).
-            Check(Dns(ev, "right") == 0 && Dns(ev, "left") == 2,
+            // tap click + hold click + grab (drag_hold), never right-click.
+            Check(Dns(ev, "right") == 0 && Dns(ev, "left") == 3,
                 "tap, press, pause 700ms, move = drag and never a right-click",
-                $"l={Dns(ev, "left")} (want 2) r={Dns(ev, "right")}");
+                $"l={Dns(ev, "left")} (want 3) r={Dns(ev, "right")}");
         }
         // ---- 4e. THE reported flow, at human speed: tap, then a SECOND later
         // press and move. The tap-chain window has closed by then, so the
@@ -602,10 +619,10 @@ public static class SelfTest
             await Drain();
             var ev = Since(n);
             int ldowns = Dns(ev, "left"), rdowns = Dns(ev, "right");
-            // 3 from the double (1 + 2) + the held press (no extra push click).
-            Check(ldowns == 4 && rdowns == 0,
+            // 3 from the double (1 + 2) + hold click + grab (drag_hold).
+            Check(ldowns == 5 && rdowns == 0,
                 $"double-tap then press+move ({label}) = drag still grabs",
-                $"l={ldowns} (want 4) r={rdowns} ev={ev.Count}");
+                $"l={ldowns} (want 5) r={rdowns} ev={ev.Count}");
         }
         // ---- 5b. and the grab must NOT leak into ordinary use: a press with
         // no multi-tap before it is a plain pointer move, and its release
@@ -654,12 +671,12 @@ public static class SelfTest
             int clicks = c.Count(e => e.Kind == "click" && e.Btn == "left");
             Check(rdowns == 0, "hold after a tap does NOT fire a right click",
                 $"r={rdowns} l={ldowns}");
-            // Exactly one complete click (the tap's). Like the original's Drag
-            // action, the grab adds no push click, and its release must not add
-            // one either: a click at the drop point is not part of a drag.
-            Check(clicks == 1,
-                "drag does not add a push click (only the tap's)",
-                $"clicks={clicks} (want 1: tap only, none on grab/release)");
+            // Exactly two complete clicks: the tap's, plus the hold's
+            // (drag_hold = click-then-hold). The grab itself adds none, and
+            // its release must not add one either.
+            Check(clicks == 2,
+                "drag_hold adds the hold click (tap + hold)",
+                $"clicks={clicks} (want 2: tap + hold-click, none on grab/release)");
             Check(ldowns >= 2 && upWhileHeld == 0,
                 "hold after a tap = the button is HELD down (click-and-drag)",
                 $"l={ldowns} upsWhileHeld={upWhileHeld} heldAt1100={held}");

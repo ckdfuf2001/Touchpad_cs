@@ -36,6 +36,28 @@ public sealed class RawTouchInput
     [DllImport("user32.dll")]
     private static extern int GetSystemMetrics(int index);
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct DEVMODE
+    {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string dmDeviceName;
+        public ushort dmSpecVersion, dmDriverVersion, dmSize, dmDriverExtra;
+        public uint dmFields;
+        public int dmPositionX, dmPositionY;
+        public uint dmDisplayOrientation, dmDisplayFixedOutput;
+        public short dmColor, dmDuplex, dmYResolution, dmTTOption, dmCollate;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string dmFormName;
+        public ushort dmLogPixels, dmBitsPerPel;
+        public uint dmPelsWidth, dmPelsHeight;
+        public uint dmDisplayFlags, dmDisplayFrequency;
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern bool EnumDisplaySettings(string? device,
+        int mode, ref DEVMODE devMode);
+    private const int ENUM_CURRENT_SETTINGS = -1;
+
     private const int WM_INPUT = 0x00FF;
     private const uint RID_INPUT = 0x10000003;
     private const uint RIDI_PREPARSEDDATA = 0x20000005;
@@ -44,12 +66,23 @@ public sealed class RawTouchInput
     private const int RIM_TYPEHID = 2;
 
     private const ushort HID_USAGE_PAGE_DIGITIZER = 0x0D;
+    private const ushort HID_USAGE_PAGE_GENERIC = 0x01;
     private const ushort USAGE_TOUCH_SCREEN = 0x04;
     private const ushort USAGE_TOUCH_PAD = 0x05;
 
     private const ushort USAGE_CONTACT_ID = 0x51;   // Contact Identifier
     private const ushort USAGE_TIP_SWITCH = 0x42;
     private const ushort USAGE_IN_RANGE = 0x32;
+    /// <summary>
+    /// Absolute position lives on the GENERIC DESKTOP page: usage 0x30 = X,
+    /// 0x31 = Y. On the Digitizer page 0x30/0x31 are Tip/Barrel PRESSURE - on
+    /// this panel they read 0..255, which is why the cursor barely moved: X was
+    /// pressure (max 255) and Y never matched at all (Y caps were skipped, so
+    /// Y mapped off-screen). Measured caps: page 1 use 0x30 [0..1600],
+    /// use 0x31 [0..2560].
+    /// </summary>
+    private const ushort USAGE_GENERIC_X = 0x30;
+    private const ushort USAGE_GENERIC_Y = 0x31;
     private const ushort USAGE_X = 0x30;
     private const ushort USAGE_Y = 0x31;
 
@@ -121,6 +154,39 @@ public sealed class RawTouchInput
             DataIndexMin, DataIndexMax;
     }
 
+    /// <summary>
+    /// Subset of HIDP_BUTTON_CAPS. Reserved is ULONG[10] (40 bytes) - reading
+    /// it as bytes shifted every field after it and produced use=0..0. With
+    /// the right layout the union starts at offset 56 either way: range tail
+    /// (UsageMin..DataIndexMax), or single usage (NotRange.Usage/DataIndex at
+    /// the same offsets as UsageMin/DataIndexMin).
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct HIDP_BUTTON_CAPS
+    {
+        public ushort UsagePage;
+        public byte ReportID;
+        public byte IsAlias;
+        public ushort BitField, LinkCollection, LinkUsage, LinkUsagePage;
+        public byte IsRange, IsStringRange, IsDesignatorRange, IsAbsolute;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 10)]
+        public uint[] Reserved;
+        public ushort UsageMin, UsageMax;
+        public ushort StringMin, StringMax, DesignatorMin, DesignatorMax,
+            DataIndexMin, DataIndexMax;
+    }
+
+    /// <summary>
+    /// One HidP_GetData entry: which control (DataIndex) + its value.
+    /// Button entries appear in the list when ON; value entries always.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct HIDP_DATA
+    {
+        public ushort DataIndex, Reserved;
+        public uint RawValue;
+    }
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool RegisterRawInputDevices(
         RAWINPUTDEVICE[] devices, uint count, uint size);
@@ -136,8 +202,17 @@ public sealed class RawTouchInput
     private static extern int HidP_GetValueCaps(ushort reportType,
         [Out] HIDP_VALUE_CAPS[] caps, ref ushort length, IntPtr preparsed);
     [DllImport("hid.dll")]
-    private static extern int HidP_GetUsageValue(ushort reportType, ushort usagePage,
-        ushort linkCollection, ushort usage, out uint value, IntPtr preparsed,
+    private static extern int HidP_GetButtonCaps(ushort reportType,
+        [Out] HIDP_BUTTON_CAPS[] caps, ref ushort length, IntPtr preparsed);
+    /// <summary>
+    /// The reference's reader: one call returns every ON button plus every
+    /// value in the report. Tip Switch / In Range are BUTTONS (HidP_GetUsageValue
+    /// on them always fails - that is why no contact ever parsed), X / Y /
+    /// Contact Identifier are values. DataIndex routes each entry to its link.
+    /// </summary>
+    [DllImport("hid.dll")]
+    private static extern int HidP_GetData(ushort reportType,
+        [In, Out] HIDP_DATA[] dataList, ref uint length, IntPtr preparsed,
         IntPtr report, uint reportLength);
 
     private sealed class Device
@@ -145,13 +220,23 @@ public sealed class RawTouchInput
         public IntPtr Preparsed;
         public HIDP_CAPS Caps;
         public HIDP_VALUE_CAPS[] ValueCaps = Array.Empty<HIDP_VALUE_CAPS>();
+        public HIDP_BUTTON_CAPS[] ButtonCaps = Array.Empty<HIDP_BUTTON_CAPS>();
         public ushort[] ContactLinks = Array.Empty<ushort>();
         public int Xmin, Xmax, Ymin, Ymax;
+        // Per link: data-index ranges routing GetData entries to contacts.
+        public readonly Dictionary<ushort, (ushort Dmin, ushort Dmax)> TipByLink = new();
+        public readonly Dictionary<ushort, (ushort Dmin, ushort Dmax)> RangeByLink = new();
+        public readonly Dictionary<ushort, (ushort Dmin, ushort Dmax)> XByLink = new();
+        public readonly Dictionary<ushort, (ushort Dmin, ushort Dmax)> YByLink = new();
+        public readonly Dictionary<ushort, (ushort Dmin, ushort Dmax)> IdByLink = new();
+        public readonly HashSet<ushort> ButtonIndices = new();
+        public uint DataIndices;
         public bool Logged;
     }
 
     private readonly Dictionary<IntPtr, Device> _devices = new();
     private readonly Dictionary<int, bool> _down = new();
+    private byte[]? _lastBytes;
     private bool _registered;
     private int _seen;
     private readonly int[] _typeCounts = new int[4];
@@ -283,28 +368,72 @@ public sealed class RawTouchInput
             if (HidP_GetValueCaps(HidP_Input, caps, ref len, prep) >= 0)
                 dev.ValueCaps = caps;
         }
-        // The contacts are the link collections that carry an X axis.
+        ushort nb = dev.Caps.NumberInputButtonCaps;
+        if (nb > 0)
+        {
+            var caps = new HIDP_BUTTON_CAPS[nb];
+            ushort len = nb;
+            if (HidP_GetButtonCaps(HidP_Input, caps, ref len, prep) >= 0)
+                dev.ButtonCaps = caps;
+        }
+        dev.DataIndices = dev.Caps.NumberInputDataIndices;
+        // Route table: data-index range per usage per link collection.
         var links = new List<ushort>();
         foreach (var vc in dev.ValueCaps)
         {
-            if (vc.UsagePage != HID_USAGE_PAGE_DIGITIZER) continue;
-            if (vc.UsageMin == USAGE_X || vc.UsageMax == USAGE_X)
+            ushort umin = vc.UsageMin;
+            ushort umax = vc.IsRange != 0 ? vc.UsageMax : vc.UsageMin;
+            // X/Y come from the GENERIC DESKTOP page, not Digitizer (where
+            // 0x30/0x31 are pressure). Contact Identifier stays on Digitizer.
+            bool hasX = vc.UsagePage == HID_USAGE_PAGE_GENERIC
+                && USAGE_GENERIC_X >= umin && USAGE_GENERIC_X <= umax;
+            bool hasY = vc.UsagePage == HID_USAGE_PAGE_GENERIC
+                && USAGE_GENERIC_Y >= umin && USAGE_GENERIC_Y <= umax;
+            bool hasId = vc.UsagePage == HID_USAGE_PAGE_DIGITIZER
+                && USAGE_CONTACT_ID >= umin && USAGE_CONTACT_ID <= umax;
+            if (hasX || hasY || hasId)
             {
-                if (vc.LogicalMax > vc.LogicalMin)
+                if (!links.Contains(vc.LinkCollection))
+                    links.Add(vc.LinkCollection);
+                // Single-usage caps: DataIndexMax reads the NotRange.Reserved4
+                // slot, so both ends are DataIndexMin.
+                ushort dmin = vc.DataIndexMin;
+                ushort dmax = vc.IsRange != 0 ? vc.DataIndexMax : vc.DataIndexMin;
+                if (hasX)
                 {
-                    dev.Xmin = vc.LogicalMin; dev.Xmax = vc.LogicalMax;
+                    dev.XByLink[vc.LinkCollection] = (dmin, dmax);
+                    if (vc.LogicalMax > vc.LogicalMin)
+                    { dev.Xmin = vc.LogicalMin; dev.Xmax = vc.LogicalMax; }
                 }
-            }
-            if (vc.UsageMin == USAGE_Y || vc.UsageMax == USAGE_Y)
-            {
-                if (vc.LogicalMax > vc.LogicalMin)
+                if (hasY)
                 {
-                    dev.Ymin = vc.LogicalMin; dev.Ymax = vc.LogicalMax;
+                    dev.YByLink[vc.LinkCollection] = (dmin, dmax);
+                    if (vc.LogicalMax > vc.LogicalMin)
+                    { dev.Ymin = vc.LogicalMin; dev.Ymax = vc.LogicalMax; }
                 }
+                if (hasId)
+                    dev.IdByLink[vc.LinkCollection] = (dmin, dmax);
             }
-            if (vc.UsageMin == USAGE_X && !links.Contains(vc.LinkCollection))
-                links.Add(vc.LinkCollection);
         }
+        foreach (var bc in dev.ButtonCaps)
+        {
+            if (bc.UsagePage != HID_USAGE_PAGE_DIGITIZER) continue;
+            ushort umin = bc.UsageMin;
+            ushort umax = bc.IsRange != 0 ? bc.UsageMax : bc.UsageMin;
+            var range = bc.IsRange != 0
+                ? (bc.DataIndexMin, bc.DataIndexMax)
+                : (bc.DataIndexMin, bc.DataIndexMin);
+            for (ushort d = range.Item1; d <= range.Item2; d++)
+                dev.ButtonIndices.Add(d);
+            if (umin <= USAGE_TIP_SWITCH && USAGE_TIP_SWITCH <= umax)
+                dev.TipByLink[bc.LinkCollection] = range;
+            if (umin <= USAGE_IN_RANGE && USAGE_IN_RANGE <= umax)
+                dev.RangeByLink[bc.LinkCollection] = range;
+        }
+        // Links with buttons but no value caps still count as contacts.
+        foreach (var link in dev.TipByLink.Keys)
+            if (!links.Contains(link)) links.Add(link);
+        links.Sort();
         dev.ContactLinks = links.ToArray();
         _devices[hDevice] = dev;
         return dev;
@@ -313,49 +442,142 @@ public sealed class RawTouchInput
     private void Parse(Device dev, IntPtr report, uint length)
     {
         int n = dev.ContactLinks.Length;
-        if (n == 0)
-        {
-            // Some devices report a single contact with no link collections;
-            // fall back to reading the usages globally.
-            Emit(dev, 0, 0, report, length);
+        if (n == 0) return;
+        // One HidP_GetData per report: every ON button plus every value.
+        uint capacity = Math.Max(dev.DataIndices, (uint)1);
+        var list = new HIDP_DATA[capacity];
+        uint len = capacity;
+        if (HidP_GetData(HidP_Input, list, ref len, dev.Preparsed,
+            report, length) < 0)
             return;
+        // Stash a copy of the raw bytes for transition dumps (tip forensics).
+        try
+        {
+            int nb = (int)length;
+            _lastBytes = new byte[nb];
+            Marshal.Copy(report, _lastBytes, 0, nb);
         }
-        for (int k = 0; k < n; k++)
-            Emit(dev, dev.ContactLinks[k], k, report, length);
-    }
-
-    private void Emit(Device dev, ushort link, int fallbackId,
-        IntPtr report, uint length)
-    {
-        bool tip = Read(dev, link, USAGE_TIP_SWITCH, report, length) == 1;
-        bool inRange = Read(dev, link, USAGE_IN_RANGE, report, length) == 1;
-        uint idRaw = Read(dev, link, USAGE_CONTACT_ID, report, length);
-        int id = (int)idRaw;
-        if (id == 0 && idRaw == 0) id = fallbackId;
-        uint rawX = Read(dev, link, USAGE_X, report, length);
-        uint rawY = Read(dev, link, USAGE_Y, report, length);
+        catch { _lastBytes = null; }
+        var values = new Dictionary<ushort, uint>((int)len);
+        var buttons = new HashSet<ushort>();
+        for (int i = 0; i < (int)len; i++)
+        {
+            values[list[i].DataIndex] = list[i].RawValue;
+            // GetData mixes buttons and values in one list; only indices
+            // from the button caps are buttons. Everything else is a value,
+            // and treating values as buttons faked tip-ON permanently.
+            if (dev.ButtonIndices.Contains(list[i].DataIndex))
+                buttons.Add(list[i].DataIndex);
+        }
         if (!dev.Logged)
         {
             dev.Logged = true;
+            try
+            {
+                var dm = new DEVMODE();
+                dm.dmSize = (ushort)Marshal.SizeOf<DEVMODE>();
+                if (EnumDisplaySettings(null, ENUM_CURRENT_SETTINGS, ref dm))
+                    DebugLog.Write($"RAWINPUT display: {dm.dmPelsWidth}x{dm.dmPelsHeight}"
+                        + $" orient={dm.dmDisplayOrientation} freq={dm.dmDisplayFrequency}");
+            }
+            catch { }
             DebugLog.Write($"RAWINPUT device caps: usePage={dev.Caps.UsagePage:X}"
                 + $" use={dev.Caps.Usage:X} links={dev.Caps.NumberLinkCollectionNodes}"
                 + $" valCaps={dev.Caps.NumberInputValueCaps}"
+                + $" btnCaps={dev.Caps.NumberInputButtonCaps}"
+                + $" dataIndices={dev.Caps.NumberInputDataIndices}"
                 + $" reportBytes={dev.Caps.InputReportByteLength}"
                 + $" X[{dev.Xmin}..{dev.Xmax}] Y[{dev.Ymin}..{dev.Ymax}]"
                 + $" contactLinks={string.Join(",", dev.ContactLinks)}");
+            foreach (var bc in dev.ButtonCaps)
+            {
+                if (bc.UsagePage != HID_USAGE_PAGE_DIGITIZER) continue;
+                ushort buMax = bc.IsRange != 0 ? bc.UsageMax : bc.UsageMin;
+                ushort bdMax = bc.IsRange != 0 ? bc.DataIndexMax : bc.DataIndexMin;
+                DebugLog.Write($"RAWINPUT btnCap link={bc.LinkCollection}"
+                    + $" use={bc.UsageMin:X}..{buMax:X} data={bc.DataIndexMin}..{bdMax}");
+            }
+            foreach (var vc in dev.ValueCaps)
+            {
+                if (vc.UsagePage != HID_USAGE_PAGE_DIGITIZER
+                    && vc.UsagePage != 0x01) continue;
+                ushort vuMax = vc.IsRange != 0 ? vc.UsageMax : vc.UsageMin;
+                ushort vdMax = vc.IsRange != 0 ? vc.DataIndexMax : vc.DataIndexMin;
+                DebugLog.Write($"RAWINPUT valCap link={vc.LinkCollection}"
+                    + $" page={vc.UsagePage:X} use={vc.UsageMin:X}..{vuMax:X}"
+                    + $" log=[{vc.LogicalMin}..{vc.LogicalMax}]"
+                    + $" data={vc.DataIndexMin}..{vdMax}");
+            }
+            DebugLog.Write($"RAWINPUT sample entries={len}"
+                + $" data=[{string.Join(",", values.Keys)}]");
+            try
+            {
+                var bb = new byte[Math.Min(24, (int)length)];
+                Marshal.Copy(report, bb, 0, bb.Length);
+                DebugLog.Write("RAWINPUT bytes="
+                    + BitConverter.ToString(bb).Replace("-", " "));
+            }
+            catch { }
         }
-        if (!tip && !inRange) return;
-        (double x, double y) = ToScreen(dev, rawX, rawY);
-        bool wasDown = _down.TryGetValue(id, out var d) && d;
-        bool nowDown = tip;
-        if (nowDown != wasDown)
+        for (int k = 0; k < n; k++)
+            Emit(dev, dev.ContactLinks[k], k, values, buttons);
+    }
+
+    private static bool On(Dictionary<ushort, (ushort Dmin, ushort Dmax)> table,
+        ushort link, HashSet<ushort> buttons)
+    {
+        if (!table.TryGetValue(link, out var r)) return false;
+        for (ushort d = r.Dmin; d <= r.Dmax; d++)
+            if (buttons.Contains(d)) return true;
+        return false;
+    }
+
+    private static uint Val(Dictionary<ushort, (ushort Dmin, ushort Dmax)> table,
+        ushort link, Dictionary<ushort, uint> values)
+    {
+        if (!table.TryGetValue(link, out var r)) return 0;
+        // Multi-report-count usages repeat per count; the first carries it.
+        for (ushort d = r.Dmin; d <= r.Dmax; d++)
+            if (values.TryGetValue(d, out uint v)) return v;
+        return 0;
+    }
+
+    private void Emit(Device dev, ushort link, int slot,
+        Dictionary<ushort, uint> values, HashSet<ushort> buttons)
+    {
+        // Buttons: presence in the GetData list means ON. Values: RawValue.
+        // State is per LINK (slot), not per contact id: an idle link whose
+        // Contact Identifier reads 0 used to fall back to its slot number and
+        // collide with a live contact's real id - one link's DOWN became
+        // another link's UP on the next report, flapping DOWN/UP every few ms
+        // on byte-identical reports. Fallbacks live at 100+slot, outside the
+        // device's real 0..10 id range, so they can never collide.
+        bool tip = On(dev.TipByLink, link, buttons);
+        uint idRaw = Val(dev.IdByLink, link, values);
+        int id = idRaw == 0 ? 100 + slot : (int)idRaw;
+        bool wasDown = _down.TryGetValue(link, out var d) && d;
+        if (tip != wasDown)
         {
-            _down[id] = nowDown;
-            DebugLog.Write($"RAWINPUT contact id={id} {(nowDown ? "DOWN" : "UP")}"
-                + $" raw=({rawX},{rawY}) -> screen=({x:0},{y:0})"
-                + $" others=[{string.Join(",", _down.Keys)}]");
+            _down[link] = tip;
+            uint rawX = Val(dev.XByLink, link, values);
+            uint rawY = Val(dev.YByLink, link, values);
+            (double ux, double uy) = ToScreen(dev, rawX, rawY);
+            string bytes = _lastBytes != null
+                ? BitConverter.ToString(_lastBytes).Replace("-", " ") : "?";
+            DebugLog.Write($"RAWINPUT contact id={id} {(tip ? "DOWN" : "UP")}"
+                + $" link={link} raw=({rawX},{rawY}) -> screen=({ux:0},{uy:0})"
+                + $" bytes=[{bytes}]");
+            Contact?.Invoke(id, ux, uy, tip);
+            if (!tip) return;
         }
-        Contact?.Invoke(id, x, y, nowDown);
+        else if (!tip)
+        {
+            return;  // idle link: silent, no moves
+        }
+        uint mx = Val(dev.XByLink, link, values);
+        uint my = Val(dev.YByLink, link, values);
+        (double x, double y) = ToScreen(dev, mx, my);
+        Contact?.Invoke(id, x, y, true);
     }
 
     /// <summary>
@@ -373,20 +595,16 @@ public sealed class RawTouchInput
             var r = PadRectProvider();
             return (r.X + nx * r.W, r.Y + ny * r.H);
         }
-        return (nx * GetSystemMetrics(0), ny * GetSystemMetrics(1));
-    }
-
-    private uint Read(Device dev, ushort link, ushort usage, IntPtr report,
-        uint length)
-    {
-        try
-        {
-            if (HidP_GetUsageValue(HidP_Input, HID_USAGE_PAGE_DIGITIZER, link,
-                usage, out uint v, dev.Preparsed, report, length) >= 0)
-                return v;
-        }
-        catch { }
-        return 0;
+        int sw = GetSystemMetrics(0), sh = GetSystemMetrics(1);
+        // Panel portrait (Xrange < Yrange) on a landscape screen: the panel
+        // is mounted rotated - rawY runs along screen X, rawX along screen Y.
+        // Display orient=3 (270°) here; corner taps put BOTH contacts on the
+        // pad only for swap+Yflip, so: screenX = ny*sw, screenY = (1-nx)*sh.
+        // (Plain swap left the second tap above the pad; direct left both
+        // taps left of it.) Verified by pad-corner taps, not assumed.
+        if (dev.Xmax < dev.Ymax && sw > sh)
+            return (ny * sw, (1 - nx) * sh);
+        return (nx * sw, ny * sh);
     }
 
     private static double Map(int min, int max, uint value)

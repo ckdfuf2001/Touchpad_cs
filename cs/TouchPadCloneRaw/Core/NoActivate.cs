@@ -6,16 +6,17 @@ using System.Windows.Interop;
 namespace TouchPadCloneV2.Core;
 
 /// <summary>
-/// Makes utility windows non-activating (WS_EX_NOACTIVATE): touches and
-/// clicks never steal focus, so wheel events and keystrokes keep going to
-/// the app the user is actually working in. (The original and TKM both do
-/// this; without it, scrolling and Ctrl+C land in our own pad window.)
-/// The Settings window intentionally stays activatable.
+/// Original parity (measured on TouchMousePointer.exe pad window):
+/// WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE.
+/// Plain popup, no border/caption. Takes all input hitting it by z-order
+/// (that IS the blocking - no hooks, no touch registration anywhere in
+/// the original), never steals focus, hides from taskbar/Alt-Tab.
 /// </summary>
 public static class NoActivate
 {
     private const int GWL_EXSTYLE = -20;
     private const int WS_EX_NOACTIVATE = 0x08000000;
+    private const int WS_EX_TOOLWINDOW = 0x00000080;
 
     [DllImport("user32.dll")]
     private static extern int GetWindowLong(IntPtr h, int n);
@@ -30,7 +31,8 @@ public static class NoActivate
             {
                 var hwnd = new WindowInteropHelper(w).Handle;
                 int st = GetWindowLong(hwnd, GWL_EXSTYLE);
-                SetWindowLong(hwnd, GWL_EXSTYLE, st | WS_EX_NOACTIVATE);
+                SetWindowLong(hwnd, GWL_EXSTYLE,
+                    st | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW);
             }
             catch { }
         };

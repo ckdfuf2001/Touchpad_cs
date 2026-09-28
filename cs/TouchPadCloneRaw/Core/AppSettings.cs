@@ -10,10 +10,9 @@ public sealed class GestureMap
     public string DoubleTap { get; set; } = "double_click";
     public string TripleTap { get; set; } = "triple_click";
     public string LongPress { get; set; } = "right_click";
-    // The original distinguishes Drag (press and hold, no extra click) from
-    // L-click and drag (click, then press and hold). The default follows the
-    // original's "2nd tap and hold: Drag" selection.
-    public string SecondHold { get; set; } = "drag";
+    // Double-touch + hold (no release): click, then hold - moving drags.
+    // The reference default ("2nd tap and hold: click then hold, drag on move").
+    public string SecondHold { get; set; } = "drag_hold";
     public string TwoFingerTap { get; set; } = "right_click";
     public string SwipeUp { get; set; } = "wheel_up";
     public string SwipeDown { get; set; } = "wheel_down";
@@ -58,7 +57,7 @@ public sealed class AppSettings
     public bool FakeCursor { get; set; } = true;
     public string CursorStyle { get; set; } = "cyan";
     public bool ShowFakeArrow { get; set; } = true;
-    public int LongPressMs { get; set; } = 500;
+    public int LongPressMs { get; set; } = 650;
     /// <summary>
     /// Hold vs drag threshold: NET travel in DIP within the last 150ms above
     /// which a press counts as a drag and its long-press dies. It MUST be a
@@ -141,18 +140,20 @@ public sealed class AppSettings
     }
 
     /// <summary>
-    /// The old default stored "drag_hold" in SecondHold slots. That setting
-    /// meant click-then-hold, while the intended default is the original's
-    /// press-and-hold Drag. Move legacy SecondHold selections forward; a user
-    /// can still explicitly select "drag_hold" for click-then-hold.
+    /// The previous default stored "drag" (press-and-hold, no click) in
+    /// SecondHold slots. The agreed default is click-then-hold ("drag_hold"):
+    /// double-touch + hold clicks first, then holds - moving drags. Stored
+    /// "drag" values came from the old default (never an explicit choice
+    /// against this), so they move forward; anyone who prefers press-and-hold
+    /// can still explicitly select "drag".
     /// </summary>
     private static void MigrateLegacySecondHold(AppSettings settings)
     {
         foreach (var map in new[]
             { settings.Gestures, settings.ArtistGestures, settings.VirtualGestures })
         {
-            if (map != null && map.SecondHold == "drag_hold")
-                map.SecondHold = "drag";
+            if (map != null && map.SecondHold == "drag")
+                map.SecondHold = "drag_hold";
         }
     }
 

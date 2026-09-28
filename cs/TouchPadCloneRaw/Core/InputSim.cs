@@ -1,17 +1,17 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 namespace TouchPadCloneV2.Core;
 
 /// <summary>
-/// Win32 SendInput wrapper. All cursor/keyboard output goes through here.
-/// No driver, no hooks - exactly like the original TouchMousePointer.
+/// Win32 output primitives. All cursor/keyboard output goes through here.
+/// No driver, no hooks - exactly like the original TouchMousePointer:
+/// mouse_event + keybd_event + Set/GetPhysicalCursorPos (physical pixels,
+/// no DPI virtualisation). No SendInput anywhere.
 /// </summary>
 public static class InputSim
 {
-    private const int INPUT_MOUSE = 0;
-    private const int INPUT_KEYBOARD = 1;
     private const uint MOUSEEVENTF_MOVE = 0x0001;
     private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     private const uint MOUSEEVENTF_LEFTUP = 0x0004;
@@ -24,89 +24,43 @@ public static class InputSim
     private const uint KEYEVENTF_KEYUP = 0x0002;
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct MOUSEINPUT
-    {
-        public int dx; public int dy; public uint mouseData;
-        public uint dwFlags; public uint time; public IntPtr dwExtraInfo;
-    }
+    public struct POINT { public int X; public int Y; }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct KEYBDINPUT
-    {
-        public ushort wVk; public ushort wScan; public uint dwFlags;
-        public uint time; public IntPtr dwExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Explicit)]
-    private struct INPUTUNION
-    {
-        [FieldOffset(0)] public MOUSEINPUT mi;
-        [FieldOffset(0)] public KEYBDINPUT ki;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct INPUT
-    {
-        public uint type; public INPUTUNION u;
-    }
+    /// <summary>
+    /// Click injection, the same primitive the reference uses - NOT SendInput.
+    /// Measured in a minimal harness: a drag built from SendInput absolute
+    /// moves selected nothing, while the same drag built from the reference's
+    /// calls did.
+    /// </summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern void mouse_event(uint dwFlags, int dx, int dy,
+        uint dwData, IntPtr dwExtraInfo);
 
     [DllImport("user32.dll", SetLastError = true)]
-    private static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+    private static extern void keybd_event(byte bVk, byte bScan,
+        uint dwFlags, UIntPtr dwExtraInfo);
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetCursorPos(out POINT lpPoint);
+    private static extern bool GetPhysicalCursorPos(out POINT lpPoint);
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct POINT { public int X; public int Y; }
-
-    private static void Mouse(uint flags, int dx = 0, int dy = 0, int data = 0)
-    {
-        var inp = new INPUT
-        {
-            type = INPUT_MOUSE,
-            u = new INPUTUNION { mi = new MOUSEINPUT
-            {
-                dx = dx, dy = dy, mouseData = (uint)data,
-                dwFlags = flags, time = 0, dwExtraInfo = IntPtr.Zero
-            } }
-        };
-        SendInput(1, new[] { inp }, Marshal.SizeOf<INPUT>());
-    }
-
-    private static void Key(ushort vk, bool up)
-    {
-        var inp = new INPUT
-        {
-            type = INPUT_KEYBOARD,
-            u = new INPUTUNION { ki = new KEYBDINPUT
-            {
-                wVk = vk, wScan = 0,
-                dwFlags = up ? KEYEVENTF_KEYUP : 0,
-                time = 0, dwExtraInfo = IntPtr.Zero
-            } }
-        };
-        SendInput(1, new[] { inp }, Marshal.SizeOf<INPUT>());
-    }
-
-    [DllImport("user32.dll")]
-    private static extern int GetSystemMetrics(int nIndex);
-    private const int SM_XVIRTUALSCREEN = 76;
-    private const int SM_YVIRTUALSCREEN = 77;
-    private const int SM_CXVIRTUALSCREEN = 78;
-    private const int SM_CYVIRTUALSCREEN = 79;
-    private const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
     /// <summary>
-    /// Without this, MOUSEEVENTF_ABSOLUTE maps 0..65535 onto the PRIMARY
-    /// MONITOR, not the virtual desktop - while the coordinates below are
-    /// computed from SM_*VIRTUALSCREEN. On a multi-monitor desktop that
-    /// mismatch mis-scales every click and wheel.
+    /// Cursor move in PHYSICAL pixels - the same call the working reference on
+    /// this machine uses (TouchMousePointer). SetCursorPos is the logical
+    /// variant and differs under DPI virtualisation; physical is unambiguous.
     /// </summary>
-    private const uint MOUSEEVENTF_VIRTUALDESK = 0x4000;
+    [DllImport("user32.dll")]
+    private static extern bool SetPhysicalCursorPos(int x, int y);
+
+    private static void Mouse(uint flags, int dx = 0, int dy = 0, int data = 0) =>
+        mouse_event(flags, dx, dy, unchecked((uint)data), InjectTag);
+
+    private static void Key(ushort vk, bool up) =>
+        keybd_event((byte)vk, 0, up ? KEYEVENTF_KEYUP : 0, UIntPtr.Zero);
 
     public static (int X, int Y) Cursor()
     {
-        GetCursorPos(out var p);
+        GetPhysicalCursorPos(out var p);
         return (p.X, p.Y);
     }
 
@@ -127,8 +81,11 @@ public static class InputSim
             Injected.Add((Environment.TickCount64, kind, btn, x, y));
     }
 
-    public static void SetCursor(int x, int y) =>
-        SetPhysicalCursorPos(x, y);
+    public static void SetCursor(int x, int y)
+    {
+        var (cx, cy) = Cursor();
+        Move((double)(x - cx), (double)(y - cy));
+    }
 
     private static uint DownFlag(string button) => button switch
     {
@@ -144,29 +101,39 @@ public static class InputSim
         _ => MOUSEEVENTF_LEFTUP,
     };
 
-    private static INPUT AbsMove(int x, int y)
+    /// <summary>
+    /// Held-button audit: counts presses without matching releases (Down/
+    /// DownAt +1, Up/UpAt -1; atomic ClickAt balanced, skipped). Measured
+    /// +63 left-downs over ups (buttons held forever, every move a drag).
+    /// EndSession drains (while>0 Up) so leaks cannot accumulate across
+    /// sessions no matter which release path missed. No-op when balanced.
+    /// </summary>
+    private static readonly Dictionary<string, int> _held = new();
+    private static void HeldDown(string button)
     {
-        int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
-        int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
-        int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-        int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-        return new INPUT
-        {
-            type = INPUT_MOUSE,
-            u = new INPUTUNION { mi = new MOUSEINPUT
-            {
-                dx = (int)((x - vx) * 65535.0 / Math.Max(1, vw - 1)),
-                dy = (int)((y - vy) * 65535.0 / Math.Max(1, vh - 1)),
-                mouseData = 0,
-                dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE
-                         | MOUSEEVENTF_VIRTUALDESK,
-                time = 0, dwExtraInfo = IntPtr.Zero
-            } }
-        };
+        _held[button] = _held.TryGetValue(button, out int n) ? n + 1 : 1;
     }
-
-    private static void Send(params INPUT[] batch) =>
-        SendInput((uint)batch.Length, batch, Marshal.SizeOf<INPUT>());
+    private static void HeldUp(string button)
+    {
+        if (_held.TryGetValue(button, out int n) && n > 0)
+            _held[button] = n - 1;
+    }
+    public static int DrainHeld()
+    {
+        int total = 0;
+        foreach (var b in new[] { "left", "right", "middle" })
+        {
+            while (_held.TryGetValue(b, out int n) && n > 0)
+            {
+                _held[b] = n - 1;
+                mouse_event(UpFlag(b), 0, 0, 0, InjectTag);
+                total++;
+            }
+        }
+        if (total > 0)
+            DebugLog.Write($"BTN drain {total} stuck press(es)");
+        return total;
+    }
 
     /// <summary>
     /// Click at an EXACT position, the way the working reference does it: put
@@ -190,6 +157,7 @@ public static class InputSim
     {
         SetPhysicalCursorPos(x, y);
         mouse_event(DownFlag(button), 0, 0, 0, InjectTag);
+        HeldDown(button);
         DebugLog.Write($"BTN down {button} @({x},{y})");
         Note("down", button, x, y);
     }
@@ -199,6 +167,7 @@ public static class InputSim
     {
         SetPhysicalCursorPos(x, y);
         mouse_event(UpFlag(button), 0, 0, 0, InjectTag);
+        HeldUp(button);
         DebugLog.Write($"BTN up {button} @({x},{y})");
         Note("up", button, x, y);
     }
@@ -215,41 +184,11 @@ public static class InputSim
         Note("wheel", (horizontal ? "h" : "v") + delta, x, y);
     }
 
-    /// <summary>A button event carrying no position (relative form).</summary>
-    private static INPUT Button(uint flags, int x, int y)
-    {
-        INPUT i = AbsMove(x, y);
-        i.u.mi.dwFlags = flags;
-        i.u.mi.dx = i.u.mi.dy = 0;
-        return i;
-    }
-
     public static void Click(string button)
     {
         var (x, y) = Cursor();
         ClickAt(x, y, button);
     }
-
-    [DllImport("user32.dll")]
-    private static extern bool SetCursorPos(int x, int y);
-
-    /// <summary>
-    /// Cursor move in PHYSICAL pixels - the same call the working reference on
-    /// this machine uses (TouchMousePointer). SetCursorPos is the logical
-    /// variant and differs under DPI virtualisation; physical is unambiguous.
-    /// </summary>
-    [DllImport("user32.dll")]
-    private static extern bool SetPhysicalCursorPos(int x, int y);
-
-    /// <summary>
-    /// Click injection, the same primitive the reference uses - NOT SendInput.
-    /// Measured in a minimal harness: a drag built from SendInput absolute
-    /// moves selected nothing, while the same drag built from the reference's
-    /// calls did.
-    /// </summary>
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern void mouse_event(uint dwFlags, int dx, int dy,
-        uint dwData, IntPtr dwExtraInfo);
 
     /// <summary>
     /// Tag our own injections so they can be told apart from real input, the
@@ -276,13 +215,42 @@ public static class InputSim
     private const uint CURSOR_SHOWING = 0x00000001;
     /// <summary>
     /// Windows hiding the pointer for a live touch. ShowCursor cannot clear
-    /// this - only the end of the touch can - and the old restore loop kept
+    /// this - it is not the ShowCursor counter - and the old restore loop kept
     /// calling ShowCursor(true) 500 times trying, which drained the shared
-    /// counter so far that the cursor could never be hidden again. Measured on
-    /// the reference: suppression is transient, the pointer comes back
-    /// visible on its own while the finger is still down.
+    /// counter so far that the cursor could never be hidden again. Measured:
+    /// a stuck suppression (e.g. a tap that produced no mouse output, or a
+    /// process killed mid-touch) does NOT clear by itself - but one injected
+    /// mouse move does. So every touch session ends with ClearSuppression.
     /// </summary>
     private const uint CURSOR_SUPPRESSED = 0x00000002;
+
+    public static bool CursorSuppressed()
+    {
+        var ci = new CURSORINFO { cbSize = (uint)Marshal.SizeOf<CURSORINFO>() };
+        return GetCursorInfo(out ci) && (ci.flags & CURSOR_SUPPRESSED) != 0;
+    }
+
+    /// <summary>
+    /// Self-heal for stuck suppression: a 1px round trip (net zero - the
+    /// cursor ends exactly where it was), only when suppressed. A touch that
+    /// produces no mouse output (an empty tap, a strip toggle) otherwise
+    /// leaves the pointer invisible until something else happens to move it.
+    /// Log rate-limited: at report rate this would bury the log.
+    /// </summary>
+    private static long _lastSuppressLog;
+    public static void ClearSuppression()
+    {
+        if (!CursorSuppressed()) return;
+        mouse_event(MOUSEEVENTF_MOVE, 1, 0, 0, InjectTag);
+        mouse_event(MOUSEEVENTF_MOVE, -1, 0, 0, InjectTag);
+        long now = Environment.TickCount64;
+        if (now - _lastSuppressLog > 500)
+        {
+            _lastSuppressLog = now;
+            DebugLog.Write("SUPPRESSION stuck after touch, cleared with a nudge"
+                + (CursorSuppressed() ? " (STILL suppressed)" : ""));
+        }
+    }
 
     public static void HideCursor() => ShowCursor(false);
 
@@ -300,10 +268,21 @@ public static class InputSim
         }
     }
 
-    public static void Move(int dx, int dy)
+    /// <summary>
+    /// Relative drive with subpixel accumulation: fractions kept, integers
+    /// emitted. Rounding per event loses slow motion; accumulation preserves
+    /// it. Relative adds always apply (no set-vs-set fight with tracking).
+    /// </summary>
+    private static double _remX, _remY;
+    public static void Move(double dx, double dy)
     {
-        if (dx != 0 || dy != 0) Mouse(MOUSEEVENTF_MOVE, dx, dy);
+        _remX += dx; _remY += dy;
+        int ix = (int)_remX, iy = (int)_remY;
+        _remX -= ix; _remY -= iy;
+        if (ix != 0 || iy != 0) Mouse(MOUSEEVENTF_MOVE, ix, iy);
     }
+
+    public static void Move(int dx, int dy) => Move((double)dx, (double)dy);
 
     /// <summary>
     /// Put the cursor at an absolute point, in physical pixels, the way the
@@ -318,15 +297,22 @@ public static class InputSim
 
     /// <summary>
     /// Record a cursor position that was set by something other than a
-    /// SendInput move (SetCursorPos). Without it the injection log cannot see
-    /// the drag at all - "moves=0" through a whole drag - which is the same
-    /// blind spot that hid the missing drag motion earlier.
+    /// relative move (SetPhysicalCursorPos). Without it the injection log
+    /// cannot see the drag at all - "moves=0" through a whole drag.
     /// </summary>
     public static void NotePosition(int x, int y) => Note("move", "", x, y);
 
-    public static void Down(string button) => Mouse(DownFlag(button));
+    public static void Down(string button)
+    {
+        Mouse(DownFlag(button));
+        HeldDown(button);
+    }
 
-    public static void Up(string button) => Mouse(UpFlag(button));
+    public static void Up(string button)
+    {
+        Mouse(UpFlag(button));
+        HeldUp(button);
+    }
 
     public static void Wheel(int delta, bool horizontal = false) =>
         Mouse(horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL, 0, 0, delta);

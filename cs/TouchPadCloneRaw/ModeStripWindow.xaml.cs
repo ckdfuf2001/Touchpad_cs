@@ -215,6 +215,10 @@ public partial class ModeStripWindow : Window
         // and then never receives Deactivated to auto-close.
         Surface.ReleaseTouchCapture(e.TouchDevice);
         Decide(dx, dy, ms);
+        // A strip tap produces no mouse output, which leaves cursor
+        // suppression stuck and the pointer invisible. Same self-heal as
+        // the pad session end.
+        Core.InputSim.ClearSuppression();
         e.Handled = true;
     }
 
