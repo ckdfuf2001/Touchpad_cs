@@ -21,11 +21,30 @@ public partial class App : WApplication
     private AssistWindow? _assist;
     private SettingsWindow? _settingsWin;
     private TrayManager? _tray;
+    private System.Threading.Mutex? _mutex;
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
+        bool first;
+        try
+        {
+            _mutex = new System.Threading.Mutex(true,
+                "TouchPadCloneV2_SingleInstance", out first);
+        }
+        catch (System.Threading.AbandonedMutexException)
+        {
+            first = true;
+            _mutex = new System.Threading.Mutex(true,
+                "TouchPadCloneV2_SingleInstance");
+        }
+        if (!first)
+        {
+            Shutdown();
+            return;
+        }
 
         if (Environment.GetEnvironmentVariable("TOUCHPAD_SELFTEST") == "1")
         {

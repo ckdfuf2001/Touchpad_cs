@@ -319,14 +319,14 @@ public static class SelfTest
             Check(c.Count == 1 && c[0].Kind == "click" && c[0].Btn == "left",
                 "tap = one left click", $"ev={c.Count}");
         }
-        // ---- 2. one hold, three things it must get right. With SecondHold =
-        // "drag" (the shipped default) a held press is a DRAG GRAB, not a right
-        // click - the reference's model, measured from its own event log:
-        // L-down arrives after the hold, then the moves, then L-up at the drop,
-        // and its right click is the TWO-FINGER TAP (R-down). So the hold must
-        // put the left button down, the label must say so, and the cursor must
-        // NOT be handed back (a drag that gets its cursor yanked away drops in
-        // the wrong place).
+        // ---- 2. one hold, three things it must get right. The reference's
+        // model, measured from its own event log with F9 markers: a still
+        // single-finger hold puts RIGHT down at the timeout (no click
+        // first), moves drag with it held, lift releases (R-down ... R-up).
+        // So the hold must put the RIGHT button down and up exactly once,
+        // never touch the left button, say so on the label, and keep the
+        // cursor at the hold point (no hand-back: a hold that gets its
+        // cursor yanked away drops in the wrong place).
         {
             var lbl = (System.Windows.Controls.TextBlock)_pad.FindName("StatusLabel");
             int n = Mark();
@@ -340,23 +340,25 @@ public static class SelfTest
             await Drain();
             var c = Since(n);
             var (cx, cy) = InputSim.Cursor();
-            int downs = c.Count(e => e.Kind == "down" && e.Btn == "left");
-            Check(downs == 1 && !c.Any(e => e.Kind == "click" && e.Btn == "right"),
-                "a held press grabs the button (SecondHold = drag), no right click",
-                $"leftDowns={downs} ev={c.Count}");
-            Check(lbl.Text.Contains("hold"),
+            int rdowns = c.Count(e => e.Kind == "down" && e.Btn == "right");
+            int rups = c.Count(e => e.Kind == "up" && e.Btn == "right");
+            int ldowns = c.Count(e => e.Kind == "down" && e.Btn == "left");
+            Check(rdowns == 1 && rups == 1 && ldowns == 0,
+                "a held press holds RIGHT down, released on lift, no left",
+                $"r down/up={rdowns}/{rups} l={ldowns} ev={c.Count}");
+            Check(lbl.Text.Contains("long-press"),
                 "the label says what the hold did", $"label=\"{lbl.Text}\"");
             // The cursor contract differs by mode, so assert the one that is
-            // configured: one cursor keeps it at the grab (there is no physical
-            // position to return to); dual cursor hands it back to the mouse
-            // once the drag ends.
+            // configured: one cursor keeps it at the hold point (there is no
+            // physical position to return to); dual cursor hands it back to
+            // the mouse once the hold ends.
             bool oneCursor = (bool?)typeof(PadWindow)
                 .GetField("RealCursorOnly", BindingFlags.NonPublic
                     | BindingFlags.Static)?.GetValue(null) ?? false;
             Check(oneCursor ? (cx != mx || cy != my) : (cx == mx && cy == my),
                 oneCursor
-                    ? "cursor NOT handed back while the grab is held"
-                    : "cursor handed back to the mouse after the grab",
+                    ? "cursor NOT handed back after the hold"
+                    : "cursor handed back to the mouse after the hold",
                 $"now=({cx},{cy}) phys=({mx},{my})");
         }
         // ---- 2b. the reference's right click, and the only right click left
@@ -470,11 +472,12 @@ public static class SelfTest
             await Drain();
             var c = Since(n);
             var downsL = c.Where(e => e.Kind != "up" && e.Btn == "left").ToList();
-            // tap click + hold click + grab (SecondHold = drag_hold:
-            // click-then-hold, the agreed default - not the old press-hold).
-            Check(downsL.Count == 3, "click+move = click, hold-click, grab (3 L downs)",
+            // tap click + grab. No hold-click: the moves start ~150ms in,
+            // long before the 500ms hold timer, so the hold is skipped on
+            // movement (motion grabs without clicking, by design).
+            Check(downsL.Count == 2, "click+move = click, grab (2 L downs)",
                 $"downs={downsL.Count}");
-            if (downsL.Count == 3)
+            if (downsL.Count == 2)
             {
                 var d2 = downsL[^1];   // the held press, after the click
                 double ddx = d2.X - fx0, ddy = d2.Y - fy0;
@@ -619,10 +622,12 @@ public static class SelfTest
             await Drain();
             var ev = Since(n);
             int ldowns = Dns(ev, "left"), rdowns = Dns(ev, "right");
-            // 3 from the double (1 + 2) + hold click + grab (drag_hold).
-            Check(ldowns == 5 && rdowns == 0,
+            // 3 from the double (1 + 2) + grab. No hold-click: the moves
+            // start ~150ms in, before the 500ms hold timer, so the hold is
+            // skipped on movement.
+            Check(ldowns == 4 && rdowns == 0,
                 $"double-tap then press+move ({label}) = drag still grabs",
-                $"l={ldowns} (want 5) r={rdowns} ev={ev.Count}");
+                $"l={ldowns} (want 4) r={rdowns} ev={ev.Count}");
         }
         // ---- 5b. and the grab must NOT leak into ordinary use: a press with
         // no multi-tap before it is a plain pointer move, and its release
@@ -898,12 +903,15 @@ public static class SelfTest
             await Task.Delay(400);
             await Drain();
             var c = Since(n);
-            // With SecondHold = "drag" the hold grabs the button (the
-            // reference's model) instead of firing a right click, so the
-            // invariant is: drift still HOLDS, i.e. the grab happens.
-            Check(Dns(c, "left") >= 1 && Dns(c, "right") == 0,
-                "a drifting finger still holds (no dead pad, no right click)",
-                $"l={Dns(c, "left")} r={Dns(c, "right")} ev={c.Count}");
+            // Reference model: a still (if drifting) fresh press holds RIGHT
+            // at the timeout - no left, exactly one R down/up pair. (Fresh
+            // presses never belonged to SecondHold; that setting is for
+            // chained presses only.)
+            int rlDn = c.Count(e => e.Kind == "down" && e.Btn == "right");
+            int rlUp = c.Count(e => e.Kind == "up" && e.Btn == "right");
+            Check(rlDn == 1 && rlUp == 1 && Dns(c, "left") == 0,
+                "a drifting finger still holds RIGHT (reference long-press)",
+                $"r down/up={rlDn}/{rlUp} l={Dns(c, "left")} ev={c.Count}");
         }
         // ---- 13. no button left pressed. The real invariant is OUR stream
         // being balanced (a drag that never releases is a stuck button).

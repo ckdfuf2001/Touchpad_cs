@@ -58,10 +58,39 @@ public static class InputSim
     private static void Key(ushort vk, bool up) =>
         keybd_event((byte)vk, 0, up ? KEYEVENTF_KEYUP : 0, UIntPtr.Zero);
 
+    /// <summary>
+    /// Last-known cursor position. GetPhysicalCursorPos FAILS intermittently
+    /// (measured: the API itself is live - a direct probe reads and writes
+    /// fine - yet reads sporadically come back (0,0), in selftest and
+    /// on-device) - and every caller that corrects from a (0,0) read
+    /// teleports the cursor instead. A failed read returns the freshest of:
+    /// our last WRITE target (we just put it there - most trustworthy right
+    /// after a drive), else the last good read; anything older than 1s is
+    /// genuinely unknown.
+    /// </summary>
+    private static int _goodX = int.MinValue, _goodY = int.MinValue;
+    private static long _goodAt;
+    private static int _wroteX = int.MinValue, _wroteY = int.MinValue;
+    private static long _wroteAt;
+    private static void NoteWrite(int x, int y)
+    {
+        _wroteX = x; _wroteY = y;
+        _wroteAt = Environment.TickCount64;
+    }
     public static (int X, int Y) Cursor()
     {
-        GetPhysicalCursorPos(out var p);
-        return (p.X, p.Y);
+        if (GetPhysicalCursorPos(out var p))
+        {
+            _goodX = p.X; _goodY = p.Y;
+            _goodAt = Environment.TickCount64;
+            return (p.X, p.Y);
+        }
+        long now = Environment.TickCount64;
+        if (_wroteX != int.MinValue && now - _wroteAt < 1000)
+            return (_wroteX, _wroteY);
+        if (_goodX != int.MinValue && now - _goodAt < 1000)
+            return (_goodX, _goodY);
+        return (0, 0);
     }
 
     /// <summary>
@@ -83,6 +112,7 @@ public static class InputSim
 
     public static void SetCursor(int x, int y)
     {
+        NoteWrite(x, y);
         var (cx, cy) = Cursor();
         Move((double)(x - cx), (double)(y - cy));
     }
@@ -143,6 +173,7 @@ public static class InputSim
     /// </summary>
     public static void ClickAt(int x, int y, string button)
     {
+        NoteWrite(x, y);
         SetPhysicalCursorPos(x, y);
         mouse_event(DownFlag(button), 0, 0, 0, InjectTag);
         mouse_event(UpFlag(button), 0, 0, 0, InjectTag);
@@ -155,6 +186,7 @@ public static class InputSim
     /// </summary>
     public static void DownAt(int x, int y, string button)
     {
+        NoteWrite(x, y);
         SetPhysicalCursorPos(x, y);
         mouse_event(DownFlag(button), 0, 0, 0, InjectTag);
         HeldDown(button);
@@ -165,6 +197,7 @@ public static class InputSim
     /// <summary>Mirror of DownAt for the release.</summary>
     public static void UpAt(int x, int y, string button)
     {
+        NoteWrite(x, y);
         SetPhysicalCursorPos(x, y);
         mouse_event(UpFlag(button), 0, 0, 0, InjectTag);
         HeldUp(button);
@@ -178,6 +211,7 @@ public static class InputSim
     /// </summary>
     public static void WheelAt(int x, int y, int delta, bool horizontal)
     {
+        NoteWrite(x, y);
         SetPhysicalCursorPos(x, y);
         mouse_event(horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL,
             0, 0, unchecked((uint)delta), InjectTag);
@@ -287,12 +321,15 @@ public static class InputSim
     /// <summary>
     /// Put the cursor at an absolute point, in physical pixels, the way the
     /// reference does. Idempotent, so it cannot fight another writer and cannot
-    /// accumulate drift.
+    /// accumulate drift. The 10ms session keeper passes record:false: it
+    /// re-asserts one position many times a second and would otherwise bury
+    /// the injection log (and the selftest counts) in duplicate moves.
     /// </summary>
-    public static void MoveTo(int x, int y)
+    public static void MoveTo(int x, int y, bool record = true)
     {
+        NoteWrite(x, y);
         SetPhysicalCursorPos(x, y);
-        Note("move", "", x, y);
+        if (record) Note("move", "", x, y);
     }
 
     /// <summary>
