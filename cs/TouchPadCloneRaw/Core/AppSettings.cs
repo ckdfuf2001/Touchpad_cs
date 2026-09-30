@@ -12,7 +12,9 @@ public sealed class GestureMap
     public string LongPress { get; set; } = "right_click";
     // Double-touch + hold (no release): click, then hold - moving drags.
     // The reference default ("2nd tap and hold: click then hold, drag on move").
-    public string SecondHold { get; set; } = "drag_hold";
+    // Double-touch + hold (no release): press-and-hold, NO extra click -
+    // moving drags. The reference "2nd tap and hold: Drag".
+    public string SecondHold { get; set; } = "drag";
     public string TwoFingerTap { get; set; } = "right_click";
     public string SwipeUp { get; set; } = "wheel_up";
     public string SwipeDown { get; set; } = "wheel_down";
@@ -140,20 +142,25 @@ public sealed class AppSettings
     }
 
     /// <summary>
-    /// The previous default stored "drag" (press-and-hold, no click) in
-    /// SecondHold slots. The agreed default is click-then-hold ("drag_hold"):
-    /// double-touch + hold clicks first, then holds - moving drags. Stored
-    /// "drag" values came from the old default (never an explicit choice
-    /// against this), so they move forward; anyone who prefers press-and-hold
-    /// can still explicitly select "drag".
+    /// <summary>
+    /// Legacy "drag_hold" (click-then-hold) selections move forward to the
+    /// press-and-hold Drag default: double-hold maintains left-down with no
+    /// extra click. Explicit "drag_hold" stays available for click-then-hold.
+    /// Chained multi-taps fired double_click (2) / triple_click (2+) on top
+    /// of the first tap's click (triple/quadruple total): single (OS pairs)
+    /// gives correct double/triple counts.
     /// </summary>
     private static void MigrateLegacySecondHold(AppSettings settings)
     {
         foreach (var map in new[]
             { settings.Gestures, settings.ArtistGestures, settings.VirtualGestures })
         {
-            if (map != null && map.SecondHold == "drag")
-                map.SecondHold = "drag_hold";
+            if (map != null && map.SecondHold == "drag_hold")
+                map.SecondHold = "drag";
+            if (map != null && map.DoubleTap == "double_click")
+                map.DoubleTap = "left_click";
+            if (map != null && map.TripleTap == "triple_click")
+                map.TripleTap = "left_click";
         }
     }
 

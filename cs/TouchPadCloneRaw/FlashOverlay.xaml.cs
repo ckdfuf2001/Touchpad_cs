@@ -64,23 +64,8 @@ public partial class FlashOverlay : Window
         };
     }
 
-    private double _lastFX, _lastFY;
-    private long _lastFTick;
-
     public void Flash(double physX, double physY)
     {
-        // Coalesce same-spot flashes: a tap plus its chained grab land on
-        // the same press point ~100-200ms apart (tap rewind), and every
-        // re-fire reset the 250ms fade - pinning a permanent ring at the
-        // first position through a whole move. A repeat at the same spot
-        // while fading is skipped so the old fade runs out on schedule;
-        // a new spot flashes normally.
-        long now = Environment.TickCount64;
-        double dx = physX - _lastFX, dy = physY - _lastFY;
-        if (IsVisible && (now - _lastFTick) < 500
-            && dx * dx + dy * dy < 24 * 24)
-            return;
-        _lastFX = physX; _lastFY = physY; _lastFTick = now;
         NativeWin.PlaceTopmost(Handle, physX - 24, physY - 24);
         _frame = 0;
         _ring.Opacity = 1.0;
