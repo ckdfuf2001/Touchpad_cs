@@ -108,6 +108,13 @@ public sealed class AppSettings
     /// be more forgiving than a mouse button, which is what this window is.
     /// </summary>
     public int MultiTapMs { get; set; } = 900;
+    /// <summary>
+    /// Drag-start travel (pad DIP, Manhattan net from press point): a press
+    /// must move this far before it becomes a move-grab (button down).
+    /// Above the tap slide, below a deliberate stroke. Cursor tracking
+    /// itself is unaffected - only the button waits.
+    /// </summary>
+    public int DragStartDip { get; set; } = 30;
     /// <summary>Gesture profile per layout family (settings tabs).</summary>
     public GestureMap Gestures { get; set; } = new();
     public GestureMap ArtistGestures { get; set; } = new();
