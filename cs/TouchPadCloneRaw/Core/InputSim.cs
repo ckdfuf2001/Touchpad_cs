@@ -52,11 +52,40 @@ public static class InputSim
     [DllImport("user32.dll")]
     private static extern bool SetPhysicalCursorPos(int x, int y);
 
-    private static void Mouse(uint flags, int dx = 0, int dy = 0, int data = 0) =>
-        mouse_event(flags, dx, dy, unchecked((uint)data), InjectTag);
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
 
-    private static void Key(ushort vk, bool up) =>
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT2 { public int X, Y; }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out POINT2 lpPoint);
+
+    /// <summary>
+    /// OBSERVATION MODE (false): all mouse/keyboard/cursor output is
+    /// neutered to log-only ("WOULD ..."). Recognition, logging and the HUD
+    /// keep running, so touch behaviour can be measured without our output
+    /// fighting it. One-line revert restores full output. Everything is in
+    /// git, so nothing is lost.
+    /// </summary>
+    public static bool OutputEnabled = false;
+
+    private static void Mouse(uint flags, int dx = 0, int dy = 0, int data = 0)
+    {
+        if (!OutputEnabled) return;   // silent: moves would flood the log
+        mouse_event(flags, dx, dy, unchecked((uint)data), InjectTag);
+    }
+
+    private static void Key(ushort vk, bool up)
+    {
+        if (!OutputEnabled)
+        {
+            DebugLog.Write($"WOULD key 0x{vk:X} {(up ? "up" : "down")}");
+            return;
+        }
         keybd_event((byte)vk, 0, up ? KEYEVENTF_KEYUP : 0, UIntPtr.Zero);
+    }
 
     public static (int X, int Y) Cursor()
     {
@@ -74,11 +103,31 @@ public static class InputSim
     public static readonly List<(long Ms, string Kind, string Btn, int X, int Y)>
         Injected = new();
 
+    private static string _lastOut = "-";
+
     private static void Note(string kind, string btn, int x, int y)
     {
+        _lastOut = $"{kind} {btn} @({x},{y})";
         if (!RecordInjections) return;
         lock (Injected)
             Injected.Add((Environment.TickCount64, kind, btn, x, y));
+    }
+
+    /// <summary>
+    /// ACTUAL system mouse state for the on-screen HUD (bottom-right):
+    /// real button states + cursor position (physical + logical) +
+    /// suppression. Raw input only - our own last event is NOT shown
+    /// (observation: logic removed).
+    /// </summary>
+    public static string ActualState()
+    {
+        var (x, y) = Cursor();
+        string log = "?";
+        try { if (GetCursorPos(out var q)) log = $"{q.X},{q.Y}"; } catch { }
+        bool l = (GetAsyncKeyState(0x01) & 0x8000) != 0;
+        bool r = (GetAsyncKeyState(0x02) & 0x8000) != 0;
+        string sup = CursorSuppressed() ? " sup" : "";
+        return $"L:{(l ? "DN" : "up")} R:{(r ? "DN" : "up")} P({x},{y}) G({log}){sup}";
     }
 
     public static void SetCursor(int x, int y)
@@ -126,12 +175,13 @@ public static class InputSim
             while (_held.TryGetValue(b, out int n) && n > 0)
             {
                 _held[b] = n - 1;
-                mouse_event(UpFlag(b), 0, 0, 0, InjectTag);
+                if (OutputEnabled)
+                    mouse_event(UpFlag(b), 0, 0, 0, InjectTag);
                 total++;
             }
         }
         if (total > 0)
-            DebugLog.Write($"BTN drain {total} stuck press(es)");
+            DebugLog.Write($"BTN {(OutputEnabled ? "drain" : "WOULD drain")} {total} stuck press(es)");
         return total;
     }
 
@@ -143,11 +193,16 @@ public static class InputSim
     /// </summary>
     public static void ClickAt(int x, int y, string button)
     {
+        Note("click", button, x, y);
+        if (!OutputEnabled)
+        {
+            DebugLog.Write($"WOULD click {button} @({x},{y})");
+            return;
+        }
         SetPhysicalCursorPos(x, y);
         mouse_event(DownFlag(button), 0, 0, 0, InjectTag);
         mouse_event(UpFlag(button), 0, 0, 0, InjectTag);
         DebugLog.Write($"BTN click {button} @({x},{y})");
-        Note("click", button, x, y);
     }
 
     /// <summary>
@@ -155,21 +210,31 @@ public static class InputSim
     /// </summary>
     public static void DownAt(int x, int y, string button)
     {
+        Note("down", button, x, y);
+        if (!OutputEnabled)
+        {
+            DebugLog.Write($"WOULD down {button} @({x},{y})");
+            return;
+        }
         SetPhysicalCursorPos(x, y);
         mouse_event(DownFlag(button), 0, 0, 0, InjectTag);
         HeldDown(button);
         DebugLog.Write($"BTN down {button} @({x},{y})");
-        Note("down", button, x, y);
     }
 
     /// <summary>Mirror of DownAt for the release.</summary>
     public static void UpAt(int x, int y, string button)
     {
+        Note("up", button, x, y);
+        if (!OutputEnabled)
+        {
+            DebugLog.Write($"WOULD up {button} @({x},{y})");
+            return;
+        }
         SetPhysicalCursorPos(x, y);
         mouse_event(UpFlag(button), 0, 0, 0, InjectTag);
         HeldUp(button);
         DebugLog.Write($"BTN up {button} @({x},{y})");
-        Note("up", button, x, y);
     }
 
     /// <summary>
@@ -178,10 +243,15 @@ public static class InputSim
     /// </summary>
     public static void WheelAt(int x, int y, int delta, bool horizontal)
     {
+        Note("wheel", (horizontal ? "h" : "v") + delta, x, y);
+        if (!OutputEnabled)
+        {
+            DebugLog.Write($"WOULD wheel {(horizontal ? "h" : "v")}{delta} @({x},{y})");
+            return;
+        }
         SetPhysicalCursorPos(x, y);
         mouse_event(horizontal ? MOUSEEVENTF_HWHEEL : MOUSEEVENTF_WHEEL,
             0, 0, unchecked((uint)delta), InjectTag);
-        Note("wheel", (horizontal ? "h" : "v") + delta, x, y);
     }
 
     public static void Click(string button)
@@ -241,8 +311,11 @@ public static class InputSim
     public static void ClearSuppression()
     {
         if (!CursorSuppressed()) return;
-        mouse_event(MOUSEEVENTF_MOVE, 1, 0, 0, InjectTag);
-        mouse_event(MOUSEEVENTF_MOVE, -1, 0, 0, InjectTag);
+        if (OutputEnabled)
+        {
+            mouse_event(MOUSEEVENTF_MOVE, 1, 0, 0, InjectTag);
+            mouse_event(MOUSEEVENTF_MOVE, -1, 0, 0, InjectTag);
+        }
         long now = Environment.TickCount64;
         if (now - _lastSuppressLog > 500)
         {
@@ -252,11 +325,15 @@ public static class InputSim
         }
     }
 
-    public static void HideCursor() => ShowCursor(false);
+    public static void HideCursor()
+    {
+        if (OutputEnabled) ShowCursor(false);
+    }
 
     /// <summary>Emergency restore: force the cursor visible again.</summary>
     public static void RestoreCursor()
     {
+        if (!OutputEnabled) return;
         for (int i = 0; i < 8; i++)
         {
             var ci = new CURSORINFO { cbSize = (uint)Marshal.SizeOf<CURSORINFO>() };
@@ -291,6 +368,7 @@ public static class InputSim
     /// </summary>
     public static void MoveTo(int x, int y)
     {
+        if (!OutputEnabled) return;   // silent, like all moves
         SetPhysicalCursorPos(x, y);
         Note("move", "", x, y);
     }
@@ -304,12 +382,22 @@ public static class InputSim
 
     public static void Down(string button)
     {
+        if (!OutputEnabled)
+        {
+            DebugLog.Write($"WOULD down {button}");
+            return;
+        }
         Mouse(DownFlag(button));
         HeldDown(button);
     }
 
     public static void Up(string button)
     {
+        if (!OutputEnabled)
+        {
+            DebugLog.Write($"WOULD up {button}");
+            return;
+        }
         Mouse(UpFlag(button));
         HeldUp(button);
     }

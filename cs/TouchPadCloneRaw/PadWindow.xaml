@@ -27,7 +27,13 @@
             <TextBlock x:Name="StatusLabel" Text="ready" Foreground="#7FE0A8"
                        FontSize="10" Margin="8,0,0,8"
                        HorizontalAlignment="Left" VerticalAlignment="Bottom"
-                       IsHitTestVisible="False"/>
+                       Cursor="Hand" ToolTip="expected events - click opens the log"
+                       MouseLeftButtonUp="OpenLogFile"/>
+            <TextBlock x:Name="ActualLabel" Text="actual: -" Foreground="#7FC4E0"
+                       FontSize="10" Margin="0,0,8,8"
+                       HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                       Cursor="Hand" ToolTip="actual mouse state - click opens the log"
+                       MouseLeftButtonUp="OpenLogFile"/>
         </Grid>
     </Border>
 </Window>

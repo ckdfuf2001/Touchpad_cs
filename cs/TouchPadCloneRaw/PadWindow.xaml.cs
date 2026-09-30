@@ -189,7 +189,8 @@ public partial class PadWindow : Window
     /// surface can be transparent to the mouse without losing the finger.
     /// </summary>
     private bool MouseThroughActive =>
-        _session || DateTime.Now < _mouseThroughUntil;
+        InputSim.OutputEnabled &&
+        (_session || DateTime.Now < _mouseThroughUntil);
 
     private const int WM_NCHITTEST = 0x0084;
     private static readonly IntPtr HTTRANSPARENT = new(-1);
@@ -670,7 +671,7 @@ public partial class PadWindow : Window
         // sometimes" is then a matter of reading the outcome of the runs that
         // did not, instead of guessing which branch was taken - the same
         // reason the reference was measured rather than inferred.
-        DebugLog.Write($"SESSION OUTCOME \"{_pressNote}\""
+        DebugLog.Write("SESSION OUTCOME raw"
             + $" fake=({_fakeX:0},{_fakeY:0}) phys=({_physX},{_physY})");
         // A touch that produced no mouse output (empty tap) leaves cursor
         // suppression stuck - the pointer stays invisible. Measured: one
@@ -699,7 +700,10 @@ public partial class PadWindow : Window
         // Pad sessions only (desktop taps must not yank): _sessionWasPad set
         // from the first finger's tile at session begin. ClearSuppression
         // above still runs for all (cursor visible after any tap).
-        if ((RealCursorOnly || !_menuClick) && _sessionWasPad && wantX != int.MinValue)
+        // Observation mode: no outcome hold (its HOLD lines would claim
+        // cursor writes that never happen).
+        if (InputSim.OutputEnabled &&
+            (RealCursorOnly || !_menuClick) && _sessionWasPad && wantX != int.MinValue)
         {
             // Fast polls (16ms): the lift-yank lands within a frame or two of
             // the release - 100ms lets a 1500px teleport sit visible, 33ms
@@ -923,6 +927,30 @@ public partial class PadWindow : Window
     private double _longFireX, _longFireY;
     private int _holdId = -1;
     private DateTime _pendingTapUntil = DateTime.MinValue;
+    /// <summary>Observation: merged finger count. The panel splits one firm
+    /// press into two close contacts (blob split); contacts within MergeDip
+    /// count as one finger. Raw _fingers.Count is the device truth.</summary>
+    private const double MergeDip = 40;
+
+    private int MergedCount()
+    {
+        var pts = new System.Collections.Generic.List<WPoint>();
+        foreach (var kv in _fingers) pts.Add(kv.Value.Last);
+        int clusters = 0;
+        var used = new bool[pts.Count];
+        for (int i = 0; i < pts.Count; i++)
+        {
+            if (used[i]) continue;
+            clusters++;
+            for (int j = i + 1; j < pts.Count; j++)
+            {
+                if (!used[j] && Math.Abs(pts[j].X - pts[i].X)
+                    + Math.Abs(pts[j].Y - pts[i].Y) <= MergeDip)
+                    used[j] = true;
+            }
+        }
+        return clusters;
+    }
     private DateTime _pendingTripleUntil = DateTime.MinValue;
     // Virtual position of the last single-tap click: a chained 2nd/3rd press
     // rewinds here before pressing, so the OS pairs click+down as a true
@@ -1225,6 +1253,7 @@ public partial class PadWindow : Window
     /// </summary>
     private void ArmLong(int id, string action)
     {
+        return; // LOGIC REMOVED (observation rig; git has it)
         CancelLong();
         _longId = id;
         _longAction = action;
@@ -1338,6 +1367,7 @@ public partial class PadWindow : Window
 
     private void ArmHold(int id, string action)
     {
+        return; // LOGIC REMOVED (observation rig; git has it)
         CancelHold();
         _holdId = id;
         _holdTimer = new System.Windows.Threading.DispatcherTimer
@@ -1401,6 +1431,7 @@ public partial class PadWindow : Window
     /// </summary>
     private void StartDrag(int id)
     {
+        return; // LOGIC REMOVED (observation rig; git has it)
         if (!DragEnabled)
         {
             DebugLog.Write($"DRAG disabled: press id={id} stays a cursor move");
@@ -1452,6 +1483,7 @@ public partial class PadWindow : Window
     /// </summary>
     private void GrabHold(int id, bool pushClick)
     {
+        return; // LOGIC REMOVED (observation rig; git has it)
         if (!DragEnabled)
         {
             DebugLog.Write($"DRAG disabled: hold id={id} clicks instead of grabbing");
@@ -1533,6 +1565,7 @@ public partial class PadWindow : Window
 
     private void FirePressAction(string action, int id)
     {
+        return; // LOGIC REMOVED (observation rig; git has it)
         // Rewind to the press-start aim point: tremor during the hold would
         // otherwise land timer-fired actions (long-press menu!) off-target.
         if (_fingers.TryGetValue(id, out var ff))
@@ -1555,6 +1588,7 @@ public partial class PadWindow : Window
 
     private void ReleaseActionButton()
     {
+        return; // LOGIC REMOVED (observation rig; git has it)
         if (_dragHold && _actionHeld != null)
         {
             PressUp(_actionHeld);
@@ -1574,6 +1608,7 @@ public partial class PadWindow : Window
     /// </summary>
     private void PressDown(string button)
     {
+        return; // LOGIC REMOVED (observation rig; git has it)
         double fx, fy;
         if (_session)
         {
@@ -1600,6 +1635,7 @@ public partial class PadWindow : Window
 
     private void PressUp(string button)
     {
+        return; // LOGIC REMOVED (observation rig; git has it)
         // In one-cursor mode the keeper runs for the whole session (a plain
         // move needs it too); otherwise it exists only for the drag.
         if (!RealCursorOnly)
@@ -1656,7 +1692,11 @@ public partial class PadWindow : Window
         // way in - the helper loops until the cursor is actually showing.
         try { InputSim.RestoreCursor(); } catch { }
         Core.NoActivate.Apply(this);
-        Core.TabletTweaks.DisableSystemGestures(this);
+        // Observation mode: system gestures stay NATIVE on our pad (OS
+        // hold-menu, double pairs, flicks) so outside observation sees the
+        // true device behaviour. Non-persistent (per-window hook only).
+        // Core.TabletTweaks.DisableSystemGestures(this); // OBSERVATION: off
+        StartActualHud();
         // Make the pad's touch surface transparent to mouse input WHILE we are
         // injecting a synthetic click or drag. The pad is on top, so a press
         // aimed at the pad's rectangle is otherwise delivered to us and lost -
@@ -1796,6 +1836,8 @@ public partial class PadWindow : Window
         Surface.PreviewMouseMove += SwallowTouchMouse;
         Surface.PreviewMouseUp += SwallowTouchMouse;
         SizeChanged += (_, _) => Render();
+        SizeChanged += (_, _) => UpdateChromeLabel();
+        LocationChanged += (_, _) => UpdateChromeLabel();
         // NOTE: window drags apply DIRECTLY per move event (absolute target
         // = pointer - grab offset). This was briefly a 30Hz/60Hz timer queue
         // and lagged: apply immediately, targets don't accumulate error.
@@ -1826,6 +1868,7 @@ public partial class PadWindow : Window
             ClampFake();
             _fakeInit = true;
             DebugLog.Write($"INIT fake=({_fakeX:0},{_fakeY:0}) dpi={_dpi}");
+            UpdateChromeLabel();
         };
     }
 
@@ -2159,6 +2202,60 @@ public partial class PadWindow : Window
     private void Status(string msg) => StatusLabel.Text =
         msg.Length > 90 ? msg[^90..] : msg;
 
+    /// <summary>
+    /// Title bar shows pad geometry (DIP, same space as touch coords):
+    /// position + size, so touches can be correlated to the screen.
+    /// </summary>
+    private void UpdateChromeLabel()
+    {
+        try
+        {
+            ChromeLabel.Text =
+                $"floatpad {_s.Speed:0.0}x @({Left:0},{Top:0}) {ActualWidth:0}x{ActualHeight:0}";
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// Actual-state HUD (bottom-right): polls the real system mouse state
+    /// 10x a second so expected (left) vs actual (right) can be compared
+    /// live while debugging gestures.
+    /// </summary>
+    private System.Windows.Threading.DispatcherTimer? _actualTimer;
+
+    private void StartActualHud()
+    {
+        _actualTimer?.Stop();
+        _actualTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(100),
+        };
+        _actualTimer.Tick += (_, _) =>
+        {
+            try
+            {
+                string s = InputSim.ActualState();
+                ActualLabel.Text = s.Length > 90 ? s[^90..] : s;
+            }
+            catch { }
+        };
+        _actualTimer.Start();
+    }
+
+    /// <summary>Click on either HUD label opens the timestamped log file.</summary>
+    private void OpenLogFile(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = Core.DebugLog.Path,
+                UseShellExecute = true,
+            });
+        }
+        catch { }
+    }
+
     private void SafeClick(string button)
     {
         // Click target is the fake cursor in a session, else the cursor.
@@ -2321,7 +2418,8 @@ public partial class PadWindow : Window
             _menuClick = false;
             _pendingMenuAction = "";
         }
-        Status($"touch {e.TouchDevice.Id} {tile?.RawKind ?? "-"} n={_fingers.Count}");
+            int rawN = _fingers.Count, mgN = MergedCount();
+            Status($"touch {e.TouchDevice.Id} {tile?.RawKind ?? "-"} n={(rawN == mgN ? rawN.ToString() : mgN + "[raw" + rawN + "]")}");
         var (ccx, ccy) = InputSim.Cursor();
         DebugLog.Write($"TOUCHDOWN id={e.TouchDevice.Id} @{p.X:0},{p.Y:0} tile={tile?.RawKind} n={_fingers.Count} cursor=({ccx},{ccy})");
         if (tile?.Action == TileAction.Grip)
@@ -2462,7 +2560,10 @@ public partial class PadWindow : Window
                 }
             }
         }
-        Surface.CaptureTouch(e.TouchDevice);
+        // Observation: no capture (a mid-gesture capture can re-issue the
+        // contact as a new device, doubling every touch in _fingers).
+        if (InputSim.OutputEnabled)
+            Surface.CaptureTouch(e.TouchDevice);
         e.Handled = true; // block promotion to mouse events
     }
 
@@ -2585,7 +2686,9 @@ public partial class PadWindow : Window
             }
         }
         // A chained press that starts moving is a drag, not a hold.
-        if (net > TapMoveDip && _dragArmId == e.TouchDevice.Id)
+        // Grab threshold is DragStartDip (bigger than the tap slide
+        // TapMoveDip): micro slides stay taps, deliberate strokes grab.
+        if (net > _s.DragStartDip && _dragArmId == e.TouchDevice.Id)
             StartDrag(e.TouchDevice.Id);
         else if (_dragArmId == e.TouchDevice.Id && (_moveLogN % 8) == 0)
         {
@@ -2686,6 +2789,12 @@ public partial class PadWindow : Window
                         int ix = (int)_fakeX, iy = (int)_fakeY;
                         InputSim.SetCursor(ix, iy);
                         InputSim.NotePosition(ix, iy);
+                        // While a button is held the cursor must be SEEN at
+                        // the driven position: a touch keeps it suppressed
+                        // (invisible), so the whole drag happens blind.
+                        // A net-zero queue wiggle transiently clears
+                        // suppression; no-op when visible.
+                        if (ButtonHeld()) InputSim.ClearSuppression();
                         _realSentX = ix; _realSentY = iy;
                     }
                     else
@@ -2866,7 +2975,7 @@ public partial class PadWindow : Window
         // right-click made the label claim nothing had happened. The note
         // survives until the next press.
         if (_pressNote.Length == 0)
-            Status(tap ? $"tap {(int)ms}ms" : $"move {(int)ms}ms");
+            Status($"up {(int)ms}ms {(f.Moved ? "moved" : "still")}");
         // Release capture BEFORE firing actions: windows opened from here
         // (settings/assist) must activate normally.
         Surface.ReleaseTouchCapture(e.TouchDevice);
@@ -3011,8 +3120,7 @@ public partial class PadWindow : Window
         {
             _twoCandidate = false;
             DebugLog.Write("GESTURE two-finger-tap");
-            _pressNote = $"2-finger tap → {G.TwoFingerTap}";
-            Status(_pressNote);
+                _pressNote = $"2-finger tap → {G.TwoFingerTap}";
             DoGesture(G.TwoFingerTap);
         }
         else if (_twoCandidate || _twoActive)
@@ -3039,8 +3147,7 @@ public partial class PadWindow : Window
                 string act = ax > 0 ? G.SwipeRight : G.SwipeLeft;
                 DebugLog.Write($"GESTURE two-swipe ({ax:0},{ay:0})");
                 // Fires after the status line above, so set it here too.
-                _pressNote = $"2-finger swipe ({ax:0},{ay:0}) → {act}";
-                Status(_pressNote);
+                    _pressNote = $"2-finger swipe ({ax:0},{ay:0}) → {act}";
                 DoGesture(act);
             }
         }
@@ -3089,6 +3196,7 @@ public partial class PadWindow : Window
     /// </summary>
     private void FireWheel(int delta, bool horizontal = false)
     {
+        return; // LOGIC REMOVED (observation rig; git has it)
         if (_session) InputSim.WheelAt((int)_fakeX, (int)_fakeY, delta, horizontal);
         else InputSim.Wheel(delta, horizontal);
         _suppressPhysicalUntil = DateTime.Now.AddMilliseconds(60);
@@ -3096,24 +3204,9 @@ public partial class PadWindow : Window
 
     private void DoGesture(string name)
     {
-        DebugLog.Write($"ACTION {name}");
-        switch (name)
-        {
-            case "left_click": SafeClick("left"); break;
-            case "right_click": SafeClick("right"); break;
-            case "middle_click": SafeClick("middle"); break;
-            case "double_click": SafeClick("left"); SafeClick("left"); break;
-            case "triple_click":
-                SafeClick("left"); SafeClick("left"); SafeClick("left"); break;
-            case "drag": SafeClick("left"); break; // release-context fallback
-            case "drag_hold": SafeClick("left"); break; // release-context fallback
-            case "wheel_up": FireWheel(_s.WheelStep); break;
-            case "wheel_down": FireWheel(-_s.WheelStep); break;
-            case "browser_back": InputSim.TapKey(0xA6); break;
-            case "browser_forward": InputSim.TapKey(0xA7); break;
-            case "assist_pad": RequestAssist?.Invoke(); break;
-            case "toggle_fake": ToggleFakeCursor(); break;
-        }
+        // LOGIC REMOVED (observation rig; git has it): only the assist
+        // window survives, everything else is silent.
+        if (name == "assist_pad") RequestAssist?.Invoke();
     }
 
     private void SysAction(string kind)
