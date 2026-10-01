@@ -37,6 +37,30 @@ public partial class MainWindow : Window
     }
 
     private readonly Dictionary<int, Finger> _fingers = new();
+    private int _lastFreeX = int.MinValue, _lastFreeY = int.MinValue;
+    private int _downOrigX = int.MinValue, _downOrigY = int.MinValue;
+
+    /// <summary>Event position law: anchor cursor + finger travel (scaled).
+    /// Never reads the live cursor (yanked/failing reads).</summary>
+    private (int X, int Y) EventAt(Finger f, Point now)
+    {
+        if (_downOrigX == int.MinValue) return (int.MinValue, int.MinValue);
+        double tx = (now.X - f.Start.X) * _dpi * _s.Speed;
+        double ty = (now.Y - f.Start.Y) * _dpi * _s.Speed;
+        return (_downOrigX + (int)tx, _downOrigY + (int)ty);
+    }
+    private bool _heldLeft;
+    private EffectOverlay? _fx;
+
+    private EffectOverlay Fx()
+    {
+        if (_fx == null)
+        {
+            _fx = new EffectOverlay();
+            _fx.Owner = this;
+        }
+        return _fx;
+    }
     private long _throughUntil;
 
     /// <summary>Mouse click-through while touches are live (plus a short
@@ -116,6 +140,12 @@ public partial class MainWindow : Window
         {
             try
             {
+                RefreshDpi();
+                if (_fingers.Count == 0)
+                {
+                    var (lx, ly) = Out.Cursor();
+                    if (lx != 0 || ly != 0) { _lastFreeX = lx; _lastFreeY = ly; }
+                }
                 string s = Out.ActualState();
                 ActualLabel.Text = s.Length > 90 ? s[^90..] : s;
             }
@@ -299,6 +329,24 @@ public partial class MainWindow : Window
                 Zone = zone,
             };
             _fingers[e.TouchDevice.Id] = f;
+            if (_fingers.Count == 1)
+            {
+                // Anchor = polled pre-touch (yank-proof); fresh read only
+                // when the poll never captured (first launch).
+                // Stale hold from a lost UP first (safety net).
+                if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
+                _downOrigX = _lastFreeX; _downOrigY = _lastFreeY;
+                if (_downOrigX == int.MinValue)
+                {
+                    var (gx, gy) = Out.Logical();
+                    _downOrigX = gx; _downOrigY = gy;
+                }
+                Out.SetAnchor(_downOrigX, _downOrigY);
+                Out.DownAt(_downOrigX, _downOrigY, "left");
+                _heldLeft = true;
+                Fx().Flash(_downOrigX / _dpi, _downOrigY / _dpi);
+                Status($"press down @({_downOrigX},{_downOrigY})");
+            }
             int rawN = _fingers.Count, mgN = MergedCount();
             Status($"touch {e.TouchDevice.Id} {zone} n={(rawN == mgN ? rawN.ToString() : mgN + "[raw" + rawN + "]")}");
             ZoneLabel.Text = "zone: " + zone;
@@ -373,9 +421,50 @@ public partial class MainWindow : Window
             var (ux, uy) = Out.Cursor();
             Log.Write($"TOUCHUP id={e.TouchDevice.Id} {(f.Moved ? "moved" : "still")} {(int)ms}ms zone={f.Zone} n={_fingers.Count} cursor=({ux},{uy})");
             Status($"up {(int)ms}ms {(f.Moved ? "moved" : "still")}");
+            // Release on the last lift (at the model G, never at the touch).
+            if (_heldLeft && _fingers.Count == 0)
+            {
+                _heldLeft = false;
+                var (rx, ry) = EventAt(f, end);
+                if (rx == int.MinValue)
+                {
+                    Out.Up("left");
+                }
+                else
+                {
+                    Out.UpAt(rx, ry, "left");
+                    Fx().Flash(rx / _dpi, ry / _dpi);
+                // Yank window: the OS pulls to the contact up to a few
+                // hundred ms AFTER lift; hold the release point briefly
+                // (stop early when stable or a new touch lands).
+                int tries = 5;
+                var holdT = new System.Windows.Threading.DispatcherTimer
+                {
+                    Interval = TimeSpan.FromMilliseconds(40),
+                };
+                holdT.Tick += (_, _) =>
+                {
+                    try
+                    {
+                        if (--tries <= 0) { holdT.Stop(); return; }
+                        if (_fingers.Count > 0) { holdT.Stop(); return; }
+                        var (hx2, hy2) = Out.Logical();
+                        if (Math.Abs(hx2 - rx) + Math.Abs(hy2 - ry) <= 4)
+                        {
+                            holdT.Stop();
+                            return;
+                        }
+                        Out.PlaceAt(rx, ry);
+                    }
+                    catch { holdT.Stop(); }
+                };
+                holdT.Start();
+                }
+            }
             if (_fingers.Count == 0)
             {
                 _throughUntil = Environment.TickCount64 + 300;
+                Out.ClearAnchor();
                 Log.Write($"SESSION raw fake=({_fakeX:0},{_fakeY:0})");
             }
             e.Handled = true;
@@ -552,6 +641,8 @@ public partial class MainWindow : Window
     {
         try
         {
+            // Our own re-emitted input looping back: swallow, no forward.
+            if (Core.Out.IsOurs()) { e.Handled = true; return; }
             // Ours (chrome/labels/buttons) or touch-promoted: not forwarded.
             if (e.StylusDevice != null) { e.Handled = true; return; }
             var src = e.OriginalSource as DependencyObject;
@@ -566,9 +657,10 @@ public partial class MainWindow : Window
                     d = (d as FrameworkElement)?.Parent as DependencyObject;
                 }
             }
-            var rp = e.GetPosition(Surface);
-            var sp = PointToScreen(rp);
-            int sx = (int)sp.X, sy = (int)sp.Y;
+            // Screen coords from the message itself (physical, exact).
+            // Posted DIRECTLY to the window below: re-emitted input
+            // re-hits our own topmost window instead and never lands below.
+            var (sx, sy) = MessagePos();
             IntPtr target = WindowBelow(sx, sy);
             if (target == IntPtr.Zero) { e.Handled = true; return; }
             POINT pt = new() { X = sx, Y = sy };
@@ -606,7 +698,7 @@ public partial class MainWindow : Window
             }
             else if (e is MouseWheelEventArgs we)
             {
-                msg = we.Delta != 0 && e.GetType().Name.Contains("Horizontal") ? 0x020Eu : 0x020Au;
+                msg = 0x020Au;
                 wParam = (UIntPtr)(uint)(((we.Delta << 16) & 0xFFFF0000) | (uint)buttons);
             }
             else
