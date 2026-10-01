@@ -399,6 +399,19 @@ public partial class PadWindow : Window
     private const uint SWP_NOMOVE = 0x0002, SWP_NOSIZE = 0x0001,
         SWP_NOACTIVATE = 0x0010, SWP_SHOWWINDOW = 0x0040;
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern int GetMessagePos();
+
+    /// <summary>
+    /// Screen position (physical px) of the message being dispatched -
+    /// window-independent, unlike element-relative touch points.
+    /// </summary>
+    private static (int x, int y) MessagePos()
+    {
+        int v = GetMessagePos();
+        return ((short)(v & 0xFFFF), (short)((v >> 16) & 0xFFFF));
+    }
+
     private System.Windows.Threading.DispatcherTimer? _topTimer;
 
     /// <summary>
@@ -865,6 +878,7 @@ public partial class PadWindow : Window
         public string? HoldButton;
         public (int vk, int[] mods)? HoldCombo;
         public double Fx0, Fy0; // fake cursor at press-down (tap rewind anchor)
+        public double ZoneWheel; // wheel-zone scroll accumulation (DIP)
         /// <summary>Raw press point, never re-based (net-drag guard).</summary>
         public double OriginX, OriginY;
         /// <summary>
@@ -1909,11 +1923,13 @@ public partial class PadWindow : Window
     private bool _chromeTouch;
     private int _chromeTouchId = -1;
     private bool _chromeMouse;
-    // Touch-drag delta tracking: the move event's relative point may be
-    // captured against an older window position; recombining it with the
-    // current one overshoots proportional to speed. Track (rel, window)
-    // pairs instead - exact at any speed.
-    private double _chromeLastRX, _chromeLastRY, _chromeLastWX, _chromeLastWY;
+    // Touch-drag delta tracking: window-relative touch points are captured
+    // against older window positions, so recombining them with the current
+    // one overshoots proportional to speed (circular shake). The message
+    // position (GetMessagePos, physical px) is window-independent: deltas
+    // between consecutive messages never feed the window back into itself.
+    private int _chromeMsgX, _chromeMsgY;
+    private bool _chromeMsgInit;
 
     /// <summary>
     /// Screen-space point from a window-relative one, using the CURRENT
@@ -1955,9 +1971,8 @@ public partial class PadWindow : Window
         // separate from the pad below: handled here, so no pad gesture fires.
         _chromeTouch = true;
         _chromeTouchId = e.TouchDevice.Id;
-        var rp = e.GetTouchPoint(Surface).Position;
-        _chromeLastRX = rp.X; _chromeLastRY = rp.Y;
-        _chromeLastWX = Left; _chromeLastWY = Top;
+        (_chromeMsgX, _chromeMsgY) = MessagePos();
+        _chromeMsgInit = true;
         TitleBar.CaptureTouch(e.TouchDevice);
         e.Handled = true;
     }
@@ -1965,12 +1980,14 @@ public partial class PadWindow : Window
     private void OnChromeTouchMove(object sender, TouchEventArgs e)
     {
         if (!_chromeTouch || e.TouchDevice.Id != _chromeTouchId) return;
-        var rel = e.GetTouchPoint(Surface).Position;
+        var (mx, my) = MessagePos();
+        double dx = (mx - _chromeMsgX) / _dpi, dy = (my - _chromeMsgY) / _dpi;
+        _chromeMsgX = mx; _chromeMsgY = my;
+        if (!_chromeMsgInit) { _chromeMsgInit = true; return; }
+        // Glitch guard: a finger cannot cross 40 DIP in one event.
+        if (Math.Abs(dx) > 40 || Math.Abs(dy) > 40) return;
         double wx = Left, wy = Top;
-        double tx = wx + (rel.X - _chromeLastRX) + (wx - _chromeLastWX);
-        double ty = wy + (rel.Y - _chromeLastRY) + (wy - _chromeLastWY);
-        _chromeLastRX = rel.X; _chromeLastRY = rel.Y;
-        _chromeLastWX = wx; _chromeLastWY = wy;
+        double tx = wx + dx, ty = wy + dy;
         // Deadband: sub-pixel jitter must not churn layout.
         if (Math.Abs(tx - wx) < 1 && Math.Abs(ty - wy) < 1) return;
         PlaceWindow(tx, ty);
@@ -2040,6 +2057,10 @@ public partial class PadWindow : Window
     private double _rsW, _rsH, _rsX, _rsY, _rsL;
     private int _rsTouchId = -1;
     private bool _rsMouse;
+    // Touch-resize delta tracking (message-space, like chrome drag):
+    // cumulative finger travel since DOWN, applied to the DOWN-time anchor.
+    private int _rsMsgX, _rsMsgY;
+    private double _rsTX, _rsTY;
 
     /// <summary>Which corner zone (if any) holds this window point.</summary>
     private string? ResizerAt(double x, double y)
@@ -2063,17 +2084,24 @@ public partial class PadWindow : Window
     {
         if (_resizeMode == null) return;
         double dx = x - _rsX, dy = y - _rsY;
+        // Deadband per dimension: sub-pixel writes churn layout and read
+        // as shaking.
         if (_resizeMode == "right")
         {
-            Width = Math.Max(220, _rsW + dx);
-            Height = Math.Max(200, _rsH + dy);
+            double nw = Math.Max(220, _rsW + dx), nh = Math.Max(200, _rsH + dy);
+            if (Math.Abs(nw - Width) >= 1) Width = nw;
+            if (Math.Abs(nh - Height) >= 1) Height = nh;
         }
         else
         {
             double nw = Math.Max(220, _rsW - dx);
-            Left = _rsL + (_rsW - nw);
-            Width = nw;
-            Height = Math.Max(200, _rsH + dy);
+            if (Math.Abs(nw - Width) >= 1)
+            {
+                Left = _rsL + (_rsW - nw);
+                Width = nw;
+            }
+            double nh = Math.Max(200, _rsH + dy);
+            if (Math.Abs(nh - Height) >= 1) Height = nh;
         }
     }
 
@@ -2083,6 +2111,7 @@ public partial class PadWindow : Window
         _resizeMode = null;
         _rsTouchId = -1;
         _rsMouse = false;
+        UpdateChromeLabel();
         // Persist TILE area (window minus chrome).
         _s.PadWidth = Width;
         _s.PadHeight = Height - ChromeH;
@@ -2217,6 +2246,31 @@ public partial class PadWindow : Window
         return t.RawKind.Replace("VK_", "");
     }
 
+    /// <summary>
+    /// Area classification (rebuild v1): the touched tile maps to one of
+    /// left-click / right-click / wheel / other. Per-area behaviour is
+    /// decided from this; output stays neutered (WOULD lines only).
+    /// </summary>
+    private string ZoneOf(Tile? t, WPoint p)
+    {
+        if (ResizerAt(p.X, p.Y) != null) return "resizer";
+        if (t == null) return "other";
+        if (t.Kind == "lbtn") return "left-click";
+        if (t.Kind == "rbtn") return "right-click";
+        if (t.Kind == "wheel") return "wheel";
+        if (t.Action == TileAction.Click)
+            return t.ClickButton == "left" ? "left-click" : "right-click";
+        if (t.Action == TileAction.Wheel) return "wheel";
+        return "other";
+    }
+
+    private static string TapActionFor(string zone) => zone switch
+    {
+        "left-click" => "left_click",
+        "right-click" => "right_click",
+        _ => "(none)",
+    };
+
     private void Status(string msg) => StatusLabel.Text =
         msg.Length > 90 ? msg[^90..] : msg;
 
@@ -2228,9 +2282,9 @@ public partial class PadWindow : Window
     {
         try
         {
-            // Not during a chrome drag: every placement would re-measure.
+            // Not during a chrome/resize drag: every placement would re-measure.
             // Refreshed once on release instead.
-            if (_chromeTouch || _chromeMouse) return;
+            if (_chromeTouch || _chromeMouse || _resizeMode != null) return;
             ChromeLabel.Text =
                 $"floatpad {_s.Speed:0.0}x @({Left:0},{Top:0}) {ActualWidth:0}x{ActualHeight:0}";
         }
@@ -2418,13 +2472,27 @@ public partial class PadWindow : Window
         }
         PressedAnywhere?.Invoke();
         var p = e.GetTouchPoint(Surface).Position;
-        // Corner resizers do NOT beat tiles for touch: a 26px grip zone is a
-        // whole fingertip, so every gesture near the bottom resized the pad
-        // instead (the reference has no touch resizer - resize stays on mouse
-        // edges and the settings). Touch always gestures.
+        // Corner resizers DO beat tiles for touch (bottom corners resize,
+        // handled above) - the rest always gestures.
         var (tw, th) = TileArea();
         var tile = _layout == null ? null :
             PresetParser.HitTest(_layout, p.X, p.Y, tw, th);
+        // Resizer zone (bottom corners, touch): drag resizes the window.
+        // Separate from pad gestures (returns before any finger/gesture).
+        var rzMode = ResizerAt(p.X, p.Y);
+        if (rzMode != null)
+        {
+            var rsp = ScreenOf(p);
+            BeginResize(rzMode, rsp.X, rsp.Y);
+            _rsTouchId = e.TouchDevice.Id;
+            (_rsMsgX, _rsMsgY) = MessagePos();
+            _rsTX = _rsTY = 0;
+            Surface.CaptureTouch(e.TouchDevice);
+            ZoneLabel.Text = "zone: resizer";
+            DebugLog.Write($"TOUCHDOWN id={e.TouchDevice.Id} resizer->{rzMode}");
+            e.Handled = true;
+            return;
+        }
         var f = new Finger
         {
             Start = p, Last = p, T0 = DateTime.Now, Active = DateTime.Now,
@@ -2441,6 +2509,7 @@ public partial class PadWindow : Window
         }
             int rawN = _fingers.Count, mgN = MergedCount();
             Status($"touch {e.TouchDevice.Id} {tile?.RawKind ?? "-"} n={(rawN == mgN ? rawN.ToString() : mgN + "[raw" + rawN + "]")}");
+            ZoneLabel.Text = "zone: " + ZoneOf(tile, p);
         var (ccx, ccy) = InputSim.Cursor();
         DebugLog.Write($"TOUCHDOWN id={e.TouchDevice.Id} @{p.X:0},{p.Y:0} tile={tile?.RawKind} n={_fingers.Count} cursor=({ccx},{ccy})");
         if (tile?.Action == TileAction.Grip)
@@ -2645,8 +2714,18 @@ public partial class PadWindow : Window
         if (IsChrome(e.OriginalSource)) return;
         if (_resizeMode != null && e.TouchDevice.Id == _rsTouchId)
         {
-            var rp = ScreenOf(e.GetTouchPoint(Surface).Position);
-            MoveResize(rp.X, rp.Y);
+            // Window-independent deltas (message space): the event's
+            // relative point goes stale as the window resizes under it.
+            var (mx, my) = MessagePos();
+            double rdx = (mx - _rsMsgX) / _dpi, rdy = (my - _rsMsgY) / _dpi;
+            _rsMsgX = mx; _rsMsgY = my;
+            if (Math.Abs(rdx) > 40 || Math.Abs(rdy) > 40)
+            {
+                e.Handled = true;
+                return;
+            }
+            _rsTX += rdx; _rsTY += rdy;
+            MoveResize(_rsX + _rsTX, _rsY + _rsTY);
             e.Handled = true;
             return;
         }
@@ -2668,6 +2747,22 @@ public partial class PadWindow : Window
         if (ButtonHeld()) _dragPathDip += Math.Sqrt(dx * dx + dy * dy);
         f.Last = p;
         f.Active = DateTime.Now;
+        if (ZoneOf(f.Tile, f.Start) == "wheel")
+        {
+            // Wheel zone: signed travel accumulates; every 60 DIP WOULD
+            // scroll one notch. Output neutered - intent only.
+            f.ZoneWheel += f.Tile?.WheelHorizontal == true ? dx : -dy;
+            while (f.ZoneWheel >= 60)
+            {
+                f.ZoneWheel -= 60;
+                DebugLog.Write("WOULD zone=wheel +1");
+            }
+            while (f.ZoneWheel <= -60)
+            {
+                f.ZoneWheel += 60;
+                DebugLog.Write("WOULD zone=wheel -1");
+            }
+        }
         f.Trail.Add((f.Active, p.X, p.Y));
         while (f.Trail.Count > 2 &&
                (f.Active - f.Trail[0].t).TotalMilliseconds > 1200)
@@ -2990,6 +3085,13 @@ public partial class PadWindow : Window
         }
         var (ucx, ucy) = InputSim.Cursor();
         DebugLog.Write($"TOUCHUP id={e.TouchDevice.Id} {(tap ? "tap" : "gesture")} {(int)ms}ms n={_fingers.Count} cursor=({ucx},{ucy})");
+        {
+            // Zone decision (rebuild v1): a quick still lift in a click
+            // zone WOULD click. Output neutered - intent only.
+            string zone = ZoneOf(f.Tile, f.Start);
+            if (!f.Moved && ms < TapMs)
+                DebugLog.Write($"WOULD zone={zone} tap->{TapActionFor(zone)}");
+        }
         // Only report a plain outcome when the press produced none. Writing
         // "up gesture" unconditionally erased the long-press line that was
         // printed while the finger was still down, so lifting after a

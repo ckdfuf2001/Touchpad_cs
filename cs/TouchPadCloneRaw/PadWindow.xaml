@@ -24,6 +24,9 @@
                     </StackPanel>
                 </Grid>
             </Border>
+            <TextBlock x:Name="ZoneLabel" Text="zone: -" Foreground="#E0C87F"
+                       FontSize="10" Margin="8,0,0,24"
+                       HorizontalAlignment="Left" VerticalAlignment="Bottom"/>
             <TextBlock x:Name="StatusLabel" Text="ready" Foreground="#7FE0A8"
                        FontSize="10" Margin="8,0,0,8"
                        HorizontalAlignment="Left" VerticalAlignment="Bottom"
