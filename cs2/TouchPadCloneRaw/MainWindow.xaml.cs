@@ -127,13 +127,26 @@ public partial class MainWindow : Window
     private void Status(string msg) =>
         StatusLabel.Text = msg.Length > 90 ? msg[^90..] : msg;
 
+    /// <summary>DPI factor with sanity clamp (a null transform or a
+    /// virtualized 1.0 would scale drags wrong).</summary>
+    private void RefreshDpi()
+    {
+        try
+        {
+            var src = PresentationSource.FromVisual(this);
+            double f = src?.CompositionTarget?.TransformToDevice.M11 ?? 0;
+            if (f >= 0.5 && f <= 4) _dpi = f;
+        }
+        catch { }
+    }
+
     private void UpdateChrome()
     {
         try
         {
             if (_chromeTouch || _chromeMouse || _resizeMode != null) return;
             ChromeLabel.Text =
-                $"rawpad {_s.Speed:0.0}x @({Left:0},{Top:0}) {ActualWidth:0}x{ActualHeight:0}";
+                $"rawpad {_s.Speed:0.0}x @({Left:0},{Top:0}) {ActualWidth:0}x{ActualHeight:0} dpi={_dpi:0.00}";
         }
         catch { }
     }
@@ -236,8 +249,7 @@ public partial class MainWindow : Window
                 _rsW = Width; _rsH = Height;
                 _rsX = Left + p.X; _rsY = Top + p.Y; _rsL = Left;
             _rsTouchId = e.TouchDevice.Id;
-            var rsrc = PresentationSource.FromVisual(this);
-            _dpi = rsrc?.CompositionTarget?.TransformToDevice.M11 ?? _dpi;
+            RefreshDpi();
             (_rsMsgX, _rsMsgY) = MessagePos();
                 _rsTX = _rsTY = 0;
                 Surface.CaptureTouch(e.TouchDevice);
@@ -372,9 +384,8 @@ public partial class MainWindow : Window
     {
         _chromeTouch = true;
         _chromeTouchId = e.TouchDevice.Id;
-        var dsrc = PresentationSource.FromVisual(this);
-        _dpi = dsrc?.CompositionTarget?.TransformToDevice.M11 ?? _dpi;
         (_chromeMsgX, _chromeMsgY) = MessagePos();
+        RefreshDpi();
         _chAX = Left; _chAY = Top;
         _chTX = _chTY = 0;
         TitleBar.CaptureTouch(e.TouchDevice);
