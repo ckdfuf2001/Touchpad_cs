@@ -1089,6 +1089,8 @@ public partial class PadWindow : Window
     private static double RecentTravel(Finger f) => f.PeakRate;
 
     private int _realSentX = int.MinValue, _realSentY = int.MinValue;
+    // Last model pixel emitted through the queue (overwrite drive).
+    private int _lastMoveX = int.MinValue, _lastMoveY = int.MinValue;
 
     /// <summary>
     /// Drive the system cursor onto the virtual cursor while a button is
@@ -1706,10 +1708,10 @@ public partial class PadWindow : Window
         // way in - the helper loops until the cursor is actually showing.
         try { InputSim.RestoreCursor(); } catch { }
         Core.NoActivate.Apply(this);
-        // Observation mode: system gestures stay NATIVE on our pad (OS
-        // hold-menu, double pairs, flicks) so outside observation sees the
-        // true device behaviour. Non-persistent (per-window hook only).
-        // Core.TabletTweaks.DisableSystemGestures(this); // OBSERVATION: off
+        // Block OS-synthesized gestures on our pad (hold-menu, double
+        // pairs, flicks): all areas except resizer stay system-silent.
+        // Per-window hook only, nothing persistent.
+        Core.TabletTweaks.DisableSystemGestures(this);
         StartActualHud();
         // Make the pad's touch surface transparent to mouse input WHILE we are
         // injecting a synthetic click or drag. The pad is on top, so a press
@@ -2493,6 +2495,22 @@ public partial class PadWindow : Window
             e.Handled = true;
             return;
         }
+        // other zone: blocked entirely (no finger, no session, no status).
+        // The lift still logs UNKNOWN (intake receipt).
+        if (ZoneOf(tile, p) == "other")
+        {
+            e.Handled = true;
+            return;
+        }
+        // Reference way: the cursor appears AT the touch (absolute landing
+        // through the queue - which also clears suppression). Model deltas
+        // then track relatively from this landing point.
+        if (_fingers.Count == 0)
+        {
+            EnsureDpi();
+            var fsp = ScreenOf(p);
+            InputSim.MoveAbsolute((int)(fsp.X * _dpi), (int)(fsp.Y * _dpi));
+        }
         var f = new Finger
         {
             Start = p, Last = p, T0 = DateTime.Now, Active = DateTime.Now,
@@ -2500,6 +2518,9 @@ public partial class PadWindow : Window
             Tile = tile,
             Fx0 = _fakeX, Fy0 = _fakeY,
         };
+        _lastMoveX = (int)_fakeX; _lastMoveY = (int)_fakeY;
+        // Every touch shows the mouse (resizer excluded: it returned above).
+        InputSim.ClearSuppression();
         _fingers[e.TouchDevice.Id] = f;
         if (_fingers.Count == 1)
         {
@@ -2903,14 +2924,18 @@ public partial class PadWindow : Window
                         }
                         ClampFake();
                         int ix = (int)_fakeX, iy = (int)_fakeY;
-                        InputSim.SetCursor(ix, iy);
+                        // Overwrite drive (reference way): model deltas go
+                        // through the input queue (relative). Queue input
+                        // transiently clears suppression, so the cursor stays
+                        // visible AT the driven position. No cursor reads:
+                        // deltas come from the model only.
+                        if (_lastMoveX == int.MinValue)
+                        {
+                            _lastMoveX = ix; _lastMoveY = iy;
+                        }
+                        InputSim.Move(ix - _lastMoveX, iy - _lastMoveY);
+                        _lastMoveX = ix; _lastMoveY = iy;
                         InputSim.NotePosition(ix, iy);
-                        // While a button is held the cursor must be SEEN at
-                        // the driven position: a touch keeps it suppressed
-                        // (invisible), so the whole drag happens blind.
-                        // A net-zero queue wiggle transiently clears
-                        // suppression; no-op when visible.
-                        if (ButtonHeld()) InputSim.ClearSuppression();
                         _realSentX = ix; _realSentY = iy;
                     }
                     else

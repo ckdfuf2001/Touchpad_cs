@@ -13,6 +13,7 @@ namespace TouchPadCloneV2.Core;
 public static class InputSim
 {
     private const uint MOUSEEVENTF_MOVE = 0x0001;
+    private const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
     private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     private const uint MOUSEEVENTF_LEFTUP = 0x0004;
     private const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
@@ -61,6 +62,10 @@ public static class InputSim
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetCursorPos(out POINT2 lpPoint);
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int nIndex);
+
 
     /// <summary>
     /// OBSERVATION MODE (false): all mouse/keyboard/cursor output is
@@ -132,6 +137,7 @@ public static class InputSim
 
     public static void SetCursor(int x, int y)
     {
+        if (!OutputEnabled) return;   // read-modify-write would yank-jump
         var (cx, cy) = Cursor();
         Move((double)(x - cx), (double)(y - cy));
     }
@@ -311,11 +317,10 @@ public static class InputSim
     public static void ClearSuppression()
     {
         if (!CursorSuppressed()) return;
-        if (OutputEnabled)
-        {
-            mouse_event(MOUSEEVENTF_MOVE, 1, 0, 0, InjectTag);
-            mouse_event(MOUSEEVENTF_MOVE, -1, 0, 0, InjectTag);
-        }
+        // Visibility is NOT output: the suppression-clearing wiggle always
+        // runs (every touch shows the mouse). Net-zero, no buttons.
+        mouse_event(MOUSEEVENTF_MOVE, 1, 0, 0, InjectTag);
+        mouse_event(MOUSEEVENTF_MOVE, -1, 0, 0, InjectTag);
         long now = Environment.TickCount64;
         if (now - _lastSuppressLog > 500)
         {
@@ -351,15 +356,45 @@ public static class InputSim
     /// it. Relative adds always apply (no set-vs-set fight with tracking).
     /// </summary>
     private static double _remX, _remY;
+    /// <summary>Move (relative) output switch: true while rebuilding
+    /// (cursor overwrite via the queue, the reference way). Buttons/keys
+    /// stay neutered under OutputEnabled.</summary>
+    public static bool MoveOutputEnabled = true;
+
     public static void Move(double dx, double dy)
     {
         _remX += dx; _remY += dy;
         int ix = (int)_remX, iy = (int)_remY;
         _remX -= ix; _remY -= iy;
+        if (!MoveOutputEnabled) return;
         if (ix != 0 || iy != 0) Mouse(MOUSEEVENTF_MOVE, ix, iy);
     }
 
     public static void Move(int dx, int dy) => Move((double)dx, (double)dy);
+
+    /// <summary>
+    /// Absolute placement through the input queue (mouse_event
+    /// MOVE|ABSOLUTE), the reference way of landing the cursor: a real
+    /// input event, so it transiently clears suppression and the cursor
+    /// appears AT the given point. Idempotent (no cursor read). Physical
+    /// pixels; the 0-65535 space spans the virtual screen (negative
+    /// origins included).
+    /// </summary>
+    public static void MoveAbsolute(int x, int y)
+    {
+        Note("move", "", x, y);
+        if (!MoveOutputEnabled) return;
+        int vx = GetSystemMetrics(76), vy = GetSystemMetrics(77);
+        int vw = GetSystemMetrics(78), vh = GetSystemMetrics(79);
+        if (vw > 1 && vh > 1)
+        {
+            int nx = (int)((x - vx) * 65535.0 / (vw - 1));
+            int ny = (int)((y - vy) * 65535.0 / (vh - 1));
+            mouse_event(MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE,
+                Math.Clamp(nx, 0, 65535), Math.Clamp(ny, 0, 65535),
+                0, InjectTag);
+        }
+    }
 
     /// <summary>
     /// Put the cursor at an absolute point, in physical pixels, the way the
