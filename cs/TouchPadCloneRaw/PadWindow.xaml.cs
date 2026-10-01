@@ -1909,6 +1909,11 @@ public partial class PadWindow : Window
     private bool _chromeTouch;
     private int _chromeTouchId = -1;
     private bool _chromeMouse;
+    // Touch-drag delta tracking: the move event's relative point may be
+    // captured against an older window position; recombining it with the
+    // current one overshoots proportional to speed. Track (rel, window)
+    // pairs instead - exact at any speed.
+    private double _chromeLastRX, _chromeLastRY, _chromeLastWX, _chromeLastWY;
 
     /// <summary>
     /// Screen-space point from a window-relative one, using the CURRENT
@@ -1946,18 +1951,29 @@ public partial class PadWindow : Window
     private void OnChromeTouchDown(object sender, TouchEventArgs e)
     {
         if (Core.WpfHit.IsButton(e.OriginalSource)) return; // button owns it
-        // No touch window-drag (mouse titlebar-drag + grip tile cover moving;
-        // edge-touch slop mis-mapped to titlebar wandered the window, then all
-        // taps missed). Touch uses the movegrip tile to reposition.
+        // Touch window-drag, mirroring the mouse titlebar-drag. The title is
+        // separate from the pad below: handled here, so no pad gesture fires.
+        _chromeTouch = true;
+        _chromeTouchId = e.TouchDevice.Id;
+        var rp = e.GetTouchPoint(Surface).Position;
+        _chromeLastRX = rp.X; _chromeLastRY = rp.Y;
+        _chromeLastWX = Left; _chromeLastWY = Top;
+        TitleBar.CaptureTouch(e.TouchDevice);
         e.Handled = true;
-        return;
     }
 
     private void OnChromeTouchMove(object sender, TouchEventArgs e)
     {
         if (!_chromeTouch || e.TouchDevice.Id != _chromeTouchId) return;
-        var p = ScreenOf(e.GetTouchPoint(Surface).Position);
-        PlaceWindow(p.X - _grabDX, p.Y - _grabDY);
+        var rel = e.GetTouchPoint(Surface).Position;
+        double wx = Left, wy = Top;
+        double tx = wx + (rel.X - _chromeLastRX) + (wx - _chromeLastWX);
+        double ty = wy + (rel.Y - _chromeLastRY) + (wy - _chromeLastWY);
+        _chromeLastRX = rel.X; _chromeLastRY = rel.Y;
+        _chromeLastWX = wx; _chromeLastWY = wy;
+        // Deadband: sub-pixel jitter must not churn layout.
+        if (Math.Abs(tx - wx) < 1 && Math.Abs(ty - wy) < 1) return;
+        PlaceWindow(tx, ty);
         e.Handled = true;
     }
 
@@ -1967,6 +1983,7 @@ public partial class PadWindow : Window
         _chromeTouch = false;
         _chromeTouchId = -1;
         TitleBar.ReleaseTouchCapture(e.TouchDevice);
+        UpdateChromeLabel();
         e.Handled = true;
     }
 
@@ -1994,6 +2011,7 @@ public partial class PadWindow : Window
         if (e.StylusDevice != null || !_chromeMouse) return;
         _chromeMouse = false;
         TitleBar.ReleaseMouseCapture();
+        UpdateChromeLabel();
         e.Handled = true;
     }
 
@@ -2210,6 +2228,9 @@ public partial class PadWindow : Window
     {
         try
         {
+            // Not during a chrome drag: every placement would re-measure.
+            // Refreshed once on release instead.
+            if (_chromeTouch || _chromeMouse) return;
             ChromeLabel.Text =
                 $"floatpad {_s.Speed:0.0}x @({Left:0},{Top:0}) {ActualWidth:0}x{ActualHeight:0}";
         }
