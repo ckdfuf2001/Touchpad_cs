@@ -37,6 +37,14 @@ public partial class MainWindow : Window
     }
 
     private readonly Dictionary<int, Finger> _fingers = new();
+    private long _throughUntil;
+
+    /// <summary>Mouse click-through while touches are live (plus a short
+    /// tail so drops land on the target, not on us). Touch intake uses
+    /// capture after DOWN, so it survives transparency; only a brand-new
+    /// DOWN needs opacity (first contact finds us opaque).</summary>
+    private bool MouseThroughActive =>
+        _fingers.Count > 0 || Environment.TickCount64 < _throughUntil;
 
     // Chrome (title) touch/mouse drag state.
     private bool _chromeTouch;
@@ -78,6 +86,14 @@ public partial class MainWindow : Window
         TitleBar.PreviewMouseDown += OnChromeMouseDown;
         TitleBar.PreviewMouseMove += OnChromeMouseMove;
         TitleBar.PreviewMouseUp += OnChromeMouseUp;
+        // Real-mouse pass-through: anything on the bare surface that our
+        // own chrome does not consume is forwarded to the window below
+        // (PostMessage, translated). Touch-promoted mouse (stylus) stays
+        // swallowed: touches are ours, the mouse is everybody's.
+        Surface.PreviewMouseDown += ForwardMouse;
+        Surface.PreviewMouseMove += ForwardMouse;
+        Surface.PreviewMouseUp += ForwardMouse;
+        Surface.PreviewMouseWheel += ForwardMouse;
         SizeChanged += (_, _) => { if (_resizeMode == null && !_chromeTouch && !_chromeMouse) RenderZones(); UpdateChrome(); };
         LocationChanged += (_, _) => UpdateChrome();
         Loaded += (_, _) =>
@@ -106,6 +122,26 @@ public partial class MainWindow : Window
             catch { }
         };
         _actualTimer.Start();
+        SourceInitialized += (_, _) =>
+        {
+            try
+            {
+                var hsrc = new System.Windows.Interop.WindowInteropHelper(this);
+                var src = System.Windows.Interop.HwndSource.FromHwnd(hsrc.Handle);
+                src?.AddHook((IntPtr hwnd, int msg, IntPtr wp, IntPtr lp,
+                    ref bool handled) =>
+                {
+                    const int WM_NCHITTEST = 0x0084;
+                    if (msg == WM_NCHITTEST && MouseThroughActive)
+                    {
+                        handled = true;
+                        return new IntPtr(-1);
+                    }
+                    return IntPtr.Zero;
+                });
+            }
+            catch { }
+        };
     }
 
     private void OpenLog()
@@ -338,7 +374,10 @@ public partial class MainWindow : Window
             Log.Write($"TOUCHUP id={e.TouchDevice.Id} {(f.Moved ? "moved" : "still")} {(int)ms}ms zone={f.Zone} n={_fingers.Count} cursor=({ux},{uy})");
             Status($"up {(int)ms}ms {(f.Moved ? "moved" : "still")}");
             if (_fingers.Count == 0)
+            {
+                _throughUntil = Environment.TickCount64 + 300;
                 Log.Write($"SESSION raw fake=({_fakeX:0},{_fakeY:0})");
+            }
             e.Handled = true;
         }
         catch { }
@@ -452,5 +491,132 @@ public partial class MainWindow : Window
         TitleBar.ReleaseMouseCapture();
         UpdateChrome();
         e.Handled = true;
+    }
+
+    private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ScreenToClient(IntPtr hWnd, ref POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool PostMessage(IntPtr hWnd, uint msg, UIntPtr wParam, IntPtr lParam);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X, Y; }
+
+    private IntPtr _selfHwnd;
+
+    /// <summary>Topmost visible window at the point, excluding ours.</summary>
+    private IntPtr WindowBelow(int sx, int sy)
+    {
+        IntPtr found = IntPtr.Zero;
+        if (_selfHwnd == IntPtr.Zero)
+            _selfHwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        EnumWindows((h, _) =>
+        {
+            if (found != IntPtr.Zero) return false;
+            if (h == _selfHwnd) return true;
+            if (!IsWindowVisible(h) || IsIconic(h)) return true;
+            if (!GetWindowRect(h, out RECT r)) return true;
+            if (sx >= r.Left && sx < r.Right && sy >= r.Top && sy < r.Bottom)
+            {
+                found = h;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    private void ForwardMouse(object sender, MouseEventArgs e)
+    {
+        try
+        {
+            // Ours (chrome/labels/buttons) or touch-promoted: not forwarded.
+            if (e.StylusDevice != null) { e.Handled = true; return; }
+            var src = e.OriginalSource as DependencyObject;
+            if (src != null)
+            {
+                var d = src;
+                while (d != null)
+                {
+                    if (ReferenceEquals(d, TitleBar)) return;
+                    if (d is System.Windows.Controls.Button) return;
+                    if (d is System.Windows.Controls.TextBlock) return;
+                    d = (d as FrameworkElement)?.Parent as DependencyObject;
+                }
+            }
+            var rp = e.GetPosition(Surface);
+            var sp = PointToScreen(rp);
+            int sx = (int)sp.X, sy = (int)sp.Y;
+            IntPtr target = WindowBelow(sx, sy);
+            if (target == IntPtr.Zero) { e.Handled = true; return; }
+            POINT pt = new() { X = sx, Y = sy };
+            if (!ScreenToClient(target, ref pt)) { e.Handled = true; return; }
+            IntPtr lParam = (IntPtr)((pt.Y << 16) | (pt.X & 0xFFFF));
+            uint msg = 0;
+            UIntPtr wParam = UIntPtr.Zero;
+            int buttons = 0;
+            if (e.LeftButton == MouseButtonState.Pressed) buttons |= 0x0001;
+            if (e.RightButton == MouseButtonState.Pressed) buttons |= 0x0002;
+            if (e.MiddleButton == MouseButtonState.Pressed) buttons |= 0x0010;
+            if (e is MouseButtonEventArgs be)
+            {
+                switch (be.ChangedButton)
+                {
+                    case MouseButton.Left:
+                        msg = be.ButtonState == MouseButtonState.Pressed ? 0x0201u : 0x0202u;
+                        break;
+                    case MouseButton.Right:
+                        msg = be.ButtonState == MouseButtonState.Pressed ? 0x0204u : 0x0205u;
+                        break;
+                    case MouseButton.Middle:
+                        msg = be.ButtonState == MouseButtonState.Pressed ? 0x0207u : 0x0208u;
+                        break;
+                    case MouseButton.XButton1:
+                        msg = be.ButtonState == MouseButtonState.Pressed ? 0x020Bu : 0x020Cu;
+                        wParam = (UIntPtr)(uint)(1 << 16);
+                        break;
+                    case MouseButton.XButton2:
+                        msg = be.ButtonState == MouseButtonState.Pressed ? 0x020Bu : 0x020Cu;
+                        wParam = (UIntPtr)(uint)(2 << 16);
+                        break;
+                }
+                if (msg != 0 && msg < 0x020Bu) wParam = (UIntPtr)(uint)buttons;
+            }
+            else if (e is MouseWheelEventArgs we)
+            {
+                msg = we.Delta != 0 && e.GetType().Name.Contains("Horizontal") ? 0x020Eu : 0x020Au;
+                wParam = (UIntPtr)(uint)(((we.Delta << 16) & 0xFFFF0000) | (uint)buttons);
+            }
+            else
+            {
+                msg = 0x0200u;
+                wParam = (UIntPtr)(uint)buttons;
+            }
+            if (msg != 0) PostMessage(target, msg, wParam, lParam);
+            e.Handled = true;
+        }
+        catch { }
     }
 }
