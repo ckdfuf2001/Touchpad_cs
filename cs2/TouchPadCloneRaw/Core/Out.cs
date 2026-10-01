@@ -93,6 +93,20 @@ public static class Out
     private const uint MOUSEEVENTF_ABSOLUTE = 0x8000;
     private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     private const uint MOUSEEVENTF_LEFTUP = 0x0004;
+
+    private static uint DownFlag(string button) => button switch
+    {
+        "right" => MOUSEEVENTF_RIGHTDOWN,
+        "middle" => MOUSEEVENTF_MIDDLEDOWN,
+        _ => MOUSEEVENTF_LEFTDOWN,
+    };
+
+    private static uint UpFlag(string button) => button switch
+    {
+        "right" => MOUSEEVENTF_RIGHTUP,
+        "middle" => MOUSEEVENTF_MIDDLEUP,
+        _ => MOUSEEVENTF_LEFTUP,
+    };
     private const uint MOUSEEVENTF_RIGHTDOWN = 0x0008;
     private const uint MOUSEEVENTF_RIGHTUP = 0x0010;
     private const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020;
@@ -216,7 +230,7 @@ public static class Out
     public static void DownAt(int x, int y, string button = "left")
     {
         PlaceAt(x, y);
-        mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, InjectTag);
+        mouse_event(DownFlag(button), 0, 0, 0, InjectTag);
         Log.Write($"BTN down {button} @({x},{y})");
     }
 
@@ -224,14 +238,14 @@ public static class Out
     public static void UpAt(int x, int y, string button = "left")
     {
         PlaceAt(x, y);
-        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, InjectTag);
+        mouse_event(UpFlag(button), 0, 0, 0, InjectTag);
         Log.Write($"BTN up {button} @({x},{y})");
     }
 
     /// <summary>Positionless release. Tagged.</summary>
     public static void Up(string button = "left")
     {
-        mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, InjectTag);
+        mouse_event(UpFlag(button), 0, 0, 0, InjectTag);
         Log.Write($"BTN up {button} (safety)");
     }
 }

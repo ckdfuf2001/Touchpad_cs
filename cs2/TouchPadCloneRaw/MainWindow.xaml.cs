@@ -37,6 +37,14 @@ public partial class MainWindow : Window
     }
 
     private readonly Dictionary<int, Finger> _fingers = new();
+    // Tap-train anchor (double pairing across slow taps): last tap time +
+    // finger pos + zone. Re-snapshot only outside window/zone/scatter.
+    private DateTime _anchorT = DateTime.MinValue;
+    private double _anchorFX, _anchorFY;
+    private string _anchorZone = "";
+    // Hold-to-right timer (pad zone): still held LongPressMs -> R click.
+    private System.Windows.Threading.DispatcherTimer? _holdTimer;
+    private int _holdId = -1;
     private int _lastFreeX = int.MinValue, _lastFreeY = int.MinValue;
     private int _downOrigX = int.MinValue, _downOrigY = int.MinValue;
 
@@ -331,21 +339,63 @@ public partial class MainWindow : Window
             _fingers[e.TouchDevice.Id] = f;
             if (_fingers.Count == 1)
             {
-                // Anchor = polled pre-touch (yank-proof); fresh read only
-                // when the poll never captured (first launch).
+                // Anchor persists across rapid same-zone taps (tap-train
+                // for OS double pairing); re-snapshot outside window, zone
+                // change, or far re-landing (120 DIP vs ~70 scatter).
                 // Stale hold from a lost UP first (safety net).
                 if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
-                _downOrigX = _lastFreeX; _downOrigY = _lastFreeY;
-                if (_downOrigX == int.MinValue)
+                double fdist = _downOrigX == int.MinValue ? double.MaxValue :
+                    Math.Abs(p.X - _anchorFX) + Math.Abs(p.Y - _anchorFY);
+                if (_downOrigX == int.MinValue
+                    || (DateTime.Now - _anchorT).TotalMilliseconds >= _s.MultiTapMs
+                    || zone != _anchorZone
+                    || fdist > 120)
                 {
-                    var (gx, gy) = Out.Logical();
-                    _downOrigX = gx; _downOrigY = gy;
+                    _downOrigX = _lastFreeX; _downOrigY = _lastFreeY;
+                    if (_downOrigX == int.MinValue)
+                    {
+                        var (gx, gy) = Out.Logical();
+                        _downOrigX = gx; _downOrigY = gy;
+                    }
+                    _anchorFX = p.X; _anchorFY = p.Y;
+                    _anchorZone = zone;
                 }
+                _anchorT = DateTime.Now;
                 Out.SetAnchor(_downOrigX, _downOrigY);
                 Out.DownAt(_downOrigX, _downOrigY, "left");
                 _heldLeft = true;
                 Fx().Flash(_downOrigX / _dpi, _downOrigY / _dpi);
                 Status($"press down @({_downOrigX},{_downOrigY})");
+                // Hold arms right-click (pad zone): still held LongPressMs
+                // with no real movement -> Up safety + R down+up at anchor.
+                _holdTimer?.Stop();
+                _holdId = -1;
+                if (zone == "pad" && _downOrigX != int.MinValue)
+                {
+                    _holdId = e.TouchDevice.Id;
+                    _holdTimer = new System.Windows.Threading.DispatcherTimer
+                    {
+                        Interval = TimeSpan.FromMilliseconds(_s.LongPressMs),
+                    };
+                    _holdTimer.Tick += (_, _) =>
+                    {
+                        try
+                        {
+                            _holdTimer?.Stop();
+                            _holdTimer = null;
+                            if (!_fingers.TryGetValue(_holdId, out var hf)) return;
+                            double htravel = Math.Abs(hf.Last.X - hf.Start.X)
+                                + Math.Abs(hf.Last.Y - hf.Start.Y);
+                            if (htravel > _s.DragStartDip) return;
+                            if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
+                            Out.DownAt(_downOrigX, _downOrigY, "right");
+                            Out.UpAt(_downOrigX, _downOrigY, "right");
+                            Status($"hold right @({_downOrigX},{_downOrigY})");
+                        }
+                        catch { }
+                    };
+                    _holdTimer.Start();
+                }
             }
             int rawN = _fingers.Count, mgN = MergedCount();
             Status($"touch {e.TouchDevice.Id} {zone} n={(rawN == mgN ? rawN.ToString() : mgN + "[raw" + rawN + "]")}");
@@ -414,6 +464,12 @@ public partial class MainWindow : Window
                 return;
             }
             _fingers.Remove(e.TouchDevice.Id);
+            if (e.TouchDevice.Id == _holdId)
+            {
+                _holdTimer?.Stop();
+                _holdTimer = null;
+                _holdId = -1;
+            }
             double ms = (DateTime.Now - f.T0).TotalMilliseconds;
             var end = e.GetTouchPoint(Surface).Position;
             if (Math.Abs(end.X - f.Start.X) + Math.Abs(end.Y - f.Start.Y) > TapMoveDip)
@@ -421,6 +477,15 @@ public partial class MainWindow : Window
             var (ux, uy) = Out.Cursor();
             Log.Write($"TOUCHUP id={e.TouchDevice.Id} {(f.Moved ? "moved" : "still")} {(int)ms}ms zone={f.Zone} n={_fingers.Count} cursor=({ux},{uy})");
             Status($"up {(int)ms}ms {(f.Moved ? "moved" : "still")}");
+            // Tap refresh: quick still pad lifts extend the tap-train
+            // window (slow multi-taps keep pairing).
+            if (!f.Moved && ms < 250 && f.Zone == "pad"
+                && _downOrigX != int.MinValue)
+            {
+                _anchorT = DateTime.Now;
+                _anchorFX = f.Start.X; _anchorFY = f.Start.Y;
+                _anchorZone = f.Zone;
+            }
             // Release on the last lift (at the model G, never at the touch).
             if (_heldLeft && _fingers.Count == 0)
             {
@@ -607,6 +672,58 @@ public partial class MainWindow : Window
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool PostMessage(IntPtr hWnd, uint msg, UIntPtr wParam, IntPtr lParam);
 
+    [DllImport("user32.dll", EntryPoint = "GetClassLongPtrW")]
+    private static extern IntPtr GetClassLongPtr(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetDoubleClickTime();
+
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics2(int nIndex);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr ChildWindowFromPointEx(IntPtr parent, POINT pt, uint flags);
+
+    private static long _lastDownMs;
+    private static int _lastDownX, _lastDownY;
+    private static IntPtr _lastDownHwnd;
+    private static string _lastDownBtn = "";
+    private static int _downParity;
+
+    private const int GCL_STYLE = -26;
+    private const int CS_DBLCLKS = 0x0008;
+    private const uint CWP_SKIPINVISIBLE = 0x1;
+    private const uint CWP_SKIPDISABLED = 0x2;
+    private const uint CWP_SKIPTRANSPARENT = 0x4;
+
+    private static bool WantsDblClk(IntPtr h)
+    {
+        try
+        {
+            return ((long)GetClassLongPtr(h, GCL_STYLE) & CS_DBLCLKS) != 0;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Deepest child at the point (listviews, edits...).</summary>
+    private static IntPtr DeepestChild(IntPtr top, int sx, int sy)
+    {
+        try
+        {
+            IntPtr cur = top;
+            while (true)
+            {
+                var p = new POINT { X = sx, Y = sy };
+                if (!ScreenToClient(cur, ref p)) return cur;
+                IntPtr child = ChildWindowFromPointEx(cur, p,
+                    CWP_SKIPINVISIBLE | CWP_SKIPDISABLED | CWP_SKIPTRANSPARENT);
+                if (child == IntPtr.Zero || child == cur) return cur;
+                cur = child;
+            }
+        }
+        catch { return top; }
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left, Top, Right, Bottom; }
 
@@ -641,9 +758,9 @@ public partial class MainWindow : Window
     {
         try
         {
-            // Our own re-emitted input looping back: swallow, no forward.
-            if (Core.Out.IsOurs()) { e.Handled = true; return; }
             // Ours (chrome/labels/buttons) or touch-promoted: not forwarded.
+            // (No own-input guard: PostMessage forwarding cannot loop back
+            // through Preview, and stale ExtraInfo reads ate real downs.)
             if (e.StylusDevice != null) { e.Handled = true; return; }
             var src = e.OriginalSource as DependencyObject;
             if (src != null)
@@ -658,11 +775,31 @@ public partial class MainWindow : Window
                 }
             }
             // Screen coords from the message itself (physical, exact).
-            // Posted DIRECTLY to the window below: re-emitted input
-            // re-hits our own topmost window instead and never lands below.
             var (sx, sy) = MessagePos();
+            // Buttons go through the Fwd helpers (with press capture, so
+            // drags survive crossing windows); moves/wheel use the matrix.
+            if (e is MouseButtonEventArgs be2)
+            {
+                string? btn = be2.ChangedButton switch
+                {
+                    MouseButton.Left => "left",
+                    MouseButton.Right => "right",
+                    MouseButton.Middle => "middle",
+                    _ => null,
+                };
+                if (btn != null)
+                {
+                    if (be2.ButtonState == MouseButtonState.Pressed)
+                        FwdDown(btn, sx, sy);
+                    else
+                        FwdUp(btn, sx, sy);
+                    e.Handled = true;
+                    return;
+                }
+            }
             IntPtr target = WindowBelow(sx, sy);
             if (target == IntPtr.Zero) { e.Handled = true; return; }
+            target = DeepestChild(target, sx, sy);
             POINT pt = new() { X = sx, Y = sy };
             if (!ScreenToClient(target, ref pt)) { e.Handled = true; return; }
             IntPtr lParam = (IntPtr)((pt.Y << 16) | (pt.X & 0xFFFF));
@@ -674,25 +811,23 @@ public partial class MainWindow : Window
             if (e.MiddleButton == MouseButtonState.Pressed) buttons |= 0x0010;
             if (e is MouseButtonEventArgs be)
             {
+                bool pressed = be.ButtonState == MouseButtonState.Pressed;
+                // Pairing lives in FwdDown (L/R/M early-return above); X
+                // buttons post plain downs here.
                 switch (be.ChangedButton)
                 {
                     case MouseButton.Left:
-                        msg = be.ButtonState == MouseButtonState.Pressed ? 0x0201u : 0x0202u;
-                        break;
+                        msg = pressed ? 0x0201u : 0x0202u; break;
                     case MouseButton.Right:
-                        msg = be.ButtonState == MouseButtonState.Pressed ? 0x0204u : 0x0205u;
-                        break;
+                        msg = pressed ? 0x0204u : 0x0205u; break;
                     case MouseButton.Middle:
-                        msg = be.ButtonState == MouseButtonState.Pressed ? 0x0207u : 0x0208u;
-                        break;
+                        msg = pressed ? 0x0207u : 0x0208u; break;
                     case MouseButton.XButton1:
-                        msg = be.ButtonState == MouseButtonState.Pressed ? 0x020Bu : 0x020Cu;
-                        wParam = (UIntPtr)(uint)(1 << 16);
-                        break;
+                        msg = pressed ? 0x020Bu : 0x020Cu;
+                        wParam = (UIntPtr)(uint)(1 << 16); break;
                     case MouseButton.XButton2:
-                        msg = be.ButtonState == MouseButtonState.Pressed ? 0x020Bu : 0x020Cu;
-                        wParam = (UIntPtr)(uint)(2 << 16);
-                        break;
+                        msg = pressed ? 0x020Bu : 0x020Cu;
+                        wParam = (UIntPtr)(uint)(2 << 16); break;
                 }
                 if (msg != 0 && msg < 0x020Bu) wParam = (UIntPtr)(uint)buttons;
             }
@@ -710,5 +845,111 @@ public partial class MainWindow : Window
             e.Handled = true;
         }
         catch { }
+    }
+
+    // ---- Below-delivery button API (for gestures): L/R down, up, click,
+    // double-click at a screen point, posted to the window below it.
+    // Buttons capture like real input: down remembers its window, moves
+    // and ups during the hold go there even if the cursor wandered off.
+    private readonly Dictionary<string, IntPtr> _fwdCap = new();
+
+    private static uint BtnDownMsg(string button) => button switch
+    {
+        "right" => 0x0204u,
+        "middle" => 0x0207u,
+        _ => 0x0201u,
+    };
+
+    private static uint BtnUpMsg(string button) => button switch
+    {
+        "right" => 0x0205u,
+        "middle" => 0x0208u,
+        _ => 0x0202u,
+    };
+
+    private static IntPtr Pack(int x, int y) => (IntPtr)((y << 16) | (x & 0xFFFF));
+
+    private IntPtr BelowAt(int sx, int sy)
+    {
+        IntPtr target = WindowBelow(sx, sy);
+        return target;
+    }
+
+    private void FwdDown(string button, int sx, int sy)
+    {
+        try
+        {
+            IntPtr target = BelowAt(sx, sy);
+            if (target == IntPtr.Zero) return;
+            target = DeepestChild(target, sx, sy);
+            // Manual double pairing: consecutive downs within the OS
+            // time+box on the same window alternate single/double.
+            // Windows rule: only the 2nd (even) down becomes DBLCLK,
+            // and only for CS_DBLCLKS windows.
+            long nowMs = Environment.TickCount64;
+            int cx = GetSystemMetrics2(36) / 2;
+            int cy = GetSystemMetrics2(37) / 2;
+            if (button == _lastDownBtn
+                && nowMs - _lastDownMs < GetDoubleClickTime()
+                && Math.Abs(sx - _lastDownX) * 2 <= cx
+                && Math.Abs(sy - _lastDownY) * 2 <= cy
+                && target == _lastDownHwnd)
+                _downParity++;
+            else
+            {
+                if (_lastDownMs > 0 && nowMs - _lastDownMs < 5000)
+                    Core.Log.Write($"NODBL button={button} dt={nowMs - _lastDownMs}ms dist={Math.Abs(sx - _lastDownX) + Math.Abs(sy - _lastDownY)} hwndSame={target == _lastDownHwnd} style={WantsDblClk(target)}");
+                _downParity = 1;
+            }
+            _lastDownMs = nowMs;
+            _lastDownX = sx; _lastDownY = sy;
+            _lastDownHwnd = target;
+            _lastDownBtn = button;
+            uint msg = BtnDownMsg(button);
+            bool dbl = (_downParity % 2 == 0) && WantsDblClk(target);
+            if (dbl)
+                msg = button switch
+                {
+                    "right" => 0x0206u,
+                    "middle" => 0x0209u,
+                    _ => 0x0203u,
+                };
+            _fwdCap[button] = target;
+            var pt = new POINT { X = sx, Y = sy };
+            if (!ScreenToClient(target, ref pt)) return;
+            PostMessage(target, msg, UIntPtr.Zero, Pack(pt.X, pt.Y));
+            Core.Log.Write($"FWD {button} {(dbl ? "dblclk" : "down")} @({sx},{sy})");
+        }
+        catch { }
+    }
+
+    private void FwdUp(string button, int sx, int sy)
+    {
+        try
+        {
+            IntPtr target;
+            if (!_fwdCap.TryGetValue(button, out target))
+                target = BelowAt(sx, sy);
+            _fwdCap.Remove(button);
+            if (target == IntPtr.Zero) return;
+            var pt = new POINT { X = sx, Y = sy };
+            if (!ScreenToClient(target, ref pt)) return;
+            PostMessage(target, BtnUpMsg(button), UIntPtr.Zero, Pack(pt.X, pt.Y));
+            Core.Log.Write($"FWD {button} up @({sx},{sy})");
+        }
+        catch { }
+    }
+
+    private void FwdClick(string button, int sx, int sy)
+    {
+        FwdDown(button, sx, sy);
+        FwdUp(button, sx, sy);
+    }
+
+    private void FwdDouble(string button, int sx, int sy)
+    {
+        FwdClick(button, sx, sy);
+        System.Threading.Thread.Sleep(60);
+        FwdClick(button, sx, sy);
     }
 }
