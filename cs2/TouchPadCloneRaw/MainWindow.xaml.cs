@@ -44,9 +44,6 @@ public partial class MainWindow : Window
     private bool _chromeMouse;
     private int _chromeMsgX, _chromeMsgY;
     private double _chromeGrabX, _chromeGrabY;
-    // Touch-drag cumulative travel (like resize): per-event deltas jitter,
-    // the anchor does not. Same stability as the resizer.
-    private double _chAX, _chAY, _chTX, _chTY;
 
     // Touch resize state.
     private string? _resizeMode;
@@ -384,10 +381,8 @@ public partial class MainWindow : Window
     {
         _chromeTouch = true;
         _chromeTouchId = e.TouchDevice.Id;
-        (_chromeMsgX, _chromeMsgY) = MessagePos();
-        RefreshDpi();
-        _chAX = Left; _chAY = Top;
-        _chTX = _chTY = 0;
+        var rp = e.GetTouchPoint(Surface).Position;
+        _chromeGrabX = rp.X; _chromeGrabY = rp.Y;
         TitleBar.CaptureTouch(e.TouchDevice);
         e.Handled = true;
     }
@@ -395,13 +390,12 @@ public partial class MainWindow : Window
     private void OnChromeTouchMove(object sender, TouchEventArgs e)
     {
         if (!_chromeTouch || e.TouchDevice.Id != _chromeTouchId) return;
-        var (mx, my) = MessagePos();
-        double dx = (mx - _chromeMsgX) / _dpi, dy = (my - _chromeMsgY) / _dpi;
-        _chromeMsgX = mx; _chromeMsgY = my;
-        if (Math.Abs(dx) > 40 || Math.Abs(dy) > 40) return;
-        _chTX += dx; _chTY += dy;
-        double tx = _chAX + _chTX, ty = _chAY + _chTY;
-        if (Math.Abs(tx - Left) < 1 && Math.Abs(ty - Top) < 1) return;
+        // Same direct follow as the mouse: touch reports carry their own
+        // position, no window coupling to go stale.
+        var rp = e.GetTouchPoint(Surface).Position;
+        double tx = rp.X + Left - _chromeGrabX;
+        double ty = rp.Y + Top - _chromeGrabY;
+        if (Math.Abs(tx - Left) < 0.5 && Math.Abs(ty - Top) < 0.5) return;
         var vx = SystemParameters.VirtualScreenLeft;
         var vy = SystemParameters.VirtualScreenTop;
         var vw = SystemParameters.VirtualScreenWidth;
@@ -425,7 +419,9 @@ public partial class MainWindow : Window
     {
         _chromeMouse = true;
         var rp = e.GetPosition(Surface);
-        _chromeGrabX = rp.X; _chromeGrabY = rp.Y;
+        var sp = new Point(rp.X + Left, rp.Y + Top);
+        _chromeGrabX = sp.X - Left;
+        _chromeGrabY = sp.Y - Top;
         TitleBar.CaptureMouse();
         e.Handled = true;
     }
@@ -433,12 +429,19 @@ public partial class MainWindow : Window
     private void OnChromeMouseMove(object sender, MouseEventArgs e)
     {
         if (!_chromeMouse) return;
+        // Mouse reports are synchronous (no touch latency), so direct
+        // follow is exact: window at mouse minus grab offset. Small
+        // deadband (0.5) filters sub-pixel churn without trailing.
         var rp = e.GetPosition(Surface);
-        double tx = Left + (rp.X - _chromeGrabX);
-        double ty = Top + (rp.Y - _chromeGrabY);
-        _chromeGrabX = rp.X; _chromeGrabY = rp.Y;
-        Left = tx;
-        Top = ty;
+        double tx = rp.X + Left - _chromeGrabX;
+        double ty = rp.Y + Top - _chromeGrabY;
+        if (Math.Abs(tx - Left) < 0.5 && Math.Abs(ty - Top) < 0.5) return;
+        var vx = SystemParameters.VirtualScreenLeft;
+        var vy = SystemParameters.VirtualScreenTop;
+        var vw = SystemParameters.VirtualScreenWidth;
+        var vh = SystemParameters.VirtualScreenHeight;
+        Left = Math.Max(vx, Math.Min(vx + vw - Width, tx));
+        Top = Math.Max(vy, Math.Min(vy + vh - Height, ty));
         e.Handled = true;
     }
 
