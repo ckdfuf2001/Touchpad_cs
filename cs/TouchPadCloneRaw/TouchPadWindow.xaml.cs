@@ -443,6 +443,29 @@ public partial class TouchPadWindow : Window
     private string ZoneOf(Point p)
     {
         var (w, h) = TileArea();
+        if (w <= 0 || h <= 0) return "pad";
+        // Layout tiles first (what you see is what you hit): last button
+        // tile wins in file order, mirroring PresetParser.HitTest.
+        if (_layout != null)
+        {
+            double fx = p.X / w, fy = p.Y / h;
+            string? hit = null;
+            foreach (var t in _layout.Tiles)
+            {
+                if (fx < t.X / 100 || fx > (t.X + t.W) / 100
+                    || fy < t.Y / 100 || fy > (t.Y + t.H) / 100) continue;
+                if (t.Kind == "lbtn"
+                    || (t.Kind == "click"
+                        && t.ClickButton.Equals("left", StringComparison.OrdinalIgnoreCase)))
+                    hit = "left-click";
+                else if (t.Kind == "rbtn"
+                    || (t.Kind == "click"
+                        && t.ClickButton.Equals("right", StringComparison.OrdinalIgnoreCase)))
+                    hit = "right-click";
+                else if (t.Kind == "wheel") hit = "wheel";
+            }
+            if (hit != null) return hit;
+        }
         return ZoneAt(p.X, p.Y, w, h);
     }
 
@@ -890,10 +913,14 @@ public partial class TouchPadWindow : Window
                             _lastWhat = "move-end";
                             break;
                         case G.TapHold:                       // 2nd tap lift
+                            // Right zone stays right (right-double pairs).
                             // "double_click" fires one pair here (the first
                             // pair already went out), completing the double.
-                            DoMapAction(ActiveMap().DoubleTap == "double_click"
-                                ? "left_click" : ActiveMap().DoubleTap, fx, fy);
+                            string dact = ActiveMap().DoubleTap;
+                            if (f.Zone == "right-click" && dact != "none")
+                                dact = "right_click";
+                            else if (dact == "double_click") dact = "left_click";
+                            DoMapAction(dact, fx, fy);
                             Fx().Flash(fx / _dpi, fy / _dpi);
                             _lastTapTick = 0;
                             _lastWhat = "second-tap";

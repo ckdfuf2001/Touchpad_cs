@@ -209,9 +209,19 @@ public partial class App : WApplication
     public void ShowPad()
     {
         if (_pad == null || _strip == null) return;
-        _pad.SyncWindowSize();
-        _pad.Left = SystemParameters.PrimaryScreenWidth - _pad.Width - 40;
-        _pad.Top = SystemParameters.PrimaryScreenHeight - _pad.Height - 120;
+        if (_settings.Layout.StartsWith("fullscreen",
+            StringComparison.OrdinalIgnoreCase))
+        {
+            _pad.Left = 0; _pad.Top = 0;
+            _pad.Width = SystemParameters.PrimaryScreenWidth;
+            _pad.Height = SystemParameters.PrimaryScreenHeight;
+        }
+        else
+        {
+            _pad.SyncWindowSize();
+            _pad.Left = SystemParameters.PrimaryScreenWidth - _pad.Width - 40;
+            _pad.Top = SystemParameters.PrimaryScreenHeight - _pad.Height - 120;
+        }
         _pad.SetLayout(_presets[_settings.Layout]);
         _pad.Show();
         _strip.SetPadActive(true);
