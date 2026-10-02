@@ -109,7 +109,6 @@ public static class InputSim
         Injected = new();
 
     private static string _lastOut = "-";
-
     private static void Note(string kind, string btn, int x, int y)
     {
         _lastOut = $"{kind} {btn} @({x},{y})";
@@ -117,6 +116,11 @@ public static class InputSim
         lock (Injected)
             Injected.Add((Environment.TickCount64, kind, btn, x, y));
     }
+
+    /// <summary>Let the active output layer record into the same journal
+    /// (selftest asserts on it).</summary>
+    internal static void NoteInjected(string kind, string btn, int x, int y) =>
+        Note(kind, btn, x, y);
 
     /// <summary>
     /// ACTUAL system mouse state for the on-screen HUD (bottom-right):

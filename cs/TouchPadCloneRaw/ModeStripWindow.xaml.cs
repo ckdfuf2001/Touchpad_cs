@@ -57,7 +57,7 @@ public partial class ModeStripWindow : Window
     private IntPtr StripWndProc(IntPtr hwnd, int msg, IntPtr wParam,
         IntPtr lParam, ref bool handled)
     {
-        if (msg != 0x0084 || !PadWindow.SessionActive) return IntPtr.Zero;
+        if (msg != 0x0084 || !TouchPadWindow.SessionActive) return IntPtr.Zero;
         try
         {
             int sx = unchecked((short)(long)lParam);
