@@ -20,6 +20,11 @@ namespace TouchPadCloneV2;
 public partial class TouchPadWindow : Window
 {
     private const double ChromeH = 30;
+
+    /// <summary>Bottom event labels (zone/status/actual) only in debug.
+    /// Normal mode hides them (cleaner pad, no per-event strings).</summary>
+    private static readonly bool ShowEvents =
+        Environment.GetEnvironmentVariable("TOUCHPAD_DEBUG") == "1";
     private const double GripZone = 20;   // visual legs
     private const double GripHit = 36;    // touch legs (bigger than visual)
     private const double TapMoveDip = 12;
@@ -158,6 +163,12 @@ public partial class TouchPadWindow : Window
             _fakeX = ccx; _fakeY = ccy;
             RenderZones();
             UpdateChrome();
+            if (!ShowEvents)
+            {
+                ZoneLabel.Visibility = Visibility.Hidden;
+                StatusLabel.Visibility = Visibility.Hidden;
+                ActualLabel.Visibility = Visibility.Hidden;
+            }
             Log.Write($"INIT fake=({_fakeX:0},{_fakeY:0}) dpi={_dpi}");
             Core.MouseTap.Start();   // system-wide tap: [ours]/[ext] in the log
             Core.Out.Below = BelowDeliver;   // our output over us goes below
@@ -217,8 +228,9 @@ public partial class TouchPadWindow : Window
                         Log.Write($"CURSOR left pad @({_lastFreeX},{_lastFreeY}) after {_lastWhat}");
                     _cursorInPad = inside;
                 }
-                string s = Out.ActualState();
-                ActualLabel.Text = s.Length > 90 ? s[^90..] : s;
+                string s = ShowEvents ? Out.ActualState() : "";
+                if (ShowEvents)
+                    ActualLabel.Text = s.Length > 90 ? s[^90..] : s;
             }
             catch { }
         };
@@ -258,8 +270,11 @@ public partial class TouchPadWindow : Window
         catch { }
     }
 
-    private void Status(string msg) =>
+    private void Status(string msg)
+    {
+        if (!ShowEvents) return;
         StatusLabel.Text = msg.Length > 90 ? msg[^90..] : msg;
+    }
 
     /// <summary>DPI factor with sanity clamp (a null transform or a
     /// virtualized 1.0 would scale drags wrong).</summary>
@@ -597,7 +612,7 @@ public partial class TouchPadWindow : Window
                 _rsLastX = p.X; _rsLastY = p.Y;
                 _rsSX = p.X; _rsSY = p.Y;
                 Surface.CaptureTouch(e.TouchDevice);
-                ZoneLabel.Text = "zone: resizer";
+                if (ShowEvents) ZoneLabel.Text = "zone: resizer";
                 Log.Write($"TOUCHDOWN id={e.TouchDevice.Id} resizer->{mode} L={Left:0} W={Width:0}");
                 e.Handled = true;
                 return;
@@ -699,7 +714,7 @@ public partial class TouchPadWindow : Window
             }
             int rawN = _fingers.Count, mgN = MergedCount();
             Status($"touch {e.TouchDevice.Id} {zone} n={(rawN == mgN ? rawN.ToString() : mgN + "[raw" + rawN + "]")}");
-            ZoneLabel.Text = "zone: " + zone;
+            if (ShowEvents) ZoneLabel.Text = "zone: " + zone;
             _lastWhat = $"touchdown {zone}";
             var (cx, cy) = Out.Cursor();
             Log.Write($"TOUCHDOWN id={e.TouchDevice.Id} @{p.X:0},{p.Y:0} zone={zone} n={_fingers.Count} cursor=({cx},{cy})");
