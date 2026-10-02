@@ -71,16 +71,14 @@ public partial class App : WApplication
         _strip.SetLabel(_settings.Layout);
         _strip.SetPadActive(false);
         _strip.Show();
-        // Deterministic z-order: strip > effect overlay > pad. The pad's
-        // keeper re-raises pad, then overlay, then strip (each tick); the
-        // overlay re-raises the strip on every Show (flashes/spins).
-        Core.TopmostKeeper.Attach(_pad, () =>
-        {
-            _pad.KeepZ();
-            if (_strip != null) Core.TopmostKeeper.Raise(_strip);
-        });
+        // Z-order: strip + strip menus always topmost, touch pad after.
+        // No periodic pad raise (it fought the strip); the strip's own
+        // keeper defends against outside apps, and the overlay hands
+        // back to strip/picker after every Show.
         EffectOverlay.AfterShow = () =>
         {
+            if (_picker != null) Core.TopmostKeeper.Raise(_picker);
+            if (_assist != null) Core.TopmostKeeper.Raise(_assist);
             if (_strip != null) Core.TopmostKeeper.Raise(_strip);
         };
 
@@ -190,6 +188,8 @@ public partial class App : WApplication
         _assist = new AssistWindow();
         _assist.Closed += (_, _) => _assist = null;
         _assist.Show();
+        Core.TopmostKeeper.Raise(_assist);
+        if (_strip != null) Core.TopmostKeeper.Raise(_strip);
     }
 
     /// <summary>Strip tap: pad off -> activate last mode; pad on -> mapped tap.</summary>
@@ -306,6 +306,8 @@ public partial class App : WApplication
             catch (InvalidOperationException) { }
         };
         _picker.Show();
+        Core.TopmostKeeper.Raise(_picker);
+        if (_strip != null) Core.TopmostKeeper.Raise(_strip);
     }
 
     private void CycleLayout(int step)

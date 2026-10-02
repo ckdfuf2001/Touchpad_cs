@@ -334,16 +334,20 @@ public partial class TouchPadWindow : Window
             {
                 double tx = t.X / 100 * w, ty = t.Y / 100 * h;
                 double tw = t.W / 100 * w, th = t.H / 100 * h;
-                string color = t.Kind switch
-                {
-                    "click" => "#40206040",
-                    "drag" => "#40404020",
-                    "wheel" => "#40602020",
-                    "key" => "#40204060",
-                    "grip" => "#50505050",
-                    "pad" => "#30404040",
-                    _ => "#30202020",
-                };
+                // Role colors via ZonePalette (fullscreen standard
+                // everywhere; per-zone settings can bind later).
+                string role;
+                if (t.Kind == "lbtn"
+                    || (t.Kind == "click" && t.ClickButton.Equals("left", StringComparison.OrdinalIgnoreCase))) role = "left";
+                else if (t.Kind == "rbtn"
+                    || (t.Kind == "click" && t.ClickButton.Equals("right", StringComparison.OrdinalIgnoreCase))) role = "right";
+                else if (t.Kind == "wheel") role = "wheel";
+                else if (t.Kind == "drag") role = "drag";
+                else if (t.Kind == "key" || t.Kind.StartsWith("vk_")
+                    || t.Kind.Length == 1) role = "key";
+                else if (t.Kind is "pad" or "padframe") role = "pad";
+                else role = "other";
+                string color = Core.ZonePalette.For(role);
                 var r = new Rectangle
                 {
                     Width = Math.Max(0, tw),
@@ -389,16 +393,6 @@ public partial class TouchPadWindow : Window
     public void EmergencyRestore() { }
     public void CenterFake() { }
     public void ApplyCursorStyle() { }
-
-    /// <summary>Re-raise the effect overlay (TopmostKeeper ordering).</summary>
-    public void KeepZ()
-    {
-        try
-        {
-            if (_fx != null && _fx.IsVisible) Core.TopmostKeeper.Raise(_fx);
-        }
-        catch { }
-    }
 
     public void SyncWindowSize()
     {
@@ -531,15 +525,15 @@ public partial class TouchPadWindow : Window
                         || (t.Kind == "click" && t.ClickButton == "right")) hasR = true;
                     else if (t.Kind == "wheel") hasW = true;
                 }
-                if (!hasL) rect(0, 0, w * 0.5, h * 0.2, "#40206040", "left");
-                if (!hasR) rect(w * 0.5, 0, w * 0.5, h * 0.2, "#40402060", "right");
-                if (!hasW) rect(w * 0.8, h * 0.2, w * 0.2, h * 0.8, "#40602020", "wheel");
+                if (!hasL) rect(0, 0, w * 0.5, h * 0.2, Core.ZonePalette.For("left"), "left");
+                if (!hasR) rect(w * 0.5, 0, w * 0.5, h * 0.2, Core.ZonePalette.For("right"), "right");
+                if (!hasW) rect(w * 0.8, h * 0.2, w * 0.2, h * 0.8, Core.ZonePalette.For("wheel"), "wheel");
             }
             else
             {
-                rect(0, 0, w * 0.5, h * 0.2, "#40206040", "left");
-                rect(w * 0.5, 0, w * 0.5, h * 0.2, "#40402060", "right");
-                rect(w * 0.8, h * 0.2, w * 0.2, h * 0.8, "#40602020", "wheel");
+                rect(0, 0, w * 0.5, h * 0.2, Core.ZonePalette.For("left"), "left");
+                rect(w * 0.5, 0, w * 0.5, h * 0.2, Core.ZonePalette.For("right"), "right");
+                rect(w * 0.8, h * 0.2, w * 0.2, h * 0.8, Core.ZonePalette.For("wheel"), "wheel");
             }
             // Resize grips: faint filled triangles in the bottom corners
             // (hit-test matches shape, bigger legs).
