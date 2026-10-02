@@ -16,7 +16,7 @@ public partial class App : WApplication
 {
     private Core.AppSettings _settings = new();
     private Dictionary<string, Core.Layout> _presets = new();
-    private PadWindow? _pad;
+    private TouchPadWindow? _pad;
     private ModeStripWindow? _strip;
     private AssistWindow? _assist;
     private SettingsWindow? _settingsWin;
@@ -48,7 +48,7 @@ public partial class App : WApplication
             _settings.Layout = _presets.ContainsKey("floatpad")
                 ? "floatpad" : _presets.Keys.First();
 
-        _pad = new PadWindow(_settings);
+        _pad = new TouchPadWindow(_settings);
         _pad.RequestSettings += OpenSettings;
         _pad.RequestAssist += ToggleAssist;
         _pad.RequestFullscreenToggle += ToggleFullscreen;

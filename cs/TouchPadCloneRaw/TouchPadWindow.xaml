@@ -1,0 +1,35 @@
+<Window x:Class="TouchPadCloneV2.TouchPadWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="TouchPad Raw" WindowStyle="None" AllowsTransparency="True"
+        Background="#8C1B1E24" Topmost="True" ShowInTaskbar="False"
+        ShowActivated="False" ResizeMode="NoResize" Width="340" Height="290">
+    <Border x:Name="Surface" Background="#8C1B1E24"
+            Stylus.IsPressAndHoldEnabled="False">
+        <Grid>
+            <Canvas x:Name="Zones" IsHitTestVisible="False" />
+            <Border x:Name="TitleBar" VerticalAlignment="Top" Height="30"
+                    Background="#CC141922">
+                <Grid>
+                    <TextBlock x:Name="ChromeLabel" Text="rawpad"
+                               Foreground="#E8ECF4" FontSize="13"
+                               VerticalAlignment="Center" Margin="10,0,0,0"/>
+                    <TextBlock x:Name="GearLabel" Text="⚙" Foreground="#9AA6BD" FontSize="13"
+                               HorizontalAlignment="Right" VerticalAlignment="Center"
+                               Margin="0,0,8,0" Cursor="Hand" ToolTip="설정"/>
+                </Grid>
+            </Border>
+            <TextBlock x:Name="ZoneLabel" Text="zone: -" Foreground="#E0C87F"
+                       FontSize="10" Margin="8,0,0,24"
+                       HorizontalAlignment="Left" VerticalAlignment="Bottom"/>
+            <TextBlock x:Name="StatusLabel" Text="ready" Foreground="#7FE0A8"
+                       FontSize="10" Margin="8,0,0,8"
+                       HorizontalAlignment="Left" VerticalAlignment="Bottom"
+                       Cursor="Hand" ToolTip="click opens the log"/>
+            <TextBlock x:Name="ActualLabel" Text="actual: -" Foreground="#7FC4E0"
+                       FontSize="10" Margin="0,0,8,8"
+                       HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                       Cursor="Hand" ToolTip="actual mouse state - click opens the log"/>
+        </Grid>
+    </Border>
+</Window>

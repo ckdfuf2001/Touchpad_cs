@@ -12,7 +12,7 @@ using TouchPadCloneV2.Core;
 namespace TouchPadCloneV2;
 
 /// <summary>
-/// In-process touch repro: drives the REAL PadWindow handlers with a fake
+/// In-process touch repro: drives the REAL TouchPadWindow handlers with a fake
 /// TouchDevice (real timers, real SendInput, real state machine) while a
 /// low-level mouse hook records every synthetic click with position.
 /// Run: TOUCHPAD_SELFTEST=1 dist\TouchPadCloneV2.exe  (console output, exit code)
@@ -99,7 +99,7 @@ public static class SelfTest
     }
 
     // ---- driver ----
-    private static PadWindow? _pad;
+    private static TouchPadWindow? _pad;
     private static FrameworkElement? _surface;
     private static MethodInfo? _mDown, _mMove, _mUp;
     private static int _fails;
@@ -225,7 +225,7 @@ public static class SelfTest
             MultiTapMs = 900,   // the shipped default - see AppSettings
             HoldCancelDip = 10,
         };
-        _pad = new PadWindow(settings);
+        _pad = new TouchPadWindow(settings);
         // real startup path also does this - layout must be set or HitTest
         // finds no tile and every gesture silently no-ops:
         Dictionary<string, Layout>? presets = null;
@@ -237,7 +237,7 @@ public static class SelfTest
         }
         catch (Exception ex) { Console.WriteLine("preset: " + ex.Message); }
         _surface = (FrameworkElement)_pad.FindName("Surface");
-        var t = typeof(PadWindow);
+        var t = typeof(TouchPadWindow);
         const BindingFlags NF = BindingFlags.NonPublic | BindingFlags.Instance;
         Type[] sig = [typeof(object), typeof(TouchEventArgs)];
         _mDown = t.GetMethod("OnTouchDown", NF, null, sig, null);
@@ -288,7 +288,7 @@ public static class SelfTest
             // clear it here like the cursor.
             try
             {
-                typeof(PadWindow).GetField("_grabArmUntil", NF)
+                typeof(TouchPadWindow).GetField("_grabArmUntil", NF)
                     ?.SetValue(_pad, DateTime.MinValue);
             }
             catch { }
@@ -350,9 +350,9 @@ public static class SelfTest
             // configured: one cursor keeps it at the grab (there is no physical
             // position to return to); dual cursor hands it back to the mouse
             // once the drag ends.
-            bool oneCursor = (bool?)typeof(PadWindow)
-                .GetField("RealCursorOnly", BindingFlags.NonPublic
-                    | BindingFlags.Static)?.GetValue(null) ?? false;
+            // New pad uses the real cursor only: no hand-back, it stays
+            // at the grab/drop. (Dual-cursor branch retired with PadWindow.)
+            bool oneCursor = true;
             Check(oneCursor ? (cx != mx || cy != my) : (cx == mx && cy == my),
                 oneCursor
                     ? "cursor NOT handed back while the grab is held"
@@ -486,9 +486,9 @@ public static class SelfTest
             // that is actually configured rather than pinning yesterday's.
             var (cx, cy) = InputSim.Cursor();
             double ax = FakeX(), ay = FakeY();
-            bool oneCursor = (bool?)typeof(PadWindow)
-                .GetField("RealCursorOnly", BindingFlags.NonPublic
-                    | BindingFlags.Static)?.GetValue(null) ?? false;
+            // New pad uses the real cursor only: no hand-back, it stays
+            // at the grab/drop. (Dual-cursor branch retired with PadWindow.)
+            bool oneCursor = true;
             if (oneCursor)
             {
                 // One cursor: the cursor must be where the drag ENDED.
@@ -936,28 +936,13 @@ public static class SelfTest
         // is missing or unreachable would pass parsing and do nothing.
         (double W, double H) SurfaceSize() =>
             (_surface!.ActualWidth, _surface.ActualHeight);
-        var mHit = typeof(PadWindow).GetMethod("HitMouse", NF);
-        var mResize = typeof(PadWindow).GetMethod("ResizerAt", NF);
-        (double X, double Y)? FindPadPoint(Layout layout, double w, double h)
+        var mZone = typeof(TouchPadWindow).GetMethod("ZoneAt",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        string ZoneAtPoint(double x, double y)
         {
-            for (int iy = 1; iy <= 9; iy++)
-                for (int ix = 1; ix <= 9; ix++)
-                {
-                    double x = w * ix / 10, y = h * iy / 10;
-                    if (PresetParser.HitTest(layout, x, y, w, h)?.Action
-                        == TileAction.Pad)
-                        return (x, y);
-                }
-            return null;
+            var (sw2, sh2) = SurfaceSize();
+            return (string?)mZone?.Invoke(null, new object[] { x, y, sw2, sh2 }) ?? "";
         }
-        // Where the mouse path finds each layout's tiles and resizer zones.
-        // The gesture tests above prove the touch path; this proves the MOUSE
-        // path reaches the same layout, which is what matters when the layout
-        // is switched from Settings and used with the physical mouse.
-        Tile? MouseHitAt(double x, double y) =>
-            (Tile?)mHit?.Invoke(_pad, new object[] { new System.Windows.Point(x, y) });
-        string? ResizerAtPoint(double x, double y) =>
-            (string?)mResize?.Invoke(_pad, new object[] { x, y });
         if (presets != null)
         {
             foreach (var kv in presets)
@@ -967,32 +952,15 @@ public static class SelfTest
                 _pad.SetLayout(kv.Value);
                 await Task.Delay(200);
                 var (sw, sh) = SurfaceSize();
-                var at = FindPadPoint(kv.Value, sw, sh);
-                if (at == null)
-                {
-                    // Not a failure, a fact about the layout: 'pad' is the
-                    // background layer and a concrete tile always wins over it,
-                    // so a layout whose keys tile the whole area has no
-                    // reachable pad at all and cannot move the cursor. The
-                    // original has the same z-order rule, so this is the
-                    // preset's own design - reported rather than asserted.
-                    Console.WriteLine($"  [NOTE] layout {kv.Key}: no reachable"
-                        + " pad area (its tiles cover the whole surface) -"
-                        + " cursor movement is not available in this layout");
-                    continue;
-                }
-                var p0 = at.Value;
-                // The MOUSE path has to reach the same layout: a tile at the
-                // point, and the corner resizer zone still where it belongs.
-                // That is what matters after switching layout in Settings and
-                // using the physical mouse.
-                var mh = MouseHitAt(p0.X, p0.Y);
-                Check(mh != null,
-                    $"layout {kv.Key}: mouse path finds a tile",
-                    $"at=({p0.X:0},{p0.Y:0}) tile={mh?.RawKind ?? "null"}");
-                string? rz = ResizerAtPoint(4, sh - 4);
-                Check(rz == "left",
-                    $"layout {kv.Key}: corner resizer works with the mouse",
+                // New pad: fixed zones (no tiles). Pad point = surface
+                // middle-lower (pad zone for any sane surface size).
+                var p0 = (X: sw * 0.5, Y: sh * 0.6);
+                Check(ZoneAtPoint(p0.X, p0.Y) == "pad",
+                    $"layout {kv.Key}: pad zone where expected",
+                    $"at=({p0.X:0},{p0.Y:0})");
+                string? rz = ZoneAtPoint(4, sh - 4);
+                Check(rz == "resizer",
+                    $"layout {kv.Key}: corner resizer works",
                     $"bottom-left -> {rz ?? "null"}");
                 var d = new FakeTouch(id++);
                 Down(d, p0.X, p0.Y); await Task.Delay(60); Up(d);
@@ -1003,18 +971,27 @@ public static class SelfTest
                     $"layout {kv.Key}: tap on the pad clicks",
                     $"at=({p0.X:0},{p0.Y:0}) ev={c.Count}");
 
+                // New state machine chains taps within the double window:
+                // the tap above would be absorbed as tap #1, so let its
+                // window (and the 400ms poll block) expire first.
+                await Task.Delay(650);
+
+                // Tap-hold: tap arms the double window, immediate re-press
+                // starts the drag (single press+move never presses).
+                var d0 = new FakeTouch(id++);
+                Down(d0, p0.X, p0.Y); Up(d0); await Task.Delay(60);
                 int m = Mark();
                 var e2 = new FakeTouch(id++);
                 Down(e2, p0.X, p0.Y); await Task.Delay(80);
                 for (int i = 1; i <= 4; i++)
-                    Move(e2, p0.X + 18 * i, p0.Y); 
+                    Move(e2, p0.X + 18 * i, p0.Y);
                 await Task.Delay(60);
                 int grabbed = Since(m).Count(e => e.Kind == "down" && e.Btn == "left");
                 Up(e2);
                 await Task.Delay(300);
                 await Drain();
-                Check(grabbed >= 1 || kv.Key == "floatpad",
-                    $"layout {kv.Key}: press+move grabs",
+                Check(grabbed >= 1,
+                    $"layout {kv.Key}: tap-hold press+move grabs",
                     $"downs={grabbed}");
             }
             _pad.SetLayout(presets["floatpad"]);

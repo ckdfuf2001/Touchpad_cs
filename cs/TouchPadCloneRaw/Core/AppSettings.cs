@@ -48,6 +48,7 @@ public sealed class StripGestureMap
 public sealed class AppSettings
 {
     public double Speed { get; set; } = 1.6;
+    public bool ScrollInvert { get; set; } = false;
     public int WheelStep { get; set; } = 120;
     public double Opacity { get; set; } = 0.6;
     public double PadWidth { get; set; } = 340;
