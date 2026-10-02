@@ -354,7 +354,7 @@ public partial class TouchPadWindow : Window
                     StrokeThickness = 1,
                 };
                 Canvas.SetLeft(r, tx);
-                Canvas.SetTop(r, ty);
+                Canvas.SetTop(r, ty + ChromeH);
                 Zones.Children.Add(r);
                 string label = t.Kind.StartsWith("vk_",
                     StringComparison.OrdinalIgnoreCase)
@@ -377,7 +377,7 @@ public partial class TouchPadWindow : Window
                     FontSize = 9,
                 };
                 Canvas.SetLeft(tb, tx + 3);
-                Canvas.SetTop(tb, ty + 2);
+                Canvas.SetTop(tb, ty + ChromeH + 2);
                 Zones.Children.Add(tb);
             }
         }
@@ -436,12 +436,12 @@ public partial class TouchPadWindow : Window
         }
     }
 
-    // ---------------- zones (tile space = full window; the title bar
-    // is an overlay on top, same as the old pad) --------------------------
+    // ---------------- zones (tile space sits below the title bar,
+    // so top tiles are never covered) -----------------------------------
 
     private (double w, double h) TileArea() =>
         (ActualWidth > 0 ? ActualWidth : Width,
-         ActualHeight > 0 ? ActualHeight : Height);
+         (ActualHeight > 0 ? ActualHeight : Height) - ChromeH);
 
     private static string ZoneAt(double x, double y, double w, double h)
     {
@@ -463,7 +463,7 @@ public partial class TouchPadWindow : Window
         // tile wins in file order, mirroring PresetParser.HitTest.
         if (_layout != null)
         {
-            double fx = p.X / w, fy = p.Y / h;
+            double fx = p.X / w, fy = (p.Y - ChromeH) / h;
             string? hit = null;
             foreach (var t in _layout.Tiles)
             {
@@ -481,7 +481,7 @@ public partial class TouchPadWindow : Window
             }
             if (hit != null) return hit;
         }
-        return ZoneAt(p.X, p.Y, w, h);
+        return ZoneAt(p.X, p.Y - ChromeH, w, h);
     }
 
     private void RenderZones()
@@ -503,7 +503,7 @@ public partial class TouchPadWindow : Window
                     StrokeThickness = 1,
                 };
                 Canvas.SetLeft(r, x);
-                Canvas.SetTop(r, y);
+                Canvas.SetTop(r, y + ChromeH);
                 Zones.Children.Add(r);
                 var t = new TextBlock
                 {
@@ -512,7 +512,7 @@ public partial class TouchPadWindow : Window
                     FontSize = 10,
                 };
                 Canvas.SetLeft(t, x + 4);
-                Canvas.SetTop(t, y + 4);
+                Canvas.SetTop(t, y + ChromeH + 4);
                 Zones.Children.Add(t);
             }
             if (_layout != null)
@@ -554,7 +554,7 @@ public partial class TouchPadWindow : Window
                 };
                 Zones.Children.Add(pg);
             }
-            double y0 = h;
+            double y0 = h + ChromeH;
             tri(new Point(0, y0 - GripZone), new Point(0, y0), new Point(GripZone, y0));
             tri(new Point(w, y0 - GripZone), new Point(w, y0), new Point(w - GripZone, y0));
         }
