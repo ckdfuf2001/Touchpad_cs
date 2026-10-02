@@ -312,7 +312,10 @@ public partial class TouchPadWindow : Window
         {
             if (_layout == null) return;
             var (w, h) = TileArea();
-            foreach (var t in _layout.Tiles)
+            // Background kinds first (pad tiles cover everything).
+            var ordered = _layout.Tiles
+                .OrderBy(t => t.Kind is "pad" or "padframe" or "blank" ? 0 : 1);
+            foreach (var t in ordered)
             {
                 double tx = t.X / 100 * w, ty = t.Y / 100 * h;
                 double tw = t.W / 100 * w, th = t.H / 100 * h;
@@ -338,9 +341,23 @@ public partial class TouchPadWindow : Window
                 Canvas.SetLeft(r, tx);
                 Canvas.SetTop(r, ty + ChromeH);
                 Zones.Children.Add(r);
+                string label = t.Kind.StartsWith("vk_",
+                    StringComparison.OrdinalIgnoreCase)
+                    ? t.Kind[3..].ToUpperInvariant()
+                    : t.Kind switch
+                    {
+                        "lbtn" => "L",
+                        "rbtn" => "R",
+                        "wheel" => "Wheel",
+                        "menu" => "Menu",
+                        "movegrip" => "<->",
+                        "minimize" => "_",
+                        _ => "",
+                    };
+                if (label.Length == 0) continue;
                 var tb = new TextBlock
                 {
-                    Text = t.Name,
+                    Text = label,
                     Foreground = Brushes.WhiteSmoke,
                     FontSize = 9,
                 };
