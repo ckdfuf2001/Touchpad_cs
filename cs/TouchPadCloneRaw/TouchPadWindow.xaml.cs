@@ -302,7 +302,7 @@ public partial class TouchPadWindow : Window
     {
         _layout = layout;
         _layoutName = layout?.Name ?? "floatpad";
-        RenderTiles();
+        RenderZones();
     }
 
     /// <summary>Draws the active preset tiles (visual linkage).</summary>
@@ -449,9 +449,18 @@ public partial class TouchPadWindow : Window
                 Canvas.SetTop(t, y + ChromeH + 4);
                 Zones.Children.Add(t);
             }
-            rect(0, 0, w * 0.5, h * 0.2, "#40206040", "left");
-            rect(w * 0.5, 0, w * 0.5, h * 0.2, "#40402060", "right");
-            rect(w * 0.8, h * 0.2, w * 0.2, h * 0.8, "#40602020", "wheel");
+            if (_layout != null)
+            {
+                // Layout set: preset tiles replace the cs2 zone overlay
+                // (no double-draw). Hit-testing stays cs2 zones.
+                RenderTiles();
+            }
+            else
+            {
+                rect(0, 0, w * 0.5, h * 0.2, "#40206040", "left");
+                rect(w * 0.5, 0, w * 0.5, h * 0.2, "#40402060", "right");
+                rect(w * 0.8, h * 0.2, w * 0.2, h * 0.8, "#40602020", "wheel");
+            }
             // Resize grips: faint filled triangles in the bottom corners
             // (hit-test matches shape, bigger legs).
             void tri(Point a, Point b, Point c)
@@ -468,7 +477,6 @@ public partial class TouchPadWindow : Window
             double y0 = h + ChromeH;
             tri(new Point(0, y0 - GripZone), new Point(0, y0), new Point(GripZone, y0));
             tri(new Point(w, y0 - GripZone), new Point(w, y0), new Point(w - GripZone, y0));
-            RenderTiles();
         }
         catch { }
     }
