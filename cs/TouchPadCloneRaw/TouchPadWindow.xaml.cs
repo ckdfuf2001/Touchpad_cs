@@ -375,6 +375,16 @@ public partial class TouchPadWindow : Window
     public void CenterFake() { }
     public void ApplyCursorStyle() { }
 
+    /// <summary>Re-raise the effect overlay (TopmostKeeper ordering).</summary>
+    public void KeepZ()
+    {
+        try
+        {
+            if (_fx != null && _fx.IsVisible) Core.TopmostKeeper.Raise(_fx);
+        }
+        catch { }
+    }
+
     public void SyncWindowSize()
     {
         try
@@ -470,8 +480,22 @@ public partial class TouchPadWindow : Window
             if (_layout != null)
             {
                 // Layout set: preset tiles replace the cs2 zone overlay
-                // (no double-draw). Hit-testing stays cs2 zones.
+                // (no double-draw). Hit-testing stays cs2 zones. Missing
+                // button/wheel tiles get their zone guides drawn, so
+                // layouts like fullscreen still show left/right/wheel.
                 RenderTiles();
+                bool hasL = false, hasR = false, hasW = false;
+                foreach (var t in _layout.Tiles)
+                {
+                    if (t.Kind == "lbtn"
+                        || (t.Kind == "click" && t.ClickButton == "left")) hasL = true;
+                    else if (t.Kind == "rbtn"
+                        || (t.Kind == "click" && t.ClickButton == "right")) hasR = true;
+                    else if (t.Kind == "wheel") hasW = true;
+                }
+                if (!hasL) rect(0, 0, w * 0.5, h * 0.2, "#40206040", "left");
+                if (!hasR) rect(w * 0.5, 0, w * 0.5, h * 0.2, "#40402060", "right");
+                if (!hasW) rect(w * 0.8, h * 0.2, w * 0.2, h * 0.8, "#40602020", "wheel");
             }
             else
             {

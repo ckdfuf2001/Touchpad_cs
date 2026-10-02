@@ -14,6 +14,9 @@ namespace TouchPadCloneV2;
 /// </summary>
 public sealed class EffectOverlay : Window
 {
+    /// <summary>Fired after every Show (the app re-raises the strip,
+    /// which a fresh topmost overlay would otherwise cover).</summary>
+    public static Action? AfterShow;
     // Effect settings (wired to the settings UI later; alpha allowed).
     public static Color RingColor = Color.FromArgb(0xFF, 0x7F, 0xE0, 0xA8);
     public static double RingDiameter = 26;
@@ -134,6 +137,7 @@ public sealed class EffectOverlay : Window
             Canvas.SetTop(_ring, 60 - RingDiameter / 2);
             _spin.Opacity = 0;
             Show();
+            try { AfterShow?.Invoke(); } catch { }
             _steps = 0;
             _flashing = true;
             _t.Start();
@@ -157,6 +161,7 @@ public sealed class EffectOverlay : Window
             Canvas.SetLeft(_spin, 60 - RingDiameter / 2);
             Canvas.SetTop(_spin, 60 - RingDiameter / 2);
             if (!IsVisible) Show();
+            try { AfterShow?.Invoke(); } catch { }
             _spinning = true;
             if (!_t.IsEnabled) _t.Start();
         }

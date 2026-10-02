@@ -71,6 +71,18 @@ public partial class App : WApplication
         _strip.SetLabel(_settings.Layout);
         _strip.SetPadActive(false);
         _strip.Show();
+        // Deterministic z-order: strip > effect overlay > pad. The pad's
+        // keeper re-raises pad, then overlay, then strip (each tick); the
+        // overlay re-raises the strip on every Show (flashes/spins).
+        Core.TopmostKeeper.Attach(_pad, () =>
+        {
+            _pad.KeepZ();
+            if (_strip != null) Core.TopmostKeeper.Raise(_strip);
+        });
+        EffectOverlay.AfterShow = () =>
+        {
+            if (_strip != null) Core.TopmostKeeper.Raise(_strip);
+        };
 
         _tray = new TrayManager(
             () => ShowPad(),
@@ -156,6 +168,7 @@ public partial class App : WApplication
             }
         }
         _strip.SetLabel(_settings.Layout);
+        Core.TopmostKeeper.Raise(_strip);
     }
 
     private void OpenSettings()
@@ -202,6 +215,7 @@ public partial class App : WApplication
         _pad.SetLayout(_presets[_settings.Layout]);
         _pad.Show();
         _strip.SetPadActive(true);
+        Core.TopmostKeeper.Raise(_strip);
     }
 
     public void HidePad()

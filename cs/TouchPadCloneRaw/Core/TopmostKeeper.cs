@@ -29,6 +29,20 @@ public static class TopmostKeeper
     private static extern bool SetWindowPos(IntPtr h, IntPtr after,
         int x, int y, int cx, int cy, uint flags);
 
+    /// <summary>Raise one window to the top of the topmost band, once.</summary>
+    public static void Raise(Window w)
+    {
+        try
+        {
+            if (!w.IsVisible) return;
+            var h = new WindowInteropHelper(w).Handle;
+            if (h == IntPtr.Zero) return;
+            SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+        catch { }
+    }
+
     /// <summary>
     /// Re-assert <paramref name="w"/>'s topmost place every
     /// <paramref name="intervalMs"/>. <paramref name="alsoAfter"/> runs right
@@ -47,11 +61,7 @@ public static class TopmostKeeper
         {
             try
             {
-                if (!w.IsVisible) return;
-                var h = new WindowInteropHelper(w).Handle;
-                if (h == IntPtr.Zero) return;
-                SetWindowPos(h, HWND_TOPMOST, 0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+                Raise(w);
                 alsoAfter?.Invoke();
             }
             catch { }
