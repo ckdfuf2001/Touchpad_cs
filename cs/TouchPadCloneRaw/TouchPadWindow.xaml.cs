@@ -1340,6 +1340,14 @@ public partial class TouchPadWindow : Window
     // and ups during the hold go there even if the cursor wandered off.
     private readonly Dictionary<string, IntPtr> _fwdCap = new();
 
+    /// <summary>MK_* button flag for a pressed button (posted downs).</summary>
+    private static uint BtnMask(string button) => button switch
+    {
+        "right" => 0x0002u,
+        "middle" => 0x0010u,
+        _ => 0x0001u,
+    };
+
     private static uint BtnDownMsg(string button) => button switch
     {
         "right" => 0x0204u,
@@ -1404,7 +1412,7 @@ public partial class TouchPadWindow : Window
             _fwdCap[button] = target;
             var pt = new POINT { X = sx, Y = sy };
             if (!ScreenToClient(target, ref pt)) return;
-            PostMessage(target, msg, UIntPtr.Zero, Pack(pt.X, pt.Y));
+            PostMessage(target, msg, (UIntPtr)BtnMask(button), Pack(pt.X, pt.Y));
             Core.Log.Write($"FWD {button} {(dbl ? "dblclk" : "down")} @({sx},{sy})");
             _lastWhat = $"fwd-{button}-down";
         }
