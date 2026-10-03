@@ -129,7 +129,17 @@ public partial class ModeStripWindow : Window
         // Topmost="True" is only the initial state - another application that
         // raises its own topmost window afterwards covers it and nothing
         // brings it back, which is "the strip gets covered by a program".
-        Core.TopmostKeeper.Attach(this);
+        // One keeper only: the grip/close buttons ride along in the same
+        // tick. Separate keepers leapfrog each other (visible flicker).
+        Core.TopmostKeeper.Attach(this, () =>
+        {
+            try
+            {
+                if (_gripWin != null) Core.TopmostKeeper.Raise(_gripWin);
+                if (_closeWin != null) Core.TopmostKeeper.Raise(_closeWin);
+            }
+            catch { }
+        });
         // And while a touch gesture runs the strip must get out of the way of
         // the mouse: it is topmost along the top of the screen, so a drag that
         // ended up there was dropped on it (logged: "DRAG end ... under
@@ -360,12 +370,36 @@ public partial class ModeStripWindow : Window
             if (_gripWin == null)
             {
                 _gripWin = MakeChromeBtn("≡", "스트립 이동 (드래그)");
-                _gripWin.PreviewTouchDown += (_, e) => { StartGripDrag(e.GetTouchPoint(_gripWin).Position, e.TouchDevice.Id, true); e.Handled = true; };
-                _gripWin.PreviewTouchMove += (_, e) => { MoveGripDrag(e.GetTouchPoint(_gripWin).Position, e.TouchDevice.Id, true); e.Handled = true; };
-                _gripWin.PreviewTouchUp += (_, e) => { EndGripDrag(e.TouchDevice.Id, true); e.Handled = true; };
-                _gripWin.MouseLeftButtonDown += (_, e) => { StartGripDrag(e.GetPosition(_gripWin), 0, false); e.Handled = true; };
-                _gripWin.MouseMove += (_, e) => { MoveGripDrag(e.GetPosition(_gripWin), 0, false); e.Handled = true; };
-                _gripWin.MouseLeftButtonUp += (_, _) => EndGripDrag(0, false);
+                _gripWin.PreviewTouchDown += (_, e) =>
+                {
+                    try { _gripWin.CaptureTouch(e.TouchDevice); } catch { }
+                    StartGripDrag(e.GetTouchPoint(_gripWin).Position,
+                        e.TouchDevice, true);
+                    e.Handled = true;
+                };
+                _gripWin.PreviewTouchMove += (_, e) =>
+                {
+                    MoveGripDrag(e.GetTouchPoint(_gripWin).Position,
+                        e.TouchDevice, true);
+                    e.Handled = true;
+                };
+                _gripWin.PreviewTouchUp += (_, e) =>
+                {
+                    EndGripDrag(e.TouchDevice, true);
+                    e.Handled = true;
+                };
+                _gripWin.MouseLeftButtonDown += (_, e) =>
+                {
+                    try { _gripWin.CaptureMouse(); } catch { }
+                    StartGripDrag(e.GetPosition(_gripWin), null, false);
+                    e.Handled = true;
+                };
+                _gripWin.MouseMove += (_, e) =>
+                {
+                    MoveGripDrag(e.GetPosition(_gripWin), null, false);
+                    e.Handled = true;
+                };
+                _gripWin.MouseLeftButtonUp += (_, _) => EndGripDrag(null, false);
             }
             if (_closeWin == null)
             {
@@ -397,7 +431,8 @@ public partial class ModeStripWindow : Window
         };
         Core.NoActivate.Apply(w);
         Core.TabletTweaks.DisableSystemGestures(w);
-        Core.TopmostKeeper.Attach(w);
+        // No own keeper: the strip's keeper raises these along (separate
+        // keepers leapfrog = flicker).
         w.Show();
         return w;
     }
@@ -448,7 +483,7 @@ public partial class ModeStripWindow : Window
 
     private bool _padActive;
     private bool _gripTouch;
-    private int _gripTouchId = -1;
+    private System.Windows.Input.TouchDevice? _gripDevice;
     private bool _gripMouse;
     private System.Windows.Point _gripGrab;
 
@@ -457,22 +492,33 @@ public partial class ModeStripWindow : Window
         try { return w.PointToScreen(p); } catch { return p; }
     }
 
-    private void StartGripDrag(System.Windows.Point p, int id, bool touch)
+    private void StartGripDrag(System.Windows.Point p,
+        System.Windows.Input.TouchDevice? dev, bool touch)
     {
         try
         {
-            if (touch) { if (_gripTouch) return; _gripTouch = true; _gripTouchId = id; }
-            else { if (_gripMouse) return; _gripMouse = true; }
-            _gripGrab = GripScreen(p, _gripWin!);
+            if (_gripWin == null) return;
+            if (touch)
+            {
+                if (_gripTouch) return;
+                _gripTouch = true; _gripDevice = dev;
+            }
+            else
+            {
+                if (_gripMouse) return;
+                _gripMouse = true;
+            }
+            _gripGrab = GripScreen(p, _gripWin);
         }
         catch { }
     }
 
-    private void MoveGripDrag(System.Windows.Point p, int id, bool touch)
+    private void MoveGripDrag(System.Windows.Point p,
+        System.Windows.Input.TouchDevice? dev, bool touch)
     {
         try
         {
-            if (touch && (!_gripTouch || id != _gripTouchId)) return;
+            if (touch && (!_gripTouch || !ReferenceEquals(dev, _gripDevice))) return;
             if (!touch && !_gripMouse) return;
             var s = GripScreen(p, _gripWin!);
             double dx = s.X - _gripGrab.X, dy = s.Y - _gripGrab.Y;
@@ -504,13 +550,26 @@ public partial class ModeStripWindow : Window
         catch { }
     }
 
-    private void EndGripDrag(int id, bool touch)
+    private void EndGripDrag(System.Windows.Input.TouchDevice? dev, bool touch)
     {
         try
         {
-            if (touch && (!_gripTouch || id != _gripTouchId)) return;
-            if (touch) { _gripTouch = false; _gripTouchId = -1; }
-            else _gripMouse = false;
+            if (touch && (!_gripTouch || !ReferenceEquals(dev, _gripDevice))) return;
+            if (touch)
+            {
+                _gripTouch = false; _gripDevice = null;
+                try
+                {
+                    if (_gripWin != null && dev != null)
+                        _gripWin.ReleaseTouchCapture(dev);
+                }
+                catch { }
+            }
+            else
+            {
+                _gripMouse = false;
+                try { _gripWin?.ReleaseMouseCapture(); } catch { }
+            }
             _s.Save();
         }
         catch { }
