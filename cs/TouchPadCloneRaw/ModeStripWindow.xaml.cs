@@ -565,7 +565,22 @@ public partial class ModeStripWindow : Window
 
     private System.Windows.Point GripScreen(System.Windows.Point p, Window w)
     {
-        try { return w.PointToScreen(p); } catch { return p; }
+        // PointToScreen returns DEVICE px; window coords are DIPs.
+        // Without scaling, high-DPI screens overshoot the finger
+        // (looks like the cursor speed gain leaking into strip moves).
+        try
+        {
+            var s = w.PointToScreen(p);
+            double d = 1.0;
+            try
+            {
+                var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(w);
+                if (dpi.DpiScaleX >= 0.5 && dpi.DpiScaleX <= 4) d = dpi.DpiScaleX;
+            }
+            catch { }
+            return new System.Windows.Point(s.X / d, s.Y / d);
+        }
+        catch { return p; }
     }
 
     private void StartGripDrag(System.Windows.Point p,
