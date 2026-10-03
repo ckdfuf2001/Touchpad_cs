@@ -168,6 +168,7 @@ public partial class App : WApplication
         _strip.ApplyStripLayout();
         _strip.SetLabel(_settings.Layout);
         _strip.KnownLayouts = Core.PresetParser.OrderedNames(_presets);
+        _strip.SetPadActive(_pad.IsVisible);
         _strip.RefreshRows();
         _artistPad?.Refresh();
         _virtualPad?.Refresh();

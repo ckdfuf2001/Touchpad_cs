@@ -413,18 +413,22 @@ public partial class ModeStripWindow : Window
                     EndGripDrag(e.TouchDevice, true);
                     e.Handled = true;
                 };
-                _gripWin.MouseLeftButtonDown += (_, e) =>
+                // Preview (tunneling) for mouse too: the child Button
+                // captures the press, so bubbling mouse events never
+                // reach the window.
+                _gripWin.PreviewMouseLeftButtonDown += (_, e) =>
                 {
                     try { _gripWin.CaptureMouse(); } catch { }
                     StartGripDrag(e.GetPosition(_gripWin), null, false);
                     e.Handled = true;
                 };
-                _gripWin.MouseMove += (_, e) =>
+                _gripWin.PreviewMouseMove += (_, e) =>
                 {
+                    if (!_gripMouse) return;
                     MoveGripDrag(e.GetPosition(_gripWin), null, false);
                     e.Handled = true;
                 };
-                _gripWin.MouseLeftButtonUp += (_, _) => EndGripDrag(null, false);
+                _gripWin.PreviewMouseLeftButtonUp += (_, _) => EndGripDrag(null, false);
             }
             if (_closeWin == null)
             {
