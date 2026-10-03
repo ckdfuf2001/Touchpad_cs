@@ -419,7 +419,7 @@ public partial class ModeStripWindow : Window
         {
             if (_gripWin == null)
             {
-                _gripWin = MakeChromeBtn(TriPoints(close: false), "스트립 이동 (드래그)");
+                _gripWin = MakeChromeBtn(TriPoints(close: false), "...", "스트립 이동 (드래그)");
                 _gripWin.PreviewTouchDown += (_, e) =>
                 {
                     try { _gripWin.CaptureTouch(e.TouchDevice); } catch { }
@@ -457,7 +457,7 @@ public partial class ModeStripWindow : Window
             }
             if (_closeWin == null)
             {
-                _closeWin = MakeChromeBtn(TriPoints(close: true), "패드 닫기");
+                _closeWin = MakeChromeBtn(TriPoints(close: true), "X", "패드 닫기");
                 _closeWin.PreviewTouchDown += (_, e) => { ClosePad?.Invoke(); e.Handled = true; };
                 _closeWin.PreviewMouseLeftButtonUp += (_, e) => { ClosePad?.Invoke(); e.Handled = true; };
             }
@@ -465,29 +465,31 @@ public partial class ModeStripWindow : Window
         catch { }
     }
 
-    /// <summary>Corner-grip triangle points (28x28 box), pad-resizer
-    /// style: grip leans into the bar from the left, close from the
-    /// right, diagonal edge like the pad resize triangles.</summary>
+    /// <summary>Corner-grip triangle points (28x28 box): the window's
+    /// outer corner IS the strip corner (top-left based / top-right
+    /// based), diagonal edge like the pad resize triangles.</summary>
     private static System.Windows.Media.PointCollection TriPoints(bool close)
     {
         var pts = new System.Windows.Media.PointCollection();
         if (close)
         {
+            // Right angle at top-right (= strip's top-right corner).
             pts.Add(new Point(4, 4));
             pts.Add(new Point(24, 4));
-            pts.Add(new Point(4, 24));
+            pts.Add(new Point(24, 24));
         }
         else
         {
+            // Right angle at top-left (= strip's top-left corner).
+            pts.Add(new Point(4, 4));
             pts.Add(new Point(24, 4));
-            pts.Add(new Point(24, 24));
             pts.Add(new Point(4, 24));
         }
         return pts;
     }
 
     private static Window MakeChromeBtn(
-        System.Windows.Media.PointCollection tri, string tip)
+        System.Windows.Media.PointCollection tri, string glyph, string tip)
     {
         var poly = new System.Windows.Shapes.Polygon
         {
@@ -497,13 +499,24 @@ public partial class ModeStripWindow : Window
             Stroke = System.Windows.Media.Brushes.Gray,
             StrokeThickness = 1,
         };
+        var label = new System.Windows.Controls.TextBlock
+        {
+            Text = glyph, FontSize = 13, FontWeight = System.Windows.FontWeights.Bold,
+            Foreground = System.Windows.Media.Brushes.White,
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
+            VerticalAlignment = System.Windows.VerticalAlignment.Center,
+            IsHitTestVisible = false,
+        };
+        var grid = new System.Windows.Controls.Grid();
+        grid.Children.Add(poly);
+        grid.Children.Add(label);
         var w = new Window
         {
             WindowStyle = WindowStyle.None, AllowsTransparency = true,
             Background = System.Windows.Media.Brushes.Transparent,
             Topmost = true, ShowInTaskbar = false, ShowActivated = false,
             ResizeMode = ResizeMode.NoResize, Width = 28, Height = 28,
-            Content = poly, ToolTip = tip, Cursor = System.Windows.Input.Cursors.Hand,
+            Content = grid, ToolTip = tip, Cursor = System.Windows.Input.Cursors.Hand,
         };
         Core.NoActivate.Apply(w);
         Core.TabletTweaks.DisableSystemGestures(w);
@@ -519,32 +532,16 @@ public partial class ModeStripWindow : Window
         {
             EnsureChrome();
             if (_gripWin == null || _closeWin == null) return;
-            var home = MonitorRect();
-            double pw = home.w, ph = home.h, ox = home.l, oy = home.t;
             bool show = Visibility == Visibility.Visible;
-            bool vertical = ((_s.StripEdge ?? "top").ToLowerInvariant() == "left")
-                || ((_s.StripEdge ?? "top").ToLowerInvariant() == "right");
-            double gx, gy, cx, cy;
-            if (vertical)
+            // Chrome rides ON the strip: grip overlaps the top-left
+            // corner, close the top-right corner (their outer corners
+            // are the strip corners). Narrow bars stack close below
+            // grip instead of overlapping it.
+            double gx = Left, gy = Top;
+            double cx = Left + Width - _closeWin.Width, cy = Top;
+            if (Width < _gripWin.Width + _closeWin.Width + 4)
             {
-                // Tall bar: grip above, close below; overlap inside
-                // when that space is off-screen.
-                gx = Left + (Width - _gripWin.Width) / 2;
-                gy = Top - _gripWin.Height;
-                if (gy < oy) gy = Top + 2;
-                cx = Left + (Width - _closeWin.Width) / 2;
-                cy = Top + Height;
-                if (cy + _closeWin.Height > oy + ph) cy = Top + Height - _closeWin.Height - 2;
-            }
-            else
-            {
-                // Wide bar: grip outside-left, close outside-right.
-                gx = Left - _gripWin.Width;
-                if (gx < ox) gx = Left + 2;
-                gy = Top + (Height - _gripWin.Height) / 2;
-                cx = Left + Width;
-                if (cx + _closeWin.Width > ox + pw) cx = Left + Width - _closeWin.Width - 2;
-                cy = Top + (Height - _closeWin.Height) / 2;
+                cx = Left; cy = Top + _gripWin.Height;
             }
             _gripWin.Left = gx; _gripWin.Top = gy;
             _closeWin.Left = cx; _closeWin.Top = cy;
