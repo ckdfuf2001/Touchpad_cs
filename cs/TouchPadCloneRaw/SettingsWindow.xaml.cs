@@ -60,7 +60,6 @@ public partial class SettingsWindow : Window
         InitializeComponent();
         Speed.Value = s.Speed;
         OpacityS.Value = s.Opacity;
-        LongMs.Value = s.LongPressMs;
         TapJudgeMs.Value = s.TapJudgeMs;
         HoldSlop.Value = s.HoldCancelDip;
         HoldDampS.Value = s.HoldDamp;
@@ -83,15 +82,11 @@ public partial class SettingsWindow : Window
             _onApply();
         };
         ApplyPhysHint();
-        // The caption is drawn by Windows, so a touch there never reaches WPF.
-        // TouchCloseBtn is the in-window equivalent; WPF promotes touch to a
-        // click for Button, so it needs no handler of its own.
-        FakeCur.IsChecked = s.FakeCursor;
-        ShowArrow.IsChecked = s.ShowFakeArrow;
         SwapBtn.IsChecked = s.SwapButtons;
+        DebugLbl.IsChecked = s.DebugLabels;
+        DebugLbl.Click += (_, _) => { _s.DebugLabels = DebugLbl.IsChecked == true; ApplySave(); };
         Speed.ValueChanged += (_, _) => Live();
         OpacityS.ValueChanged += (_, _) => Live();
-        LongMs.ValueChanged += (_, _) => Live();
         TapJudgeMs.ValueChanged += (_, _) => Live();
         HoldSlop.ValueChanged += (_, _) => Live();
         HoldDampS.ValueChanged += (_, _) => Live();
@@ -111,9 +106,6 @@ public partial class SettingsWindow : Window
             if (dlg.ShowDialog() == true) { _s.PresetFile = dlg.FileName; ApplySave(); }
         };
         SaveBtn.Click += (_, _) => ApplySave();
-        // Touch: WPF raises Click for a Button on touch, so this is the
-        // touch-reachable close (the caption bar belongs to Windows).
-        TouchCloseBtn.Click += (_, _) => Close();
 
         VjoyStatus.Text = "상태: " + (VjoyInstalled() ? "설치됨" : "미설치");
         VjoyDl.Click += (_, _) => OpenUrl("https://sourceforge.net/projects/vjoystick/files/");
@@ -147,7 +139,6 @@ public partial class SettingsWindow : Window
     {
         _s.Speed = Speed.Value;
         _s.Opacity = OpacityS.Value;
-        _s.LongPressMs = (int)LongMs.Value;
         _s.TapJudgeMs = (int)TapJudgeMs.Value;
         _s.HoldCancelDip = HoldSlop.Value;
         _s.HoldDamp = HoldDampS.Value;
@@ -159,7 +150,6 @@ public partial class SettingsWindow : Window
     {
         _s.Speed = Speed.Value;
         _s.Opacity = OpacityS.Value;
-        _s.LongPressMs = (int)LongMs.Value;
         _s.TapJudgeMs = (int)TapJudgeMs.Value;
         _s.HoldCancelDip = HoldSlop.Value;
         _s.HoldDamp = HoldDampS.Value;
@@ -167,9 +157,8 @@ public partial class SettingsWindow : Window
         if (LayoutBox.SelectedItem is string l) _s.Layout = l;
         _s.TapToClick = TapClick.IsChecked == true;
         _s.ScrollInvert = ScrollInv.IsChecked == true;
-        _s.FakeCursor = FakeCur.IsChecked == true;
-        _s.ShowFakeArrow = ShowArrow.IsChecked == true;
         _s.SwapButtons = SwapBtn.IsChecked == true;
+        _s.DebugLabels = DebugLbl.IsChecked == true;
         SaveStripTab();
         foreach (var (key, _, _, set) in Slots)
         {
@@ -267,12 +256,26 @@ public partial class SettingsWindow : Window
         foreach (var p in PadNames) PadSel.Items.Add(p);
         PadSel.SelectedIndex = 0;
         foreach (var a in new[] { "default", "full", "half-left", "half-right" }) PadArea.Items.Add(a);
+        // Tri-state as an explicit combo (a 3-state checkbox cycles
+        // null->false on first click, which silently wrote "off" instead
+        // of "follow global" and killed taps).
+        foreach (var c in new[] { PadScroll, PadSwap, PadTap })
+            foreach (var o in new[] { "전역 따름", "켜기", "끄기" }) c.Items.Add(o);
         PadSel.SelectionChanged += (_, _) => LoadPadTab();
         PadArea.SelectionChanged += (_, _) => SavePadTab();
         PadVisible.Click += (_, _) => SavePadTab();
+        PadScroll.SelectionChanged += (_, _) => SavePadTab();
+        PadSwap.SelectionChanged += (_, _) => SavePadTab();
+        PadTap.SelectionChanged += (_, _) => SavePadTab();
         PadPreview.Click += (_, _) => PreviewPad();
         LoadPadTab();
     }
+
+    /// <summary>null(global) / true / false to combo index.</summary>
+    private static int TriToIndex(bool? v) => v == null ? 0 : (v == true ? 1 : 2);
+
+    /// <summary>Combo index to null / true / false.</summary>
+    private static bool? IndexToTri(int i) => i == 1 ? true : i == 2 ? (bool?)false : null;
 
     private void LoadPadTab()
     {
@@ -282,6 +285,11 @@ public partial class SettingsWindow : Window
         PadVisible.IsChecked = p.Visible;
         PadVisible.IsEnabled = name != "fullscreen";
         PadOpacity.Text = p.Opacity.ToString();
+        PadSpeed.Text = p.Speed.ToString();
+        PadJudge.Text = p.TapJudgeMs.ToString();
+        PadScroll.SelectedIndex = TriToIndex(p.ScrollInvert);
+        PadSwap.SelectedIndex = TriToIndex(p.SwapButtons);
+        PadTap.SelectedIndex = TriToIndex(p.TapToClick);
     }
 
     private void SavePadTab()
@@ -293,6 +301,11 @@ public partial class SettingsWindow : Window
         if (area.Length > 0) p.AreaMode = area;
         if (name != "fullscreen") p.Visible = PadVisible.IsChecked == true;
         if (double.TryParse(PadOpacity.Text, out double op)) p.Opacity = op;
+        if (double.TryParse(PadSpeed.Text, out double sp)) p.Speed = sp;
+        if (int.TryParse(PadJudge.Text, out int jg)) p.TapJudgeMs = jg;
+        p.ScrollInvert = IndexToTri(PadScroll.SelectedIndex);
+        p.SwapButtons = IndexToTri(PadSwap.SelectedIndex);
+        p.TapToClick = IndexToTri(PadTap.SelectedIndex);
         _s.Save();
         LoadPadTab();
         _onApply();

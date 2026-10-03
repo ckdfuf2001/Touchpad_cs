@@ -3,15 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
 Title="TouchPad Clone - 설정" Width="560" Height="620"
         Topmost="True" WindowStartupLocation="CenterScreen">
-    <Grid>
-    <Grid.RowDefinitions>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="*"/>
-    </Grid.RowDefinitions>
-    <Button x:Name="TouchCloseBtn" Grid.Row="0" Content="닫기"
-            HorizontalAlignment="Right" Margin="0,4,6,4" MinWidth="96" MinHeight="34"
-            FontSize="14" IsCancel="True"/>
-    <TabControl x:Name="Tabs" Grid.Row="1" TabStripPlacement="Left">
+    <TabControl x:Name="Tabs" TabStripPlacement="Left">
         <TabItem Header="General">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="14">
@@ -19,17 +11,14 @@ Title="TouchPad Clone - 설정" Width="560" Height="620"
                 <TextBlock Text="커서 속도" Margin="0,6,0,0"/>
                 <Slider x:Name="Speed" Minimum="0.2" Maximum="5" TickFrequency="0.1"/>
                 <CheckBox x:Name="TapClick" Content="탭 = 클릭 (끄면 탭 무시)" Margin="0,8,0,0"/>
-                <CheckBox x:Name="FakeCur" Content="터치 중 시스템 커서 숨김 (Fake cursor)" Margin="0,4,0,0"/>
-                <CheckBox x:Name="ShowArrow" Content="가상 화살표 표시 (끄면 실커서만)" Margin="0,4,0,0"/>
                 <CheckBox x:Name="SwapBtn" Content="좌/우 버튼 반전" Margin="0,4,0,0"/>
+                <CheckBox x:Name="DebugLbl" Content="디버그 라벨 표시 (zone/status/actual)" Margin="0,4,0,0"/>
                 <CheckBox x:Name="ScrollInv" Content="스크롤 상하반전" Margin="0,4,0,0"/>
                 <TextBlock Text="물리 마우스" Margin="0,8,0,0"/>
                 <ComboBox x:Name="PhysBox"/>
                 <TextBlock x:Name="PhysHint" Foreground="Gray" TextWrapping="Wrap"
                            FontSize="11" Margin="0,2,0,0"/>
-                <TextBlock Text="길게 누르기 판정 (ms)" Margin="0,8,0,0"/>
-                <Slider x:Name="LongMs" Minimum="200" Maximum="1000" TickFrequency="50"/>
-                <TextBlock Text="탭 판정 시간 (ms, 첫 터치 후 동작판단)" Margin="0,8,0,0"/>
+                <TextBlock Text="동작 판정 시간 (ms): 떼면 탭, 계속 누르면 홀드" Margin="0,8,0,0"/>
                 <Slider x:Name="TapJudgeMs" Minimum="50" Maximum="1000" TickFrequency="50"/>
                 <TextBlock Text="홀드 중 드래그로 간주하는 이동 (DIP/150ms)" Margin="0,8,0,0"/>
                 <Slider x:Name="HoldSlop" Minimum="2" Maximum="60" TickFrequency="2"/>
@@ -166,6 +155,16 @@ Title="TouchPad Clone - 설정" Width="560" Height="620"
                 <CheckBox x:Name="PadVisible" Content="영역 보이기 (fullscreen은 항상)" Margin="0,0,0,6"/>
                 <TextBlock Text="투명도 (-1 = 전역 따름)"/>
                 <TextBox x:Name="PadOpacity" Margin="0,2,0,6"/>
+                <TextBlock Text="커서 속도 (-1 = 전역 따름)"/>
+                <TextBox x:Name="PadSpeed" Margin="0,2,0,6"/>
+                <TextBlock Text="판정 시간 ms (-1 = 전역 따름)"/>
+                <TextBox x:Name="PadJudge" Margin="0,2,0,6"/>
+                <TextBlock Text="스크롤 상하반전"/>
+                <ComboBox x:Name="PadScroll" Margin="0,2,0,2"/>
+                <TextBlock Text="좌/우 버튼 반전"/>
+                <ComboBox x:Name="PadSwap" Margin="0,2,0,2"/>
+                <TextBlock Text="탭 = 클릭"/>
+                <ComboBox x:Name="PadTap" Margin="0,2,0,6"/>
                 <Button x:Name="PadPreview" Content="미리보기 (해당 패드 적용)" Width="170" HorizontalAlignment="Left" Margin="0,4,0,0"/>
             </StackPanel>
             </ScrollViewer>
@@ -192,5 +191,4 @@ Title="TouchPad Clone - 설정" Width="560" Height="620"
             </ScrollViewer>
         </TabItem>
     </TabControl>
-    </Grid>
 </Window>

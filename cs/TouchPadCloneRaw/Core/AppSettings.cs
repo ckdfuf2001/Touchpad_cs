@@ -57,12 +57,19 @@ public sealed class StripRowItem
     public bool Visible { get; set; } = true;
 }
 
-/// <summary>Per-pad override: area mode, visibility, opacity.</summary>
+/// <summary>Per-pad override: area mode, visibility, opacity, and the
+/// touch globals (speed / judge time / scroll-invert / swap / tap-click).
+/// Same-as-global by default; any set value overwrites for that pad.</summary>
 public sealed class PadConfig
 {
     public string AreaMode { get; set; } = "default"; // default | full | half-left | half-right
     public bool Visible { get; set; } = true;
     public double Opacity { get; set; } = -1;     // -1 = follow global
+    public double Speed { get; set; } = -1;       // -1 = follow global
+    public int TapJudgeMs { get; set; } = -1;     // -1 = follow global
+    public bool? ScrollInvert { get; set; }       // null = follow global
+    public bool? SwapButtons { get; set; }        // null = follow global
+    public bool? TapToClick { get; set; }         // null = follow global
 }
 
 /// <summary>One custom button on an artist/virtual pad.</summary>
@@ -105,9 +112,15 @@ public sealed class AppSettings
     public string PresetFile { get; set; } = "";
     public bool TapToClick { get; set; } = true;
     public bool SwapButtons { get; set; } = false;
+    /// <summary>Bottom zone/status/actual labels. Default off: the launch
+    /// environment is not reliable (Explorer keeps a stale copy of deleted
+    /// env vars), so this file-backed flag owns the decision.</summary>
+    public bool DebugLabels { get; set; } = false;
     public bool FakeCursor { get; set; } = true;
     public string CursorStyle { get; set; } = "cyan";
     public bool ShowFakeArrow { get; set; } = true;
+    /// <summary>Legacy file-compat only: the engine now uses the single
+    /// TapJudgeMs for both tap and hold. Kept so old files still load.</summary>
     public int LongPressMs { get; set; } = 650;
     /// <summary>
     /// Hold vs drag threshold: NET travel in DIP within the last 150ms above
@@ -224,7 +237,25 @@ public sealed class AppSettings
     public PadConfig Pad(string name) =>
         Pads.TryGetValue(name, out var p) ? p : new PadConfig();
 
+    /// <summary>Layout name -&gt; Pads key (artist/virtual families).</summary>
+    public static string PadFamilyKey(string layoutName)
+    {
+        if (layoutName.Contains("artist", StringComparison.OrdinalIgnoreCase))
+            return "artist";
+        if (layoutName.Contains("virtual", StringComparison.OrdinalIgnoreCase))
+            return "virtual";
+        return layoutName.ToLowerInvariant();
+    }
+
+    /// <summary>Settings live in Documents\Default Project\Touchpad_cs
+    /// (user-visible folder, not AppData).</summary>
     public static string Path =>
+        System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "Default Project", "Touchpad_cs", "settings.json");
+
+    /// <summary>Previous location (kept for one-time migration).</summary>
+    private static string LegacyPath =>
         System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "TouchPadClone", "settings.json");
@@ -258,8 +289,6 @@ public sealed class AppSettings
                 map.SecondHold = "drag";
             if (map != null && map.DoubleTap == "double_click")
                 map.DoubleTap = "left_click";
-            if (map != null && map.TripleTap == "triple_click")
-                map.TripleTap = "left_click";
         }
     }
 
@@ -267,6 +296,17 @@ public sealed class AppSettings
     {
         try
         {
+            // One-time migration from the old AppData location.
+            if (!File.Exists(Path) && File.Exists(LegacyPath))
+            {
+                try
+                {
+                    Directory.CreateDirectory(
+                        System.IO.Path.GetDirectoryName(Path)!);
+                    File.Copy(LegacyPath, Path);
+                }
+                catch { }
+            }
             if (File.Exists(Path))
             {
                 var s = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Path));
