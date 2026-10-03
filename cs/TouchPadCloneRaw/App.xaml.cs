@@ -186,8 +186,7 @@ public partial class App : WApplication
         _strip.ApplyStripLayout();
         _strip.SetLabel(_settings.Layout);
         _strip.KnownLayouts = Core.PresetParser.OrderedNames(_presets);
-        _strip.SetPadActive(_pad.IsVisible);
-        _strip.RefreshRows();
+        UpdateStripText();
         _artistPad?.Refresh();
         _virtualPad?.Refresh();
         Core.TopmostKeeper.Raise(_strip);
@@ -395,7 +394,10 @@ public partial class App : WApplication
             name => ToggleAux(name),
             action => RunPickerAction(action),
             name => _auxOn.Contains(name),
-            () => OpenSettings());
+            () => OpenSettings(),
+            Core.ActionRunner.StripMenu.GetCell(
+                _settings, _menuRow, _menuCol, out var selCell)
+                ? selCell.Value : null);
         _picker.Closed += (_, _) => _picker = null;
         // The mode panel always opens docked to the strip, wherever the
         // strip is: below/above it for top/bottom edges, beside it for
@@ -476,8 +478,9 @@ public partial class App : WApplication
     }
 
     /// <summary>Strip swipe menu navigation: left/right step inside
-    /// the row (wrapping), up/down change rows. The landed cell fires
-    /// (layout select, aux toggle, custom, gesture, cmd...).</summary>
+    /// the row (wrapping), up/down change rows. Swipes only move the
+    /// selection shown on the strip; nothing fires. Tap opens the
+    /// popup (or a cell tap there executes).</summary>
     private int _menuRow = -1, _menuCol = -1;
 
     private void StepMenu(int dRow, int dCol)
@@ -485,18 +488,25 @@ public partial class App : WApplication
         try
         {
             if (!Core.ActionRunner.StripMenu.MoveSelection(
-                _settings, ref _menuRow, ref _menuCol, dRow, dCol, out var cell))
+                _settings, ref _menuRow, ref _menuCol, dRow, dCol, out _))
                 return;
-            Core.ActionRunner.StripMenu.Fire(cell, _settings,
-                name =>
-                {
-                    _settings.Layout = name;
-                    _settings.Save();
-                    Apply();
-                    AdoptMenuCell(name);
-                },
-                name => ToggleAux(name),
-                action => RunPickerAction(action));
+            UpdateStripText();
+        }
+        catch { }
+    }
+
+    /// <summary>Strip bar shows the selected cell (else the layout).</summary>
+    private void UpdateStripText()
+    {
+        try
+        {
+            if (_strip == null) return;
+            if (Core.ActionRunner.StripMenu.GetCell(
+                _settings, _menuRow, _menuCol, out var cell)
+                && !cell.IsEmpty)
+                _strip.SetSelection(cell.Label);
+            else
+                _strip.SetLabel(_settings.Layout);
         }
         catch { }
     }
@@ -510,6 +520,7 @@ public partial class App : WApplication
             if (Core.ActionRunner.StripMenu.LocateLayout(
                 _settings, layout, out int r, out int c))
             { _menuRow = r; _menuCol = c; }
+            UpdateStripText();
         }
         catch { }
     }

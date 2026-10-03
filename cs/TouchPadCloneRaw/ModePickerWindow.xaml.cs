@@ -19,7 +19,7 @@ public partial class ModePickerWindow : Window
 
     public ModePickerWindow(AppSettings s, string current,
         Action<string> onLayout, Action<string> onAux, Action<string> onAction,
-        Func<string, bool> auxOn, Action onSettings)
+        Func<string, bool> auxOn, Action onSettings, string? selectedValue = null)
     {
         InitializeComponent();
         // Docked flush under the top strip: reads as one expanded area.
@@ -47,6 +47,14 @@ public partial class ModePickerWindow : Window
                     MinHeight = 48,
                     MinWidth = 100,
                 };
+                // Strip swipe selection shows as a bold frame.
+                if (!string.IsNullOrEmpty(selectedValue)
+                    && cell.Value.Equals(selectedValue,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    b.BorderBrush = Brushes.White;
+                    b.BorderThickness = new Thickness(3);
+                }
                 try
                 {
                     if (ColorPalettes.IsNone(cell.Color))

@@ -197,6 +197,14 @@ public partial class ModeStripWindow : Window
         RefreshRows();
     }
 
+    /// <summary>Strip shows the selected menu cell (swipe navigation).
+    /// Falls back to the layout label when empty.</summary>
+    public void SetSelection(string label)
+    {
+        Label.Text = string.IsNullOrWhiteSpace(label)
+            ? $"◀  {_current}  ▶" : $"◀  {label.Trim()}  ▶";
+    }
+
     // NOTE: the bar never resizes itself on press anymore (that was
     // confusing). "Expansion" = the mode panel window below the bar.
 

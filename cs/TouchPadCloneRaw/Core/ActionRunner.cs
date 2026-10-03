@@ -147,6 +147,22 @@ public static class ActionRunner
             catch { return false; }
         }
 
+        /// <summary>Reads the selected cell (for the strip display).</summary>
+        public static bool GetCell(AppSettings s, int row, int col,
+            out StripCell cell)
+        {
+            cell = new StripCell();
+            try
+            {
+                var rows = NonEmptyRows(s);
+                if (row < 0 || row >= rows.Count) return false;
+                if (col < 0 || col >= rows[row].Count) return false;
+                cell = rows[row][col];
+                return true;
+            }
+            catch { return false; }
+        }
+
         /// <summary>Finds the cell selecting a layout (swipe continuity
         /// after picker taps). Indexes match MoveSelection's filtered
         /// rows. Returns false when absent.</summary>
