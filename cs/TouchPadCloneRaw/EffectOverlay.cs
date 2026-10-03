@@ -23,6 +23,25 @@ public sealed class EffectOverlay : Window
     public static double RingStroke = 2;
     public static double RingGrowth = 6;
 
+    /// <summary>Per-flash tint from settings (EffEffect). Null = RingColor.
+    /// Set by the pad on every gesture so color picks apply live.</summary>
+    public Color? EffectTint { get; set; }
+
+    private Color TintOrDefault()
+    {
+        try
+        {
+            if (EffectTint is Color c)
+            {
+                // Fully transparent tint = keep default (invisible ring
+                // would read as broken, not as a color choice).
+                if (c.A != 0) return c;
+            }
+        }
+        catch { }
+        return RingColor;
+    }
+
     private readonly Ellipse _ring;
     private readonly Ellipse _spin;
     private readonly Canvas _canvas;
@@ -66,7 +85,7 @@ public sealed class EffectOverlay : Window
         {
             Width = RingDiameter,
             Height = RingDiameter,
-            Stroke = new SolidColorBrush(RingColor),
+            Stroke = new SolidColorBrush(TintOrDefault()),
             StrokeThickness = RingStroke,
             Opacity = 1,
         };
@@ -75,7 +94,7 @@ public sealed class EffectOverlay : Window
         {
             Width = RingDiameter,
             Height = RingDiameter,
-            Stroke = new SolidColorBrush(RingColor),
+            Stroke = new SolidColorBrush(TintOrDefault()),
             StrokeThickness = RingStroke,
             StrokeDashArray = new DoubleCollection { RingDiameter * 2.2, RingDiameter * 1.4 },
             StrokeDashCap = PenLineCap.Round,
@@ -130,7 +149,7 @@ public sealed class EffectOverlay : Window
             Top = dipY - 60;
             _ring.Width = RingDiameter;
             _ring.Height = RingDiameter;
-            _ring.Stroke = new SolidColorBrush(RingColor);
+            _ring.Stroke = new SolidColorBrush(TintOrDefault());
             _ring.StrokeThickness = RingStroke;
             _ring.Opacity = 1;
             Canvas.SetLeft(_ring, 60 - RingDiameter / 2);
@@ -156,7 +175,7 @@ public sealed class EffectOverlay : Window
             Top = dipY - 60;
             _spin.Width = RingDiameter;
             _spin.Height = RingDiameter;
-            _spin.Stroke = new SolidColorBrush(RingColor);
+            _spin.Stroke = new SolidColorBrush(TintOrDefault());
             _spin.StrokeThickness = RingStroke;
             Canvas.SetLeft(_spin, 60 - RingDiameter / 2);
             Canvas.SetTop(_spin, 60 - RingDiameter / 2);

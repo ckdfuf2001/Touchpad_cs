@@ -95,6 +95,14 @@ public partial class TouchPadWindow : Window
             _fx = new EffectOverlay();
             _fx.Owner = this;
         }
+        // Effect tint follows settings live (render only). Unparsable
+        // values fall back inside TintOrDefault.
+        try
+        {
+            _fx.EffectTint = (Color)ColorConverter.ConvertFromString(
+                _s.EffEffect(_layoutName));
+        }
+        catch { _fx.EffectTint = null; }
         return _fx;
     }
     private long _throughUntil;
