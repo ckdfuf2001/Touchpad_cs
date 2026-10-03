@@ -35,8 +35,8 @@ public sealed class StripGestureMap
     public string Tap { get; set; } = "toggle_modes";
     public string SwipeLeft { get; set; } = "prev_layout";
     public string SwipeRight { get; set; } = "next_layout";
-    public string SwipeUp { get; set; } = "show_modes";
-    public string SwipeDown { get; set; } = "show_modes";
+    public string SwipeUp { get; set; } = "prev_layout";
+    public string SwipeDown { get; set; } = "next_layout";
 
     public static readonly string[] Actions =
     [
@@ -431,6 +431,13 @@ public sealed class AppSettings
                     s.ArtistGestures ??= new();
                     s.VirtualGestures ??= new();
                     s.StripGestures ??= new();
+                    // Old default parked both vertical swipes on show_modes
+                    // (no UI ever set it deliberately): forward to layout
+                    // switching like the horizontal swipes.
+                    if (s.StripGestures.SwipeUp == "show_modes")
+                        s.StripGestures.SwipeUp = "prev_layout";
+                    if (s.StripGestures.SwipeDown == "show_modes")
+                        s.StripGestures.SwipeDown = "next_layout";
                     s.StripRow1 ??= new();
                     s.StripRow2 ??= new();
                     s.Pads ??= new();
