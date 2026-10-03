@@ -303,17 +303,37 @@ public partial class App : WApplication
     }
 
     /// <summary>Strip tap: pad off -> activate last mode; pad on -> mapped tap.</summary>
+    /// <summary>Strip tap: fires the currently displayed (selected)
+    /// cell AND opens the mode popup. (Pad-only launch still works:
+    /// firing a layout cell shows its pad via Apply.)</summary>
     private void HandleStripTap()
     {
         if (_pad == null || _strip == null) return;
-        if (!_pad.IsVisible)
+        FireSelected();
+        ShowModePicker();
+    }
+
+    /// <summary>Fires the selected menu cell (shared by tap).</summary>
+    private void FireSelected()
+    {
+        try
         {
-            ShowPad();
-            return;
+            if (!Core.ActionRunner.StripMenu.GetCell(
+                _settings, _menuRow, _menuCol, out var cell)
+                || cell.IsEmpty)
+                return;
+            Core.ActionRunner.StripMenu.Fire(cell, _settings,
+                name =>
+                {
+                    _settings.Layout = name;
+                    _settings.Save();
+                    Apply();
+                    AdoptMenuCell(name);
+                },
+                name => ToggleAux(name),
+                action => RunPickerAction(action));
         }
-        string action = _settings.StripGestures?.Tap ?? "toggle_modes";
-        if (action == "toggle_modes") ToggleModePicker();
-        else if (action != "none") HandleStripGesture(action);
+        catch { }
     }
 
     public void ShowPad()
@@ -380,7 +400,13 @@ public partial class App : WApplication
 
     private void ShowModePicker()
     {
-        if (_picker != null) { _picker.Activate(); return; }
+        // Always rebuild: a reused instance would show stale buttons
+        // after settings edits (never shrinks/grows with them).
+        try
+        {
+            if (_picker != null) { _picker.Close(); _picker = null; }
+        }
+        catch (InvalidOperationException) { _picker = null; }
         _picker = new ModePickerWindow(
             _settings,
             _settings.Layout,
