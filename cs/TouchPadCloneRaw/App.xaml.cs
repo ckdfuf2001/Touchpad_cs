@@ -191,8 +191,9 @@ public partial class App : WApplication
         Core.TopmostKeeper.Raise(_strip);
     }
 
-    /// <summary>Pad's home monitor in DIPs (dual monitors: area modes
-    /// split this screen, never the whole virtual desktop).</summary>
+    /// <summary>Pad's home monitor in DIPs: the CONFIGURED strip monitor,
+    /// so the pad opens where the strip is (dual monitors). Vanished
+    /// monitor falls back to primary/first, then the virtual screen.</summary>
     private (double l, double t, double w, double h) HomeRect()
     {
         try
@@ -200,21 +201,21 @@ public partial class App : WApplication
             double d = 1.0;
             try
             {
-                var src = System.Windows.Media.VisualTreeHelper.GetDpi(_pad);
-                if (src.DpiScaleX >= 0.5 && src.DpiScaleX <= 4) d = src.DpiScaleX;
+                var s = System.Windows.Media.VisualTreeHelper.GetDpi(_pad);
+                if (s.DpiScaleX >= 0.5 && s.DpiScaleX <= 4) d = s.DpiScaleX;
             }
             catch { }
-            var h = _pad == null ? IntPtr.Zero
-                : new System.Windows.Interop.WindowInteropHelper(_pad).Handle;
-            return Core.HomeMonitor.RectFor(h, d,
-                SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
-                SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight);
+            var sc = Core.MonitorList.Resolve(_settings.StripMonitor);
+            if (sc != null)
+            {
+                var b = sc.Bounds;
+                if (b.Width >= 100 && b.Height >= 100)
+                    return (b.Left / d, b.Top / d, b.Width / d, b.Height / d);
+            }
         }
-        catch
-        {
-            return (SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
-                SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight);
-        }
+        catch { }
+        return (SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
+            SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight);
     }
 
     private void ApplyPad(bool fresh)
