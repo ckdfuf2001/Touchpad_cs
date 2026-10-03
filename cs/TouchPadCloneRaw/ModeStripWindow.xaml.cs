@@ -403,6 +403,7 @@ public partial class ModeStripWindow : Window
                 Top = Math.Max(oy, Math.Min(oy + ph - Height, Top));
             }
             Visibility = _s.StripVisible ? Visibility.Visible : Visibility.Hidden;
+            ApplyStripStyle();
             PositionChrome();
         }
         catch { }
@@ -419,7 +420,7 @@ public partial class ModeStripWindow : Window
         {
             if (_gripWin == null)
             {
-                _gripWin = MakeChromeBtn(TriPoints(close: false), "...", "스트립 이동 (드래그)");
+                _gripWin = MakeChromeBtn(TriPoints(close: false), "...", "스트립 이동 (드래그)", true);
                 _gripWin.PreviewTouchDown += (_, e) =>
                 {
                     try { _gripWin.CaptureTouch(e.TouchDevice); } catch { }
@@ -457,7 +458,7 @@ public partial class ModeStripWindow : Window
             }
             if (_closeWin == null)
             {
-                _closeWin = MakeChromeBtn(TriPoints(close: true), "X", "패드 닫기");
+                _closeWin = MakeChromeBtn(TriPoints(close: true), "X", "패드 닫기", false);
                 _closeWin.PreviewTouchDown += (_, e) => { ClosePad?.Invoke(); e.Handled = true; };
                 _closeWin.PreviewMouseLeftButtonUp += (_, e) => { ClosePad?.Invoke(); e.Handled = true; };
             }
@@ -488,8 +489,10 @@ public partial class ModeStripWindow : Window
         return pts;
     }
 
-    private static Window MakeChromeBtn(
-        System.Windows.Media.PointCollection tri, string glyph, string tip)
+    private System.Windows.Shapes.Polygon? _gripPoly, _closePoly;
+
+    private Window MakeChromeBtn(
+        System.Windows.Media.PointCollection tri, string glyph, string tip, bool grip)
     {
         var poly = new System.Windows.Shapes.Polygon
         {
@@ -522,8 +525,37 @@ public partial class ModeStripWindow : Window
         Core.TabletTweaks.DisableSystemGestures(w);
         // No own keeper: the strip's keeper raises these along (separate
         // keepers leapfrog = flicker).
+        if (grip) _gripPoly = poly; else _closePoly = poly;
+        ApplyStripStyle();
         w.Show();
         return w;
+    }
+
+    /// <summary>Strip color + opacity onto the bar and the corner
+    /// triangles (render only).</summary>
+    private void ApplyStripStyle()
+    {
+        try
+        {
+            string raw = (_s.StripColor ?? "#10131A").Trim();
+            System.Windows.Media.Brush brush;
+            if (ColorPalettes.IsNone(raw))
+                brush = System.Windows.Media.Brushes.Transparent;
+            else
+            {
+                var c = (System.Windows.Media.Color)System.Windows.Media.ColorConverter
+                    .ConvertFromString(raw);
+                double op = _s.StripOpacity;
+                if (op < 0.05) op = 0.05;
+                if (op > 1) op = 1;
+                brush = new System.Windows.Media.SolidColorBrush(
+                    System.Windows.Media.Color.FromArgb((byte)(op * 255), c.R, c.G, c.B));
+            }
+            Surface.Background = brush;
+            if (_gripPoly != null) _gripPoly.Fill = brush;
+            if (_closePoly != null) _closePoly.Fill = brush;
+        }
+        catch { }
     }
 
     private void PositionChrome()

@@ -190,6 +190,10 @@ public partial class SettingsWindow : Window
         StripPxBox.Text = s.StripPx.ToString();
         StripWBox.Text = s.StripWidth.ToString();
         StripHBox.Text = s.StripHeight.ToString();
+        StripOpacityS.Value = s.StripOpacity;
+        StripOpacityS.ValueChanged += (_, _) => Live();
+        WirePicker(StripColorPicker, ColorPalettes.Zones, false,
+            () => _s.StripColor, v => _s.StripColor = v ?? "#10131A");
         StripPxBox.LostFocus += (_, _) => CommitStripNumbers();
         StripWBox.LostFocus += (_, _) => CommitStripNumbers();
         StripHBox.LostFocus += (_, _) => CommitStripNumbers();
@@ -261,6 +265,7 @@ public partial class SettingsWindow : Window
         _s.Speed = Speed.Value;
         _s.Opacity = OpacityS.Value;
         _s.TapJudgeMs = (int)TapJudgeMs.Value;
+        _s.StripOpacity = StripOpacityS.Value;
         UpdateValLabels();
         _onApply();
     }
@@ -271,6 +276,7 @@ public partial class SettingsWindow : Window
         {
             SpeedVal.Text = $"{Speed.Value:0.0}x";
             OpacityVal.Text = $"{OpacityS.Value * 100:0}%";
+            StripOpacityVal.Text = $"{StripOpacityS.Value * 100:0}%";
         }
         catch { }
     }
@@ -280,6 +286,7 @@ public partial class SettingsWindow : Window
         _s.Speed = Speed.Value;
         _s.Opacity = OpacityS.Value;
         _s.TapJudgeMs = (int)TapJudgeMs.Value;
+        _s.StripOpacity = StripOpacityS.Value;
         _s.TapToClick = TapClick.IsChecked == true;
         _s.ScrollInvert = ScrollInv.IsChecked == true;
         _s.SwapButtons = SwapBtn.IsChecked == true;

@@ -269,6 +269,10 @@ public sealed class AppSettings
     /// Empty = primary. A vanished monitor falls back to primary live.</summary>
     public string StripMonitor { get; set; } = "";
 
+    /// <summary>Strip bar color + opacity (General tab).</summary>
+    public string StripColor { get; set; } = "#10131A";
+    public double StripOpacity { get; set; } = 0.35;
+
     /// <summary>Retired UI (was the reference's event-gap slider): the single
     /// TapJudgeMs is the judge time now. Kept so files still load.</summary>
     public int EventGapMs { get; set; } = 500;
