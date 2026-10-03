@@ -409,17 +409,32 @@ public partial class ModeStripWindow : Window
             EnsureChrome();
             if (_gripWin == null || _closeWin == null) return;
             double pw = SystemParameters.PrimaryScreenWidth;
+            double ph = SystemParameters.PrimaryScreenHeight;
             bool show = Visibility == Visibility.Visible;
-            // Grip: outside-left, else overlapping inside-left.
-            double gx = Left - _gripWin.Width;
-            bool gripOut = gx >= 0;
-            if (!gripOut) gx = Left + 2;
-            double gy = Top + (Height - _gripWin.Height) / 2;
-            // Close: outside-right, else overlapping inside-right.
-            double cx = Left + Width;
-            bool closeOut = cx + _closeWin.Width <= pw;
-            if (!closeOut) cx = Left + Width - _closeWin.Width - 2;
-            double cy = Top + (Height - _closeWin.Height) / 2;
+            bool vertical = ((_s.StripEdge ?? "top").ToLowerInvariant() == "left")
+                || ((_s.StripEdge ?? "top").ToLowerInvariant() == "right");
+            double gx, gy, cx, cy;
+            if (vertical)
+            {
+                // Tall bar: grip above, close below; overlap inside
+                // when that space is off-screen.
+                gx = Left + (Width - _gripWin.Width) / 2;
+                gy = Top - _gripWin.Height;
+                if (gy < 0) gy = Top + 2;
+                cx = Left + (Width - _closeWin.Width) / 2;
+                cy = Top + Height;
+                if (cy + _closeWin.Height > ph) cy = Top + Height - _closeWin.Height - 2;
+            }
+            else
+            {
+                // Wide bar: grip outside-left, close outside-right.
+                gx = Left - _gripWin.Width;
+                if (gx < 0) gx = Left + 2;
+                gy = Top + (Height - _gripWin.Height) / 2;
+                cx = Left + Width;
+                if (cx + _closeWin.Width > pw) cx = Left + Width - _closeWin.Width - 2;
+                cy = Top + (Height - _closeWin.Height) / 2;
+            }
             _gripWin.Left = gx; _gripWin.Top = gy;
             _closeWin.Left = cx; _closeWin.Top = cy;
             var gv = show ? Visibility.Visible : Visibility.Hidden;
