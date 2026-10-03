@@ -84,9 +84,11 @@ public partial class App : WApplication
             _settings.Layout = name;
             _settings.Save();
             Apply();
+            AdoptMenuCell(name);
         };
         _strip.KnownLayouts = Core.PresetParser.OrderedNames(_presets);
         _strip.SetLabel(_settings.Layout);
+        AdoptMenuCell(_settings.Layout);
         _strip.SetPadActive(false);
         _strip.Show();
         // Z-order: strip + strip menus always topmost, touch pad after.
@@ -342,6 +344,10 @@ public partial class App : WApplication
         {
             case "prev_layout": CycleLayout(-1); break;
             case "next_layout": CycleLayout(1); break;
+            case "menu_prev": StepMenu(0, -1); break;
+            case "menu_next": StepMenu(0, 1); break;
+            case "menu_up": StepMenu(-1, 0); break;
+            case "menu_down": StepMenu(1, 0); break;
             case "show_modes": ShowModePicker(); break;
             case "toggle_modes": ToggleModePicker(); break;
             case "open_settings": OpenSettings(); break;
@@ -384,6 +390,7 @@ public partial class App : WApplication
                 _settings.Layout = name;
                 _settings.Save();
                 Apply();
+                AdoptMenuCell(name);
             },
             name => ToggleAux(name),
             action => RunPickerAction(action),
@@ -466,6 +473,45 @@ public partial class App : WApplication
             && _settings.Actions.TryGetValue(action, out var def))
             Core.ActionRunner.Run(def);
         else HandleStripGesture(action);
+    }
+
+    /// <summary>Strip swipe menu navigation: left/right step inside
+    /// the row (wrapping), up/down change rows. The landed cell fires
+    /// (layout select, aux toggle, custom, gesture, cmd...).</summary>
+    private int _menuRow = -1, _menuCol = -1;
+
+    private void StepMenu(int dRow, int dCol)
+    {
+        try
+        {
+            if (!Core.ActionRunner.StripMenu.MoveSelection(
+                _settings, ref _menuRow, ref _menuCol, dRow, dCol, out var cell))
+                return;
+            Core.ActionRunner.StripMenu.Fire(cell, _settings,
+                name =>
+                {
+                    _settings.Layout = name;
+                    _settings.Save();
+                    Apply();
+                    AdoptMenuCell(name);
+                },
+                name => ToggleAux(name),
+                action => RunPickerAction(action));
+        }
+        catch { }
+    }
+
+    /// <summary>Keeps swipe navigation continuous after a picker tap:
+    /// selection follows the chosen layout's cell.</summary>
+    private void AdoptMenuCell(string layout)
+    {
+        try
+        {
+            if (Core.ActionRunner.StripMenu.LocateLayout(
+                _settings, layout, out int r, out int c))
+            { _menuRow = r; _menuCol = c; }
+        }
+        catch { }
     }
 
     private void CycleLayout(int step)

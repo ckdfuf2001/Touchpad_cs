@@ -91,6 +91,106 @@ public static class ActionRunner
         catch { return false; }
     }
 
+    /// <summary>Strip menu (StripLayout cells) routing shared by the
+    /// picker popup and the strip swipe navigation. UI wiring only.</summary>
+    public static class StripMenu
+    {
+        /// <summary>Routes a cell: layout select, aux toggle, custom
+        /// action, strip gesture, or direct cmd/program/shortcut.</summary>
+        public static void Fire(StripCell cell, AppSettings s,
+            Action<string> onLayout, Action<string> onAux, Action<string> onAction)
+        {
+            if (cell.Kind != "기능")
+            {
+                if (cell.Kind == "cmd") onAction("cmd:" + cell.Value);
+                else if (cell.Kind == "프로그램") onAction("program:" + cell.Value);
+                else onAction("shortcut:" + cell.Value);   // 단축키
+                return;
+            }
+            if (cell.Value.StartsWith("layout:", StringComparison.OrdinalIgnoreCase))
+            {
+                string name = cell.Value.Substring(7);
+                if (name.Contains("artist", StringComparison.OrdinalIgnoreCase)) { onAux("artist"); return; }
+                if (name.Contains("virtual", StringComparison.OrdinalIgnoreCase)) { onAux("virtual"); return; }
+                onLayout(name);
+                return;
+            }
+            onAction(cell.Value);   // custom registry key or strip gesture
+        }
+
+        /// <summary>Steps the menu selection through the cell grid and
+        /// returns the landed cell. Left/right wrap inside the row;
+        /// up/down change rows (column clamped). False when empty.</summary>
+        public static bool MoveSelection(AppSettings s,
+            ref int row, ref int col, int dRow, int dCol, out StripCell cell)
+        {
+            cell = new StripCell();
+            try
+            {
+                var rows = NonEmptyRows(s);
+                if (rows.Count == 0) return false;
+                if (row < 0 || row >= rows.Count) row = 0;
+                if (dRow != 0)
+                {
+                    row = Math.Max(0, Math.Min(rows.Count - 1, row + dRow));
+                    col = Math.Min(Math.Max(col, 0), rows[row].Count - 1);
+                }
+                else
+                {
+                    int n = rows[row].Count;
+                    if (col < 0 || col >= n) col = dCol < 0 ? 0 : n - 1;
+                    col = (col + dCol + n) % n;
+                }
+                cell = rows[row][col];
+                return true;
+            }
+            catch { return false; }
+        }
+
+        /// <summary>Finds the cell selecting a layout (swipe continuity
+        /// after picker taps). Indexes match MoveSelection's filtered
+        /// rows. Returns false when absent.</summary>
+        public static bool LocateLayout(AppSettings s, string layout,
+            out int row, out int col)
+        {
+            row = -1; col = -1;
+            try
+            {
+                int r = 0;
+                foreach (var raw in NonEmptyRows(s))
+                {
+                    int c = 0;
+                    foreach (var cell in raw)
+                    {
+                        if (cell.Value.Equals("layout:" + layout,
+                            StringComparison.OrdinalIgnoreCase))
+                        { row = r; col = c; return true; }
+                        c++;
+                    }
+                    r++;
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        private static List<List<StripCell>> NonEmptyRows(AppSettings s)
+        {
+            var rows = new List<List<StripCell>>();
+            foreach (var r in s.StripLayout)
+            {
+                var cs = new List<StripCell>();
+                foreach (var raw in r.Cells)
+                {
+                    var c = StripCell.Parse(raw);
+                    if (!c.IsEmpty) cs.Add(c);
+                }
+                if (cs.Count > 0) rows.Add(cs);
+            }
+            return rows;
+        }
+    }
+
     private static int ParseKey(string name)
     {
         string n = name.Trim().ToUpperInvariant();

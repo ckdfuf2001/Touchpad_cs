@@ -33,16 +33,17 @@ public sealed class GestureMap
 public sealed class StripGestureMap
 {
     public string Tap { get; set; } = "toggle_modes";
-    public string SwipeLeft { get; set; } = "prev_layout";
-    public string SwipeRight { get; set; } = "next_layout";
-    public string SwipeUp { get; set; } = "prev_layout";
-    public string SwipeDown { get; set; } = "next_layout";
+    public string SwipeLeft { get; set; } = "menu_prev";
+    public string SwipeRight { get; set; } = "menu_next";
+    public string SwipeUp { get; set; } = "menu_up";
+    public string SwipeDown { get; set; } = "menu_down";
 
     public static readonly string[] Actions =
     [
         "none", "prev_layout", "next_layout", "show_modes", "toggle_modes",
         "open_settings", "toggle_fullscreen", "show_assist", "toggle_pad",
         "center_fake", "toggle_fake",
+        "menu_prev", "menu_next", "menu_up", "menu_down",
     ];
 }
 
@@ -431,13 +432,21 @@ public sealed class AppSettings
                     s.ArtistGestures ??= new();
                     s.VirtualGestures ??= new();
                     s.StripGestures ??= new();
-                    // Old default parked both vertical swipes on show_modes
-                    // (no UI ever set it deliberately): forward to layout
-                    // switching like the horizontal swipes.
+                    // Strip swipes navigate the menu grid now (not preset
+                    // order, not the mode panel): forward old defaults.
+                    // (No UI ever set these deliberately.)
                     if (s.StripGestures.SwipeUp == "show_modes")
-                        s.StripGestures.SwipeUp = "prev_layout";
+                        s.StripGestures.SwipeUp = "menu_up";
                     if (s.StripGestures.SwipeDown == "show_modes")
-                        s.StripGestures.SwipeDown = "next_layout";
+                        s.StripGestures.SwipeDown = "menu_down";
+                    if (s.StripGestures.SwipeUp == "prev_layout")
+                        s.StripGestures.SwipeUp = "menu_up";
+                    if (s.StripGestures.SwipeDown == "next_layout")
+                        s.StripGestures.SwipeDown = "menu_down";
+                    if (s.StripGestures.SwipeLeft == "prev_layout")
+                        s.StripGestures.SwipeLeft = "menu_prev";
+                    if (s.StripGestures.SwipeRight == "next_layout")
+                        s.StripGestures.SwipeRight = "menu_next";
                     s.StripRow1 ??= new();
                     s.StripRow2 ??= new();
                     s.Pads ??= new();

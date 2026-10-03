@@ -127,28 +127,12 @@ public partial class ModePickerWindow : Window
         return false;
     }
 
-    /// <summary>Routes a cell: layout select, aux toggle, custom action,
-    /// strip gesture, or direct cmd/program/shortcut.</summary>
+    /// <summary>Routes a cell through the shared menu router.</summary>
     private static void Fire(StripCell cell, AppSettings s,
         Action<string> onLayout, Action<string> onAux, Action<string> onAction)
     {
         DebugLog.Write($"PICKER fire {cell.Label} [{cell.Kind}] -> {cell.Value}");
-        if (cell.Kind != "기능")
-        {
-            if (cell.Kind == "cmd") onAction("cmd:" + cell.Value);
-            else if (cell.Kind == "프로그램") onAction("program:" + cell.Value);
-            else onAction("shortcut:" + cell.Value);   // 단축키
-            return;
-        }
-        if (cell.Value.StartsWith("layout:", StringComparison.OrdinalIgnoreCase))
-        {
-            string name = cell.Value.Substring(7);
-            if (name.Contains("artist", StringComparison.OrdinalIgnoreCase)) { onAux("artist"); return; }
-            if (name.Contains("virtual", StringComparison.OrdinalIgnoreCase)) { onAux("virtual"); return; }
-            onLayout(name);
-            return;
-        }
-        onAction(cell.Value);   // custom registry key or strip gesture
+        Core.ActionRunner.StripMenu.Fire(cell, s, onLayout, onAux, onAction);
     }
 
     protected override void OnClosed(EventArgs e)
