@@ -165,6 +165,7 @@ public partial class App : WApplication
         // full + visible). Geometry only on layout change so sliders
         // never yank the window; ShowPad places fresh opens.
         ApplyPad(false);
+        _strip.ApplyStripLayout();
         _strip.SetLabel(_settings.Layout);
         _strip.KnownLayouts = Core.PresetParser.OrderedNames(_presets);
         _strip.RefreshRows();

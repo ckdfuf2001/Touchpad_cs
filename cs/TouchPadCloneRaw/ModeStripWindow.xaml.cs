@@ -315,6 +315,13 @@ public partial class ModeStripWindow : Window
             double sh = vertical ? _s.StripWidth : _s.StripHeight;
             Width = Math.Min(Math.Max(sw, 40), pw);
             Height = Math.Min(Math.Max(sh, 12), ph);
+            // Tall bar: lay the mode label along it instead of clipping.
+            try
+            {
+                Label.LayoutTransform = vertical
+                    ? new System.Windows.Media.RotateTransform(-90) : null;
+            }
+            catch { }
             string align = (_s.StripSide ?? "left").ToLowerInvariant();
             int px = _s.StripPx;
             if (edge == "bottom" || edge == "top")
@@ -494,16 +501,11 @@ public partial class ModeStripWindow : Window
         catch { }
     }
 
-    /// <summary>Rebuild rows from settings (call after edits).</summary>
+    /// <summary>Legacy in-bar menu retired (menu = picker popup).
+    /// Kept as a clear-only stub so existing callers still compile.</summary>
     public void RefreshRows()
     {
-        try
-        {
-            if (Rows == null) return;
-            Rows.Children.Clear();
-            AddRow(_s.StripRow1);
-            AddRow(_s.StripRow2);
-        }
+        try { Rows?.Children.Clear(); }
         catch { }
     }
 
