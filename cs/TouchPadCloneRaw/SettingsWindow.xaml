@@ -3,15 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
 Title="TouchPad Clone - 설정" Width="560" Height="620"
         Topmost="True" WindowStartupLocation="CenterScreen">
-    <Grid>
-    <Grid.RowDefinitions>
-        <RowDefinition Height="Auto"/>
-        <RowDefinition Height="*"/>
-    </Grid.RowDefinitions>
-    <Button x:Name="TouchCloseBtn" Grid.Row="0" Content="닫기"
-            HorizontalAlignment="Right" Margin="0,4,6,4" MinWidth="96" MinHeight="34"
-            FontSize="14" IsCancel="True"/>
-    <TabControl x:Name="Tabs" Grid.Row="1" TabStripPlacement="Left">
+    <TabControl x:Name="Tabs" TabStripPlacement="Left">
         <TabItem Header="General">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="14">
@@ -193,5 +185,4 @@ Title="TouchPad Clone - 설정" Width="560" Height="620"
             </ScrollViewer>
         </TabItem>
     </TabControl>
-    </Grid>
 </Window>

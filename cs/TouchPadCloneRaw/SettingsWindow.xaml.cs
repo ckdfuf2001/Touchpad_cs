@@ -83,9 +83,6 @@ public partial class SettingsWindow : Window
             _onApply();
         };
         ApplyPhysHint();
-        // The caption is drawn by Windows, so a touch there never reaches WPF.
-        // TouchCloseBtn is the in-window equivalent; WPF promotes touch to a
-        // click for Button, so it needs no handler of its own.
         FakeCur.IsChecked = s.FakeCursor;
         ShowArrow.IsChecked = s.ShowFakeArrow;
         SwapBtn.IsChecked = s.SwapButtons;
@@ -113,9 +110,6 @@ public partial class SettingsWindow : Window
             if (dlg.ShowDialog() == true) { _s.PresetFile = dlg.FileName; ApplySave(); }
         };
         SaveBtn.Click += (_, _) => ApplySave();
-        // Touch: WPF raises Click for a Button on touch, so this is the
-        // touch-reachable close (the caption bar belongs to Windows).
-        TouchCloseBtn.Click += (_, _) => Close();
 
         VjoyStatus.Text = "상태: " + (VjoyInstalled() ? "설치됨" : "미설치");
         VjoyDl.Click += (_, _) => OpenUrl("https://sourceforge.net/projects/vjoystick/files/");

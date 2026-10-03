@@ -228,7 +228,15 @@ public sealed class AppSettings
     public PadConfig Pad(string name) =>
         Pads.TryGetValue(name, out var p) ? p : new PadConfig();
 
+    /// <summary>Settings live in Documents\Default Project\Touchpad_cs
+    /// (user-visible folder, not AppData).</summary>
     public static string Path =>
+        System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+            "Default Project", "Touchpad_cs", "settings.json");
+
+    /// <summary>Previous location (kept for one-time migration).</summary>
+    private static string LegacyPath =>
         System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "TouchPadClone", "settings.json");
@@ -271,6 +279,17 @@ public sealed class AppSettings
     {
         try
         {
+            // One-time migration from the old AppData location.
+            if (!File.Exists(Path) && File.Exists(LegacyPath))
+            {
+                try
+                {
+                    Directory.CreateDirectory(
+                        System.IO.Path.GetDirectoryName(Path)!);
+                    File.Copy(LegacyPath, Path);
+                }
+                catch { }
+            }
             if (File.Exists(Path))
             {
                 var s = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(Path));
