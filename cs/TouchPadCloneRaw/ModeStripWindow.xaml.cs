@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using TouchPadCloneV2.Core;
 using WPoint = System.Windows.Point;
 using WMouseEventArgs = System.Windows.Input.MouseEventArgs;
@@ -35,6 +38,32 @@ public partial class ModeStripWindow : Window
     /// <summary>Fired on press so the app can tell strip-taps apart when
     /// the mode panel auto-closes on deactivation.</summary>
     public event Action? Pressed;
+
+    /// <summary>Row item selected a preset layout.</summary>
+    public event Action<string>? LayoutSelected;
+
+    /// <summary>Row toggle for artist/virtual pads (not a layout).</summary>
+    public event Action<string>? AuxToggled;
+
+    private List<string> _knownLayouts = new();
+    public List<string> KnownLayouts
+    {
+        get => _knownLayouts;
+        set { _knownLayouts = value ?? new(); RefreshRows(); }
+    }
+
+    private string _current = "";
+    private readonly Dictionary<string, bool> _toggleState = new();
+
+    public void SetToggle(string name, bool on)
+    {
+        _toggleState[name] = on;
+        RefreshRows();
+    }
+    private int _itId = -1;
+    private WPoint _itStart;
+    private DateTime _itT0;
+    private StripRowItem? _itItem;
 
     private readonly AppSettings _s;
 
@@ -118,6 +147,8 @@ public partial class ModeStripWindow : Window
         };
         Left = (SystemParameters.PrimaryScreenWidth - Width) / 2;
         Top = 0;
+        ApplyStripLayout();
+        RefreshRows();
         Surface.PreviewTouchDown += OnTouchDown;
         Surface.PreviewTouchMove += OnTouchMove;
         Surface.PreviewTouchUp += OnTouchUp;
@@ -143,7 +174,12 @@ public partial class ModeStripWindow : Window
     public void SetPadActive(bool on) =>
         PadClose.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
 
-    public void SetLabel(string layout) => Label.Text = $"◀  {layout}  ▶";
+    public void SetLabel(string layout)
+    {
+        _current = layout;
+        Label.Text = $"◀  {layout}  ▶";
+        RefreshRows();
+    }
 
     // NOTE: the bar never resizes itself on press anymore (that was
     // confusing). "Expansion" = the mode panel window below the bar.
@@ -156,6 +192,7 @@ public partial class ModeStripWindow : Window
     private void OnTouchDown(object sender, TouchEventArgs e)
     {
         if (Core.WpfHit.IsButton(e.OriginalSource)) return; // ✕ owns it
+        if (InRows(e.OriginalSource)) return; // row items own it
         if (_touchId != -1) { e.Handled = true; return; }
         _touchId = e.TouchDevice.Id;
         _start = _last = e.GetTouchPoint(this).Position;
@@ -250,5 +287,150 @@ public partial class ModeStripWindow : Window
         Surface.ReleaseMouseCapture();
         Decide(dx, dy, ms);
         e.Handled = true;
+    }
+
+    // ---------------- configurable rows -------------------------------
+
+    /// <summary>Position/size from settings.</summary>
+    public void ApplyStripLayout()
+    {
+        try
+        {
+            Width = _s.StripWidth;
+            Height = _s.StripHeight;
+            double pw = SystemParameters.PrimaryScreenWidth;
+            double ph = SystemParameters.PrimaryScreenHeight;
+            switch (_s.StripPosition)
+            {
+                case "bottom":
+                    Left = (pw - Width) / 2; Top = ph - Height; break;
+                case "left":
+                    Left = 0; Top = (ph - Height) / 2; break;
+                case "right":
+                    Left = pw - Width; Top = (ph - Height) / 2; break;
+                default:
+                    Left = (pw - Width) / 2; Top = 0; break;
+            }
+            Visibility = _s.StripVisible ? Visibility.Visible : Visibility.Hidden;
+        }
+        catch { }
+    }
+
+    /// <summary>Rebuild rows from settings (call after edits).</summary>
+    public void RefreshRows()
+    {
+        try
+        {
+            if (Rows == null) return;
+            Rows.Children.Clear();
+            AddRow(_s.StripRow1);
+            AddRow(_s.StripRow2);
+        }
+        catch { }
+    }
+
+    private void AddRow(List<StripRowItem> items)
+    {
+        if (items == null) return;
+        var row = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        foreach (var it in items)
+        {
+            if (!it.Visible) continue;
+            bool on = it.Kind == "radio" ? it.Target == _current
+                : _toggleState.TryGetValue(it.Target, out bool v) && v;
+            row.Children.Add(MakeItem(it, on));
+        }
+        if (row.Children.Count > 0) Rows.Children.Add(row);
+    }
+
+    private Border MakeItem(StripRowItem it, bool on)
+    {
+        var tb = new TextBlock
+        {
+            Text = it.Name,
+            Foreground = Brushes.LightGray,
+            FontSize = 11,
+            IsHitTestVisible = false,
+        };
+        var b = new Border
+        {
+            CornerRadius = new CornerRadius(4),
+            Background = on
+                ? new SolidColorBrush(Color.FromArgb(0xAA, 0x2E, 0x7F, 0xE0))
+                : new SolidColorBrush(Color.FromArgb(0x33, 0xFF, 0xFF, 0xFF)),
+            Margin = new Thickness(3, 2, 3, 2),
+            Padding = new Thickness(8, 2, 8, 2),
+            Child = tb,
+            Tag = it,
+        };
+        b.TouchDown += ItemTouchDown;
+        b.TouchUp += ItemTouchUp;
+        b.MouseLeftButtonUp += (_, e) => { Activate(it); e.Handled = true; };
+        return b;
+    }
+
+    private void ItemTouchDown(object sender, TouchEventArgs e)
+    {
+        try
+        {
+            if (_itId != -1) { e.Handled = true; return; }
+            _itId = e.TouchDevice.Id;
+            _itStart = e.GetTouchPoint(this).Position;
+            _itT0 = DateTime.Now;
+            _itItem = (sender as Border)?.Tag as StripRowItem;
+            e.Handled = true;
+        }
+        catch { }
+    }
+
+    private void ItemTouchUp(object sender, TouchEventArgs e)
+    {
+        try
+        {
+            if (e.TouchDevice.Id != _itId) return;
+            _itId = -1;
+            var end = e.GetTouchPoint(this).Position;
+            double ms = (DateTime.Now - _itT0).TotalMilliseconds;
+            var it = _itItem;
+            _itItem = null;
+            if (ms < 300 && Math.Abs(end.X - _itStart.X) + Math.Abs(end.Y - _itStart.Y) <= 12
+                && it != null)
+                Activate(it);
+            e.Handled = true;
+        }
+        catch { }
+    }
+
+    private void Activate(StripRowItem it)
+    {
+        try
+        {
+            if (_knownLayouts.Contains(it.Target))
+            {
+                _current = it.Target;
+                LayoutSelected?.Invoke(it.Target);
+            }
+            else if (it.Target == "artist" || it.Target == "virtual")
+                AuxToggled?.Invoke(it.Target);
+            else if (Array.IndexOf(StripGestureMap.Actions, it.Target) >= 0)
+                Gesture?.Invoke(it.Target);
+            RefreshRows();
+        }
+        catch { }
+    }
+
+    private bool InRows(object? src)
+    {
+        var d = src as DependencyObject;
+        while (d != null)
+        {
+            if (ReferenceEquals(d, Rows)) return true;
+            d = VisualTreeHelper.GetParent(d);
+        }
+        return false;
     }
 }

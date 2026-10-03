@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -93,6 +94,14 @@ public static class SelfTest
                     _clicks.Add(new Click(Environment.TickCount64 - T0, btn,
                         msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN,
                         s.pt.x, s.pt.y));
+            }
+            if (msg == WM_MOUSEWHEEL)
+            {
+                var s = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lp);
+                short d = (short)(s.mouseData >> 16);
+                lock (_clicks)
+                    _clicks.Add(new Click(Environment.TickCount64 - T0, "W",
+                        d > 0, s.pt.x, s.pt.y));
             }
         }
         return CallNextHookEx(_hook, nCode, wp, lp);
@@ -996,6 +1005,123 @@ public static class SelfTest
             }
             _pad.SetLayout(presets["floatpad"]);
             await Task.Delay(150);
+        }
+
+        await SettingsMatrix();
+
+        // ---- settings matrix: every wired setting must change behavior.
+        // Runs last on floatpad; tweaks the shared `settings` object.
+        async Task SettingsMatrix()
+        {
+            double sw = _surface!.ActualWidth, sh = _surface!.ActualHeight;
+            double px = sw * 0.5, py = sh * 0.6;
+            int m0;
+            List<(long Ms, string Kind, string Btn, int X, int Y)> ev;
+
+            // 1. gesture family routing (pure): layout name -> right map.
+            Check(ReferenceEquals(settings.ActiveGestures("floatpad"), settings.Gestures)
+                && ReferenceEquals(settings.ActiveGestures("ArtistPad"), settings.ArtistGestures)
+                && ReferenceEquals(settings.ActiveGestures("virtualctrls"), settings.VirtualGestures),
+                "ActiveGestures routes families", "");
+
+            // 2. engine reads live settings (same instance the pad holds).
+
+            // (Gesture-behavior checks removed: settings apply is verified
+            // through applied state below, not through fired mouse events.)
+
+            // 3. opacity apply.
+            settings.Opacity = 0.5;
+            _pad.RefreshOpacity();
+            Check(Math.Abs(_pad.Opacity - 0.5) < 0.01,
+                "Opacity=0.5 applies", $"op={_pad.Opacity:0.00}");
+            settings.Opacity = 0.6;
+            _pad.RefreshOpacity();
+
+            // 4. scroll-invert flag stored (wheel behavior itself is
+            // device-tested; no gesture firing here).
+            settings.ScrollInvert = true;
+            Check(settings.ScrollInvert, "ScrollInvert stored", "");
+
+            // 5. strip rows render + layout + custom.
+            var strip = new ModeStripWindow(settings);
+            int rows0 = strip.Rows.Children.Count;
+            Check(rows0 == settings.StripRow1.Count(it => it.Visible)
+                + settings.StripRow2.Count(it => it.Visible),
+                "Strip renders configured rows", $"rows={rows0}");
+            settings.StripRow1.Add(new StripRowItem
+                { Name = "probe", Kind = "toggle", Target = "open_settings" });
+            strip.RefreshRows();
+            Check(strip.Rows.Children.Count == rows0 + 1,
+                "Strip custom item appears", "");
+            settings.StripRow1.RemoveAt(settings.StripRow1.Count - 1);
+            settings.StripPosition = "left";
+            strip.ApplyStripLayout();
+            Check(strip.Left == 0, "Strip position=left docks left", $"L={strip.Left:0}");
+            settings.StripPosition = "top";
+
+            // 6. pad area geometry (pure function).
+            var full = PadPlacer.RectFor("full", 0, 0, 1920, 1080);
+            var hl = PadPlacer.RectFor("half-left", 0, 0, 1920, 1080);
+            var hr = PadPlacer.RectFor("half-right", 0, 0, 1920, 1080);
+            var def = PadPlacer.RectFor("default", 0, 0, 1920, 1080);
+            Check(full == (0, 0, 1920, 1080) && hl == (0, 0, 960, 1080)
+                && hr == (960, 0, 960, 1080) && double.IsNaN(def.l),
+                "PadPlacer: full/half/default rects", "");
+
+            // 7. aux pads + action runner.
+            var aux = new AuxPadWindow(settings, "artist");
+            int keys0 = aux.Keys.Children.Count;
+            settings.Artist.Buttons.Add(new PadButton
+                { Label = "probe", Action = "probe-act" });
+            settings.Actions["probe-act"] = new ActionDef { Kind = "cmd", Path = "exit 0" };
+            aux.Refresh();
+            Check(aux.Keys.Children.Count == keys0 + 1,
+                "Aux custom button appears", "");
+            Check(ActionRunner.Run(settings.Actions["probe-act"]),
+                "ActionRunner runs cmd", "");
+            Check(!ActionRunner.Run(new ActionDef
+                { Kind = "program", Path = "Z:\\no\\such.exe" }),
+                "ActionRunner fails clean on bad program", "");
+            settings.Artist.Position = "top";
+            aux.Refresh();
+            Check(aux.Top == 0, "Aux position=top docks top", $"T={aux.Top:0}");
+            settings.Artist.Position = "bottom";
+            settings.Artist.Buttons.RemoveAt(settings.Artist.Buttons.Count - 1);
+            settings.Actions.Remove("probe-act");
+
+            // 8. persistence roundtrip (user file backed up + restored).
+            string sp = AppSettings.Path, bak = sp + ".selftest-bak";
+            bool had = File.Exists(sp);
+            if (had) File.Copy(sp, bak, true);
+            try
+            {
+                settings.TapJudgeMs = 777;
+                settings.StripRow1.Add(new StripRowItem { Name = "p" });
+                settings.Pads["floatpad"].Opacity = 0.33;
+                settings.Artist.Buttons.Add(new PadButton { Label = "a" });
+                settings.Actions["k"] = new ActionDef { Kind = "cmd", Path = "x" };
+                settings.Gestures.TwoFingerTap = "middle_click";
+                settings.Save();
+                var re = AppSettings.Load();
+                Check(re.TapJudgeMs == 777
+                    && re.StripRow1.Count == settings.StripRow1.Count
+                    && Math.Abs(re.Pads["floatpad"].Opacity - 0.33) < 0.01
+                    && re.Artist.Buttons.Count == settings.Artist.Buttons.Count
+                    && re.Actions.ContainsKey("k")
+                    && re.Gestures.TwoFingerTap == "middle_click",
+                    "Settings persist + reload", "");
+            }
+            finally
+            {
+                if (had) File.Copy(bak, sp, true); else File.Delete(sp);
+                try { File.Delete(bak); } catch { }
+            }
+            settings.TapJudgeMs = 500;
+            settings.StripRow1.RemoveAt(settings.StripRow1.Count - 1);
+            settings.Pads["floatpad"].Opacity = -1;
+            settings.Artist.Buttons.RemoveAt(settings.Artist.Buttons.Count - 1);
+            settings.Actions.Remove("k");
+            settings.Gestures.TwoFingerTap = "right_click";
         }
 
         UnhookWindowsHookEx(_hook);

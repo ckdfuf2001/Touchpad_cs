@@ -18,6 +18,16 @@ public partial class App : WApplication
     private Dictionary<string, Core.Layout> _presets = new();
     private TouchPadWindow? _pad;
     private ModeStripWindow? _strip;
+    private AuxPadWindow? _artistPad, _virtualPad;
+    private string _placedMode = "";
+
+    private Core.PadConfig Cfg(string name)
+    {
+        foreach (var kv in _settings.Pads)
+            if (kv.Key.Equals(name, StringComparison.OrdinalIgnoreCase))
+                return kv.Value;
+        return new Core.PadConfig();
+    }
     private AssistWindow? _assist;
     private SettingsWindow? _settingsWin;
     private TrayManager? _tray;
@@ -64,10 +74,18 @@ public partial class App : WApplication
         _pad.Hide();
 
         _strip = new ModeStripWindow(_settings);
+        _strip.AuxToggled += name => ToggleAux(name);
         _strip.Gesture += HandleStripGesture;
         _strip.Tap += HandleStripTap;
         _strip.ClosePad += () => HidePad();
         _strip.Pressed += () => _stripTouchAt = DateTime.Now;
+        _strip.LayoutSelected += name =>
+        {
+            _settings.Layout = name;
+            _settings.Save();
+            Apply();
+        };
+        _strip.KnownLayouts = Core.PresetParser.OrderedNames(_presets);
         _strip.SetLabel(_settings.Layout);
         _strip.SetPadActive(false);
         _strip.Show();
@@ -126,8 +144,6 @@ public partial class App : WApplication
         catch { return Core.PresetParser.ParseFile(bundled); }
     }
 
-    private bool _wasFs;
-
     private void Apply()
     {
         if (_pad == null || _strip == null) return;
@@ -144,29 +160,74 @@ public partial class App : WApplication
             if (_settings.FakeCursor) _pad.EnterPersistentFake();
             else _pad.EmergencyRestore();
         }
-        // Fullscreen layouts take the whole screen; others restore tile size.
-        // Only on family transition, so sliders don't yank the window.
-        bool fs = _settings.Layout.StartsWith("fullscreen",
-            StringComparison.OrdinalIgnoreCase);
-        if (fs != _wasFs)
-        {
-            _wasFs = fs;
-            if (fs)
-            {
-                _pad.Left = 0; _pad.Top = 0;
-                _pad.Width = SystemParameters.PrimaryScreenWidth;
-                _pad.Height = SystemParameters.PrimaryScreenHeight;
-                _pad.SetLayout(_presets[_settings.Layout]);
-            }
-            else
-            {
-                _pad.SyncWindowSize();
-                _pad.Left = SystemParameters.PrimaryScreenWidth - _pad.Width - 40;
-                _pad.Top = SystemParameters.PrimaryScreenHeight - _pad.Height - 120;
-            }
-        }
+        // Per-pad area mode + visibility + opacity (fullscreen forced
+        // full + visible). Geometry only on layout change so sliders
+        // never yank the window; ShowPad places fresh opens.
+        ApplyPad(false);
         _strip.SetLabel(_settings.Layout);
+        _strip.KnownLayouts = Core.PresetParser.OrderedNames(_presets);
+        _strip.RefreshRows();
+        _artistPad?.Refresh();
+        _virtualPad?.Refresh();
         Core.TopmostKeeper.Raise(_strip);
+    }
+
+    private void ApplyPad(bool fresh)
+    {
+        if (_pad == null) return;
+        var cfg = Cfg(_settings.Layout);
+        string mode = cfg.AreaMode;
+        if (_settings.Layout.StartsWith("fullscreen",
+            StringComparison.OrdinalIgnoreCase)) mode = "full";
+        if (mode != "default" && (fresh || mode != _placedMode || !_pad.IsVisible))
+        {
+            var (l, t, w, h) = Core.PadPlacer.RectFor(mode,
+                SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
+                SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight);
+            _pad.Left = l; _pad.Top = t; _pad.Width = w; _pad.Height = h;
+            _placedMode = mode;
+        }
+        else if (mode == "default" && fresh)
+        {
+            _pad.SyncWindowSize();
+            _pad.Left = SystemParameters.PrimaryScreenWidth - _pad.Width - 40;
+            _pad.Top = SystemParameters.PrimaryScreenHeight - _pad.Height - 120;
+            _placedMode = mode;
+        }
+        bool show = cfg.Visible;
+        if (mode == "full") show = true;   // fullscreen always on
+        _pad.Visibility = show ? Visibility.Visible : Visibility.Hidden;
+        _pad.RefreshOpacity();
+    }
+
+    private readonly System.Collections.Generic.HashSet<string> _auxOn = new();
+
+    private void ToggleAux(string name)
+    {
+        if (!_auxOn.Remove(name)) _auxOn.Add(name);
+        ShowAux(name, _auxOn.Contains(name));
+    }
+
+    private void ShowAux(string name, bool on)
+    {
+        try
+        {
+            AuxPadWindow? w = name == "artist" ? _artistPad
+                : name == "virtual" ? _virtualPad : null;
+            if (w == null && on)
+            {
+                w = new AuxPadWindow(_settings, name);
+                if (name == "artist") _artistPad = w; else _virtualPad = w;
+                w.Show();
+            }
+            if (w != null)
+            {
+                w.Refresh();
+                w.Visibility = on ? Visibility.Visible : Visibility.Hidden;
+            }
+            _strip?.SetToggle(name, on);
+        }
+        catch { }
     }
 
     private void OpenSettings()
@@ -177,7 +238,8 @@ public partial class App : WApplication
             return;
         }
         _settingsWin = new SettingsWindow(_settings,
-            Core.PresetParser.OrderedNames(_presets), Apply);
+            Core.PresetParser.OrderedNames(_presets), Apply,
+            (name, on) => ShowAux(name, on));
         _settingsWin.Closed += (_, _) => _settingsWin = null;
         _settingsWin.Show();
     }
@@ -209,19 +271,7 @@ public partial class App : WApplication
     public void ShowPad()
     {
         if (_pad == null || _strip == null) return;
-        if (_settings.Layout.StartsWith("fullscreen",
-            StringComparison.OrdinalIgnoreCase))
-        {
-            _pad.Left = 0; _pad.Top = 0;
-            _pad.Width = SystemParameters.PrimaryScreenWidth;
-            _pad.Height = SystemParameters.PrimaryScreenHeight;
-        }
-        else
-        {
-            _pad.SyncWindowSize();
-            _pad.Left = SystemParameters.PrimaryScreenWidth - _pad.Width - 40;
-            _pad.Top = SystemParameters.PrimaryScreenHeight - _pad.Height - 120;
-        }
+        ApplyPad(true);
         _pad.SetLayout(_presets[_settings.Layout]);
         _pad.Show();
         _strip.SetPadActive(true);

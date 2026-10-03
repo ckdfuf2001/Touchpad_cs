@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 
@@ -43,6 +44,53 @@ public sealed class StripGestureMap
         "open_settings", "toggle_fullscreen", "show_assist", "toggle_pad",
         "center_fake", "toggle_fake",
     ];
+}
+
+/// <summary>One configurable strip row item: a group radio (pad select)
+/// or an individual toggle / custom (program/cmd).</summary>
+public sealed class StripRowItem
+{
+    public string Name { get; set; } = "";
+    public string Kind { get; set; } = "radio";    // radio | toggle
+    public string Target { get; set; } = "";       // pad name or action key
+    public bool Fixed { get; set; } = false;      // fixed items can't be deleted
+    public bool Visible { get; set; } = true;
+}
+
+/// <summary>Per-pad override: area mode, visibility, opacity.</summary>
+public sealed class PadConfig
+{
+    public string AreaMode { get; set; } = "default"; // default | full | half-left | half-right
+    public bool Visible { get; set; } = true;
+    public double Opacity { get; set; } = -1;     // -1 = follow global
+}
+
+/// <summary>One custom button on an artist/virtual pad.</summary>
+public sealed class PadButton
+{
+    public string Label { get; set; } = "";
+    public string Action { get; set; } = "";       // key into Actions
+}
+
+public sealed class ArtistConfig
+{
+    public string Position { get; set; } = "bottom"; // top | bottom | left | right | hidden
+    public List<PadButton> Buttons { get; set; } = new();
+}
+
+public sealed class VirtualConfig
+{
+    public string Position { get; set; } = "hidden"; // top | bottom | left | right | grid | hidden
+    public List<PadButton> Buttons { get; set; } = new();
+}
+
+/// <summary>A runnable action: a mouse action, a program, or a cmd line.</summary>
+public sealed class ActionDef
+{
+    public string Kind { get; set; } = "mouse";   // mouse | program | cmd
+    public string Value { get; set; } = "left_click";
+    public string Path { get; set; } = "";
+    public string Args { get; set; } = "";
 }
 
 public sealed class AppSettings
@@ -133,6 +181,49 @@ public sealed class AppSettings
     /// <summary>Top-strip gestures, user-mappable (General tab).</summary>
     public StripGestureMap StripGestures { get; set; } = new();
 
+    /// <summary>Tap judgment window ms (first touch to action decision).</summary>
+    public int TapJudgeMs { get; set; } = 500;
+
+    /// <summary>Configurable strip rows. Row1 = group radios (pad select,
+    /// one at a time), row2 = individual toggles + customs (program/cmd).</summary>
+    public string StripPosition { get; set; } = "top";  // top | bottom | left | right
+    public double StripWidth { get; set; } = 380;
+    public double StripHeight { get; set; } = 86;
+    public bool StripVisible { get; set; } = true;
+    public List<StripRowItem> StripRow1 { get; set; } = new()
+    {
+        new StripRowItem { Name = "floatpad", Kind = "radio", Target = "floatpad", Fixed = true },
+        new StripRowItem { Name = "leftpad", Kind = "radio", Target = "leftpad", Fixed = true },
+        new StripRowItem { Name = "rightpad", Kind = "radio", Target = "rightpad", Fixed = true },
+        new StripRowItem { Name = "fullscreen", Kind = "radio", Target = "fullscreen", Fixed = true },
+    };
+    public List<StripRowItem> StripRow2 { get; set; } = new()
+    {
+        new StripRowItem { Name = "artist", Kind = "toggle", Target = "artist", Fixed = true },
+        new StripRowItem { Name = "virtual", Kind = "toggle", Target = "virtual", Fixed = true },
+    };
+
+    /// <summary>Per-pad overrides (same-as-global + overwrite).</summary>
+    public Dictionary<string, PadConfig> Pads { get; set; } = new()
+    {
+        ["floatpad"] = new PadConfig(),
+        ["leftpad"] = new PadConfig { AreaMode = "half-left" },
+        ["rightpad"] = new PadConfig { AreaMode = "half-right" },
+        ["fullscreen"] = new PadConfig { AreaMode = "full" },
+        ["artist"] = new PadConfig(),
+        ["virtual"] = new PadConfig(),
+    };
+
+    public ArtistConfig Artist { get; set; } = new();
+    public VirtualConfig Virtual { get; set; } = new();
+
+    /// <summary>Named custom actions (program/cmd/mouse) for strip items
+    /// and aux pad buttons.</summary>
+    public Dictionary<string, ActionDef> Actions { get; set; } = new();
+
+    public PadConfig Pad(string name) =>
+        Pads.TryGetValue(name, out var p) ? p : new PadConfig();
+
     public static string Path =>
         System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -185,6 +276,12 @@ public sealed class AppSettings
                     s.ArtistGestures ??= new();
                     s.VirtualGestures ??= new();
                     s.StripGestures ??= new();
+                    s.StripRow1 ??= new();
+                    s.StripRow2 ??= new();
+                    s.Pads ??= new();
+                    s.Artist ??= new();
+                    s.Virtual ??= new();
+                    s.Actions ??= new();
                     MigrateLegacySecondHold(s);
                     return s;
                 }

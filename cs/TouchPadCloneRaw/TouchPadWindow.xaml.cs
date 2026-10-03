@@ -63,7 +63,7 @@ public partial class TouchPadWindow : Window
     private long _lastTapTick;
     private int _lastTapX, _lastTapY;
     private double _lastTapFX, _lastTapFY;
-    private const int TapMaxMs = 250;
+    // Tap window lives in settings (TapJudgeMs); no const here.
     // Hold-to-right timer (pad zone): still held LongPressMs -> R click.
     private System.Windows.Threading.DispatcherTimer? _holdTimer;
     private int _holdId = -1;
@@ -406,15 +406,25 @@ public partial class TouchPadWindow : Window
 
     public void RefreshOpacity()
     {
-        try { Opacity = Math.Clamp(_s.Opacity, 0.2, 1.0); } catch { }
+        try
+        {
+            double op = _s.Pad(_layoutName).Opacity;
+            if (op < 0) op = _s.Opacity;
+            Opacity = Math.Clamp(op, 0.2, 1.0);
+        }
+        catch { }
     }
 
     public void RefreshChrome() => UpdateChrome();
 
     /// <summary>Fires a gesture-map mouse action. True if it clicked.
-    /// Single pairs journal as one "click" (old ClickAt semantics).</summary>
+    /// Single pairs journal as one "click" (old ClickAt semantics).
+    /// SwapButtons swaps left/right globally.</summary>
     private bool DoMapAction(string action, int x, int y)
     {
+        if (_s.SwapButtons)
+            action = action == "left_click" ? "right_click"
+                : action == "right_click" ? "left_click" : action;
         switch (action)
         {
             case "left_click":
@@ -792,14 +802,15 @@ public partial class TouchPadWindow : Window
                     // click), "drag_hold" clicks first, then holds.
                     // Rebase travel so the deadzone doesn't jump it.
                     string sh = ActiveMap().SecondHold;
+                    string dbtn = _s.SwapButtons ? "right" : "left";
                     if (sh == "drag_hold")
                     {
-                        Out.DownAt(_downOrigX, _downOrigY, "left");
-                        Out.UpAt(_downOrigX, _downOrigY, "left");
+                        Out.DownAt(_downOrigX, _downOrigY, dbtn);
+                        Out.UpAt(_downOrigX, _downOrigY, dbtn);
                     }
                     if (sh == "drag" || sh == "drag_hold")
                     {
-                        Out.DownAt(_downOrigX, _downOrigY, "left");
+                        Out.DownAt(_downOrigX, _downOrigY, dbtn);
                         _heldLeft = true;
                     }
                     f.Start = p;
@@ -901,7 +912,7 @@ public partial class TouchPadWindow : Window
                     else switch (_g)
                     {
                         case G.Pending:                       // tap
-                            if (ms <= TapMaxMs && (f.Zone == "pad"
+                            if (ms <= _s.TapJudgeMs && _s.TapToClick && (f.Zone == "pad"
                                 || f.Zone == "left-click" || f.Zone == "right-click"))
                             {
                                 string act = f.Zone == "right-click"
