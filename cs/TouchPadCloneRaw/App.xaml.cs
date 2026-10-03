@@ -389,28 +389,42 @@ public partial class App : WApplication
             name => _auxOn.Contains(name),
             () => OpenSettings());
         _picker.Closed += (_, _) => _picker = null;
-        // Dock beside the strip: below it for top/bottom edges,
-        // beside it for left/right edges (bar runs vertical there).
+        // The mode panel always opens docked to the strip, wherever the
+        // strip is: below/above it for top/bottom edges, beside it for
+        // left/right edges. Measured before showing (no jump).
         try
         {
             if (_strip != null)
             {
+                _picker.UpdateLayout();
                 string edge = (_settings.StripEdge ?? "top").ToLowerInvariant();
                 var home = _strip.MonitorRect();
                 double ox = home.l, oy = home.t, pw = home.w, ph = home.h;
+                double pwid = _picker.Width;
+                double phei = _picker.ActualHeight > 0 ? _picker.ActualHeight : 300;
+                double cx = _strip.Left + (_strip.Width - pwid) / 2;
+                cx = Math.Max(ox, Math.Min(ox + pw - pwid, cx));
+                double cy = _strip.Top + (_strip.Height - phei) / 2;
+                cy = Math.Max(oy, Math.Min(oy + ph - phei, cy));
                 if (edge == "left")
                 {
-                    _picker.Left = Math.Min(_strip.Left + _strip.Width + 4, ox + pw - _picker.Width);
-                    _picker.Top = Math.Max(oy, Math.Min(oy + ph - 200, _strip.Top));
+                    _picker.Left = Math.Min(_strip.Left + _strip.Width + 4, ox + pw - pwid);
+                    _picker.Top = cy;
                 }
                 else if (edge == "right")
                 {
-                    _picker.Left = Math.Max(ox, _strip.Left - _picker.Width - 4);
-                    _picker.Top = Math.Max(oy, Math.Min(oy + ph - 200, _strip.Top));
+                    _picker.Left = Math.Max(ox, _strip.Left - pwid - 4);
+                    _picker.Top = cy;
                 }
                 else if (edge == "bottom")
                 {
-                    _picker.Top = Math.Max(oy, _strip.Top - 400);
+                    _picker.Left = cx;
+                    _picker.Top = Math.Max(oy, _strip.Top - phei - 4);
+                }
+                else
+                {
+                    _picker.Left = cx;
+                    _picker.Top = _strip.Top + _strip.Height + 4;
                 }
             }
         }
