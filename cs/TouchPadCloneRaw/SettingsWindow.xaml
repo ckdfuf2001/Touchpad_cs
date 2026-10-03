@@ -79,8 +79,6 @@
                     <CheckBox x:Name="ScrollInv" Content="스크롤 상하반전" Margin="0,2,4,2"/>
                     <CheckBox x:Name="DebugLbl" Content="디버그 라벨 표시" Margin="0,2,0,2"/>
                 </UniformGrid>
-                <TextBlock Text="레이아웃 (원본 INI 섹션)" Margin="0,8,0,0"/>
-                <ComboBox x:Name="LayoutBox"/>
                 <TextBlock Text="스트립 설정" FontWeight="Bold" Foreground="#35C4FF" Margin="0,12,0,0"/>
                 <StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
                     <TextBlock Text="위치" VerticalAlignment="Center"/>

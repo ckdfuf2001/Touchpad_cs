@@ -344,6 +344,32 @@ public partial class App : WApplication
             name => _auxOn.Contains(name),
             () => OpenSettings());
         _picker.Closed += (_, _) => _picker = null;
+        // Dock beside the strip: below it for top/bottom edges,
+        // beside it for left/right edges (bar runs vertical there).
+        try
+        {
+            if (_strip != null)
+            {
+                string edge = (_settings.StripEdge ?? "top").ToLowerInvariant();
+                double pw = SystemParameters.PrimaryScreenWidth;
+                double ph = SystemParameters.PrimaryScreenHeight;
+                if (edge == "left")
+                {
+                    _picker.Left = Math.Min(_strip.Left + _strip.Width + 4, pw - _picker.Width);
+                    _picker.Top = Math.Max(0, Math.Min(ph - 200, _strip.Top));
+                }
+                else if (edge == "right")
+                {
+                    _picker.Left = Math.Max(0, _strip.Left - _picker.Width - 4);
+                    _picker.Top = Math.Max(0, Math.Min(ph - 200, _strip.Top));
+                }
+                else if (edge == "bottom")
+                {
+                    _picker.Top = Math.Max(0, _strip.Top - 400);
+                }
+            }
+        }
+        catch { }
         // Tap outside (any other window activates) collapses the panel.
         // A tap on the strip itself is exempt: the toggle gesture that
         // follows will close it (avoids close+reopen flicker).

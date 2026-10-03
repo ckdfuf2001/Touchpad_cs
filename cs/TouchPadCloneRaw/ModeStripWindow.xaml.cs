@@ -308,9 +308,13 @@ public partial class ModeStripWindow : Window
         {
             double pw = SystemParameters.PrimaryScreenWidth;
             double ph = SystemParameters.PrimaryScreenHeight;
-            Width = Math.Min(Math.Max(_s.StripWidth, 40), pw);
-            Height = Math.Min(Math.Max(_s.StripHeight, 12), ph);
             string edge = (_s.StripEdge ?? "top").ToLowerInvariant();
+            // Vertical edges run the bar tall: width/height swap.
+            bool vertical = edge == "left" || edge == "right";
+            double sw = vertical ? _s.StripHeight : _s.StripWidth;
+            double sh = vertical ? _s.StripWidth : _s.StripHeight;
+            Width = Math.Min(Math.Max(sw, 40), pw);
+            Height = Math.Min(Math.Max(sh, 12), ph);
             string align = (_s.StripSide ?? "left").ToLowerInvariant();
             int px = _s.StripPx;
             if (edge == "bottom" || edge == "top")

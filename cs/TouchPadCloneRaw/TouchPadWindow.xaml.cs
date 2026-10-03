@@ -671,8 +671,10 @@ public partial class TouchPadWindow : Window
 
                 long now = Environment.TickCount64;
                 double tdist = Math.Abs(p.X - _lastTapFX) + Math.Abs(p.Y - _lastTapFY);
+                // Unified judge: a re-touch inside the action-judge time
+                // after a tap chains (double). One time constant for all.
                 bool second = _lastTapTick != 0
-                    && now - _lastTapTick <= GetDoubleClickTime()
+                    && now - _lastTapTick <= _s.TapJudgeMs
                     && tdist <= SecondTapDip;
 
                 if (second)

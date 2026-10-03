@@ -144,10 +144,6 @@ public partial class SettingsWindow : Window
         Speed.Value = s.Speed;
         OpacityS.Value = s.Opacity;
         TapJudgeMs.Value = s.TapJudgeMs;
-        MultiMs.Value = s.MultiTapMs;
-        LayoutBox.ItemsSource = layouts;
-        LayoutBox.SelectedItem = layouts.Contains(s.Layout) ? s.Layout : layouts.FirstOrDefault();
-        LayoutBox.SelectionChanged += (_, _) => ApplySave();
         TapClick.IsChecked = s.TapToClick;
         TapClick.Click += (_, _) => ApplySave();
         ScrollInv.IsChecked = s.ScrollInvert;
@@ -201,7 +197,6 @@ public partial class SettingsWindow : Window
         Speed.ValueChanged += (_, _) => Live();
         OpacityS.ValueChanged += (_, _) => Live();
         TapJudgeMs.ValueChanged += (_, _) => Live();
-        MultiMs.ValueChanged += (_, _) => Live();
         UpdateValLabels();
         WirePicker(EffectPicker, ColorPalettes.Effects, false, () => _s.EffectColor, v => _s.EffectColor = v ?? ColorPalettes.Effects[0]);
         WirePicker(ZoneLPicker, ColorPalettes.Zones, false, () => _s.ZoneLeft, v => _s.ZoneLeft = v ?? "없음");
@@ -248,7 +243,6 @@ public partial class SettingsWindow : Window
         _s.Speed = Speed.Value;
         _s.Opacity = OpacityS.Value;
         _s.TapJudgeMs = (int)TapJudgeMs.Value;
-        _s.MultiTapMs = (int)MultiMs.Value;
         UpdateValLabels();
         _onApply();
     }
@@ -268,8 +262,6 @@ public partial class SettingsWindow : Window
         _s.Speed = Speed.Value;
         _s.Opacity = OpacityS.Value;
         _s.TapJudgeMs = (int)TapJudgeMs.Value;
-        _s.MultiTapMs = (int)MultiMs.Value;
-        if (LayoutBox.SelectedItem is string l) _s.Layout = l;
         _s.TapToClick = TapClick.IsChecked == true;
         _s.ScrollInvert = ScrollInv.IsChecked == true;
         _s.SwapButtons = SwapBtn.IsChecked == true;
