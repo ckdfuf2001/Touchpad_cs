@@ -69,10 +69,8 @@
                     <TextBlock x:Name="SpeedVal" Grid.Column="1" FontWeight="Bold" VerticalAlignment="Center"/>
                 </Grid>
                 <Slider x:Name="Speed" Minimum="0.2" Maximum="5" TickFrequency="0.1"/>
-                <TextBlock Text="동작 판정 시간 (ms): 떼면 탭, 계속 누르면 홀드" Margin="0,6,0,0"/>
+                <TextBlock Text="동작 판정 시간 (ms): 떼면 탭, 계속 누르면 홀드. 재터치도 이 시간 안에." Margin="0,6,0,0"/>
                 <Slider x:Name="TapJudgeMs" Minimum="50" Maximum="1000" TickFrequency="50"/>
-                <TextBlock Text="더블/트리플 탭 판정 (ms): 탭 사이 간격" Margin="0,8,0,0"/>
-                <Slider x:Name="MultiMs" Minimum="200" Maximum="1000" TickFrequency="50"/>
                 <UniformGrid Columns="2" Margin="0,6,0,0">
                     <CheckBox x:Name="TapClick" Content="Pad tap = click" Margin="0,2,4,2"/>
                     <CheckBox x:Name="SwapBtn" Content="좌/우 버튼 반전" Margin="0,2,0,2"/>
