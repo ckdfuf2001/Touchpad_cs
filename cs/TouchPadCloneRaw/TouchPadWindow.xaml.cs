@@ -22,9 +22,12 @@ public partial class TouchPadWindow : Window
     private const double ChromeH = 30;
 
     /// <summary>Bottom event labels (zone/status/actual) only in debug.
-    /// Normal mode hides them (cleaner pad, no per-event strings).</summary>
-    private static readonly bool ShowEvents =
-        Environment.GetEnvironmentVariable("TOUCHPAD_DEBUG") == "1";
+    /// File-backed (AppSettings.DebugLabels); TOUCHPAD_DEBUG=1 also
+    /// forces on. Env alone is unreliable: Explorer inherits a stale
+    /// copy of deleted vars.</summary>
+    private bool ShowEvents =>
+        _s.DebugLabels
+        || Environment.GetEnvironmentVariable("TOUCHPAD_DEBUG") == "1";
     private const double GripZone = 20;   // visual legs
     private const double GripHit = 36;    // touch legs (bigger than visual)
     private const double TapMoveDip = 12;
@@ -163,12 +166,7 @@ public partial class TouchPadWindow : Window
             _fakeX = ccx; _fakeY = ccy;
             RenderZones();
             UpdateChrome();
-            if (!ShowEvents)
-            {
-                ZoneLabel.Visibility = Visibility.Hidden;
-                StatusLabel.Visibility = Visibility.Hidden;
-                ActualLabel.Visibility = Visibility.Hidden;
-            }
+            RefreshDebugLabels();
             Log.Write($"INIT fake=({_fakeX:0},{_fakeY:0}) dpi={_dpi}");
             Core.MouseTap.Start();   // system-wide tap: [ours]/[ext] in the log
             Core.Out.Below = BelowDeliver;   // our output over us goes below
@@ -320,10 +318,43 @@ public partial class TouchPadWindow : Window
         RenderZones();
     }
 
-    /// <summary>Draws the active preset tiles (visual linkage).</summary>
-    private void RenderTiles()
+    /// <summary>Applies AppSettings.DebugLabels to the bottom labels
+    /// (called at load and on every settings apply).</summary>
+    public void RefreshDebugLabels()
+    {
+        var v = ShowEvents ? Visibility.Visible : Visibility.Hidden;
+        ZoneLabel.Visibility = v;
+        StatusLabel.Visibility = v;
+        ActualLabel.Visibility = v;
+    }
+
+    /// <summary>Tile color for a role: settings Eff* wins; anything
+    /// unparsable (including "없음") falls back to ZonePalette.
+    /// Render only - no event behavior.</summary>
+    private string RoleColor(string role)
     {
         try
+        {
+            string v = role switch
+            {
+                "left" => _s.EffZoneLeft(_layoutName),
+                "right" => _s.EffZoneRight(_layoutName),
+                "wheel" => _s.EffZoneWheel(_layoutName),
+                "pad" => _s.EffZonePad(_layoutName),
+                _ => "",
+            };
+            if (string.IsNullOrWhiteSpace(v)) return Core.ZonePalette.For(role);
+            if (v.Equals("none", StringComparison.OrdinalIgnoreCase)
+                || v == "없음") return Core.ZonePalette.For(role);
+            var _ = (Color)ColorConverter.ConvertFromString(v);
+            return v;
+        }
+        catch { return Core.ZonePalette.For(role); }
+    }
+
+    /// <summary>Draws the active preset tiles (visual linkage).</summary>
+    private void RenderTiles()
+    {        try
         {
             if (_layout == null) return;
             var (w, h) = TileArea();
@@ -334,9 +365,10 @@ public partial class TouchPadWindow : Window
             {
                 double tx = t.X / 100 * w, ty = t.Y / 100 * h;
                 double tw = t.W / 100 * w, th = t.H / 100 * h;
-                // Role colors via ZonePalette (fullscreen standard
-                // everywhere; per-zone settings can bind later).
+                // Role colors: settings Eff* wins, ZonePalette is the
+                // fallback (render only - no event behavior here).
                 string role;
+                string color;
                 if (t.Kind == "lbtn"
                     || (t.Kind == "click" && t.ClickButton.Equals("left", StringComparison.OrdinalIgnoreCase))) role = "left";
                 else if (t.Kind == "rbtn"
@@ -347,7 +379,7 @@ public partial class TouchPadWindow : Window
                     || t.Kind.Length == 1) role = "key";
                 else if (t.Kind is "pad" or "padframe") role = "pad";
                 else role = "other";
-                string color = Core.ZonePalette.For(role);
+                color = RoleColor(role);
                 var r = new Rectangle
                 {
                     Width = Math.Max(0, tw),
@@ -535,15 +567,15 @@ public partial class TouchPadWindow : Window
                         || (t.Kind == "click" && t.ClickButton == "right")) hasR = true;
                     else if (t.Kind == "wheel") hasW = true;
                 }
-                if (!hasL) rect(0, 0, w * 0.5, h * 0.2, Core.ZonePalette.For("left"), "left");
-                if (!hasR) rect(w * 0.5, 0, w * 0.5, h * 0.2, Core.ZonePalette.For("right"), "right");
-                if (!hasW) rect(w * 0.8, h * 0.2, w * 0.2, h * 0.8, Core.ZonePalette.For("wheel"), "wheel");
+                if (!hasL) rect(0, 0, w * 0.5, h * 0.2, RoleColor("left"), "left");
+                if (!hasR) rect(w * 0.5, 0, w * 0.5, h * 0.2, RoleColor("right"), "right");
+                if (!hasW) rect(w * 0.8, h * 0.2, w * 0.2, h * 0.8, RoleColor("wheel"), "wheel");
             }
             else
             {
-                rect(0, 0, w * 0.5, h * 0.2, Core.ZonePalette.For("left"), "left");
-                rect(w * 0.5, 0, w * 0.5, h * 0.2, Core.ZonePalette.For("right"), "right");
-                rect(w * 0.8, h * 0.2, w * 0.2, h * 0.8, Core.ZonePalette.For("wheel"), "wheel");
+                rect(0, 0, w * 0.5, h * 0.2, RoleColor("left"), "left");
+                rect(w * 0.5, 0, w * 0.5, h * 0.2, RoleColor("right"), "right");
+                rect(w * 0.8, h * 0.2, w * 0.2, h * 0.8, RoleColor("wheel"), "wheel");
             }
             // Resize grips: faint filled triangles in the bottom corners
             // (hit-test matches shape, bigger legs).
@@ -912,8 +944,11 @@ public partial class TouchPadWindow : Window
                     else switch (_g)
                     {
                         case G.Pending:                       // tap
-                            if (ms <= _s.TapJudgeMs && _s.TapToClick && (f.Zone == "pad"
-                                || f.Zone == "left-click" || f.Zone == "right-click"))
+                            // "Pad tap = click" gates the pad zone only:
+                            // left/right zones always click.
+                            if (ms <= _s.TapJudgeMs && (f.Zone == "left-click"
+                                || f.Zone == "right-click"
+                                || (f.Zone == "pad" && _s.TapToClick)))
                             {
                                 string act = f.Zone == "right-click"
                                     ? "right_click" : ActiveMap().Tap;

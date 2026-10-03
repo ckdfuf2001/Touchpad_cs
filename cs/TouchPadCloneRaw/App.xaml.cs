@@ -153,6 +153,7 @@ public partial class App : WApplication
         _pad.RefreshOpacity();
         _pad.SetLayout(_presets[_settings.Layout]);
         _pad.RefreshChrome();
+        _pad.RefreshDebugLabels();
         _pad.ApplyCursorStyle();
         // Cursor/overlay only while the pad is actually shown (launch = off).
         if (_pad.IsVisible)

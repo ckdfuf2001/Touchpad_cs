@@ -38,17 +38,19 @@ public partial class SettingsWindow : Window
     }
 
     private static readonly string[] StripEdges = ["상", "하", "좌", "우"];
-    private static readonly string[] StripSides = ["좌", "우"];
+    private static readonly string[] StripSides = ["왼쪽", "중앙", "오른쪽"];
 
     private static string SideLabel(string? v) => v switch
     {
-        "right" => "우",
-        _ => "좌",
+        "right" => "오른쪽",
+        "center" => "중앙",
+        _ => "왼쪽",
     };
 
     private static string SideValue(string? l) => l switch
     {
-        "우" => "right",
+        "오른쪽" => "right",
+        "중앙" => "center",
         _ => "left",
     };
 

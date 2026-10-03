@@ -167,12 +167,18 @@ public partial class ModeStripWindow : Window
             // wedge the strip: drop the stroke, collapse the bar.
             ResetTouch();
         };
-        PadClose.Click += (_, _) => ClosePad?.Invoke();
+        // In-bar close button retired: close lives outside the bar now
+        // (PositionChrome). Kept in XAML collapsed for layout spacing.
+        PadClose.Visibility = Visibility.Collapsed;
     }
 
-    /// <summary>Show/hide the pad-close (✕) button: visible while pad is on.</summary>
-    public void SetPadActive(bool on) =>
-        PadClose.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+    /// <summary>Pad-close availability: the external close button shows
+    /// while the pad is on (and hides with the strip).</summary>
+    public void SetPadActive(bool on)
+    {
+        _padActive = on;
+        PositionChrome();
+    }
 
     public void SetLabel(string layout)
     {
@@ -292,42 +298,194 @@ public partial class ModeStripWindow : Window
     // ---------------- configurable rows -------------------------------
 
     /// <summary>Position/size from settings: edge top|bottom|left|right,
-    /// side left|right, px offset along the edge (-1 = centered).</summary>
+    /// align left|center|right, px offset (px &lt; 0 = centered).
+    /// Center align: +px toward right/bottom, -px toward left/top.
+    /// Always clamped on-screen. Grip/close buttons dock outside the
+    /// bar, overlapping it only when no outside space remains.</summary>
     public void ApplyStripLayout()
     {
         try
         {
-            Width = _s.StripWidth;
-            Height = _s.StripHeight;
             double pw = SystemParameters.PrimaryScreenWidth;
             double ph = SystemParameters.PrimaryScreenHeight;
+            Width = Math.Min(Math.Max(_s.StripWidth, 40), pw);
+            Height = Math.Min(Math.Max(_s.StripHeight, 12), ph);
             string edge = (_s.StripEdge ?? "top").ToLowerInvariant();
-            bool right = (_s.StripSide ?? "left").ToLowerInvariant() == "right";
-            double px = _s.StripPx;
-            switch (edge)
+            string align = (_s.StripSide ?? "left").ToLowerInvariant();
+            int px = _s.StripPx;
+            if (edge == "bottom" || edge == "top")
             {
-                case "bottom":
-                    Top = ph - Height;
-                    Left = px < 0 ? (pw - Width) / 2
-                        : right ? pw - Width - px : px;
-                    break;
-                case "left":
-                    Left = 0;
-                    Top = px < 0 ? (ph - Height) / 2
-                        : right ? ph - Height - px : px;
-                    break;
-                case "right":
-                    Left = pw - Width;
-                    Top = px < 0 ? (ph - Height) / 2
-                        : right ? ph - Height - px : px;
-                    break;
-                default:   // top
-                    Top = 0;
-                    Left = px < 0 ? (pw - Width) / 2
-                        : right ? pw - Width - px : px;
-                    break;
+                Top = edge == "bottom" ? ph - Height : 0;
+                if (px < 0) Left = (pw - Width) / 2;
+                else if (align == "right") Left = pw - Width - px;
+                else if (align == "center") Left = (pw - Width) / 2 + px;
+                else Left = px;
+                Left = Math.Max(0, Math.Min(pw - Width, Left));
+            }
+            else
+            {
+                Left = edge == "right" ? pw - Width : 0;
+                if (px < 0) Top = (ph - Height) / 2;
+                else if (align == "right") Top = ph - Height - px;
+                else if (align == "center") Top = (ph - Height) / 2 + px;
+                else Top = px;
+                Top = Math.Max(0, Math.Min(ph - Height, Top));
             }
             Visibility = _s.StripVisible ? Visibility.Visible : Visibility.Hidden;
+            PositionChrome();
+        }
+        catch { }
+    }
+
+    private Window? _gripWin, _closeWin;
+
+    /// <summary>External grip (drag to move) + close buttons. They dock
+    /// outside the bar; only when that space is off-screen do they
+    /// overlap the bar instead.</summary>
+    private void EnsureChrome()
+    {
+        try
+        {
+            if (_gripWin == null)
+            {
+                _gripWin = MakeChromeBtn("≡", "스트립 이동 (드래그)");
+                _gripWin.PreviewTouchDown += (_, e) => { StartGripDrag(e.GetTouchPoint(_gripWin).Position, e.TouchDevice.Id, true); e.Handled = true; };
+                _gripWin.PreviewTouchMove += (_, e) => { MoveGripDrag(e.GetTouchPoint(_gripWin).Position, e.TouchDevice.Id, true); e.Handled = true; };
+                _gripWin.PreviewTouchUp += (_, e) => { EndGripDrag(e.TouchDevice.Id, true); e.Handled = true; };
+                _gripWin.MouseLeftButtonDown += (_, e) => { StartGripDrag(e.GetPosition(_gripWin), 0, false); e.Handled = true; };
+                _gripWin.MouseMove += (_, e) => { MoveGripDrag(e.GetPosition(_gripWin), 0, false); e.Handled = true; };
+                _gripWin.MouseLeftButtonUp += (_, _) => EndGripDrag(0, false);
+            }
+            if (_closeWin == null)
+            {
+                _closeWin = MakeChromeBtn("X", "패드 닫기");
+                _closeWin.PreviewTouchDown += (_, e) => { ClosePad?.Invoke(); e.Handled = true; };
+                _closeWin.MouseLeftButtonUp += (_, _) => ClosePad?.Invoke();
+            }
+        }
+        catch { }
+    }
+
+    private static Window MakeChromeBtn(string text, string tip)
+    {
+        var b = new System.Windows.Controls.Button
+        {
+            Content = text, FontSize = 13, Foreground = System.Windows.Media.Brushes.WhiteSmoke,
+            Background = new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromArgb(0x59, 0x10, 0x13, 0x1A)),
+            BorderBrush = System.Windows.Media.Brushes.Transparent,
+            ToolTip = tip,
+        };
+        var w = new Window
+        {
+            WindowStyle = WindowStyle.None, AllowsTransparency = true,
+            Background = System.Windows.Media.Brushes.Transparent,
+            Topmost = true, ShowInTaskbar = false, ShowActivated = false,
+            ResizeMode = ResizeMode.NoResize, Width = 28, Height = 28,
+            Content = b, ToolTip = tip,
+        };
+        Core.NoActivate.Apply(w);
+        Core.TabletTweaks.DisableSystemGestures(w);
+        Core.TopmostKeeper.Attach(w);
+        w.Show();
+        return w;
+    }
+
+    private void PositionChrome()
+    {
+        try
+        {
+            EnsureChrome();
+            if (_gripWin == null || _closeWin == null) return;
+            double pw = SystemParameters.PrimaryScreenWidth;
+            bool show = Visibility == Visibility.Visible;
+            // Grip: outside-left, else overlapping inside-left.
+            double gx = Left - _gripWin.Width;
+            bool gripOut = gx >= 0;
+            if (!gripOut) gx = Left + 2;
+            double gy = Top + (Height - _gripWin.Height) / 2;
+            // Close: outside-right, else overlapping inside-right.
+            double cx = Left + Width;
+            bool closeOut = cx + _closeWin.Width <= pw;
+            if (!closeOut) cx = Left + Width - _closeWin.Width - 2;
+            double cy = Top + (Height - _closeWin.Height) / 2;
+            _gripWin.Left = gx; _gripWin.Top = gy;
+            _closeWin.Left = cx; _closeWin.Top = cy;
+            var gv = show ? Visibility.Visible : Visibility.Hidden;
+            _gripWin.Visibility = gv;
+            // Close keeps its pad-active rule, and hides with the strip.
+            _closeWin.Visibility = show && _padActive
+                ? Visibility.Visible : Visibility.Hidden;
+        }
+        catch { }
+    }
+
+    private bool _padActive;
+    private bool _gripTouch;
+    private int _gripTouchId = -1;
+    private bool _gripMouse;
+    private System.Windows.Point _gripGrab;
+
+    private System.Windows.Point GripScreen(System.Windows.Point p, Window w)
+    {
+        try { return w.PointToScreen(p); } catch { return p; }
+    }
+
+    private void StartGripDrag(System.Windows.Point p, int id, bool touch)
+    {
+        try
+        {
+            if (touch) { if (_gripTouch) return; _gripTouch = true; _gripTouchId = id; }
+            else { if (_gripMouse) return; _gripMouse = true; }
+            _gripGrab = GripScreen(p, _gripWin!);
+        }
+        catch { }
+    }
+
+    private void MoveGripDrag(System.Windows.Point p, int id, bool touch)
+    {
+        try
+        {
+            if (touch && (!_gripTouch || id != _gripTouchId)) return;
+            if (!touch && !_gripMouse) return;
+            var s = GripScreen(p, _gripWin!);
+            double dx = s.X - _gripGrab.X, dy = s.Y - _gripGrab.Y;
+            if (Math.Abs(dx) + Math.Abs(dy) < 1) return;
+            // Move along the current edge; the offset becomes explicit px.
+            string edge = (_s.StripEdge ?? "top").ToLowerInvariant();
+            string align = (_s.StripSide ?? "left").ToLowerInvariant();
+            double pw = SystemParameters.PrimaryScreenWidth;
+            double ph = SystemParameters.PrimaryScreenHeight;
+            if (edge == "top" || edge == "bottom")
+            {
+                double nl = Left + dx;
+                nl = Math.Max(0, Math.Min(pw - Width, nl));
+                if (align == "right") _s.StripPx = (int)Math.Round(pw - Width - nl);
+                else if (align == "center") _s.StripPx = (int)Math.Round(nl - (pw - Width) / 2);
+                else _s.StripPx = (int)Math.Round(nl);
+            }
+            else
+            {
+                double nt = Top + dy;
+                nt = Math.Max(0, Math.Min(ph - Height, nt));
+                if (align == "right") _s.StripPx = (int)Math.Round(ph - Height - nt);
+                else if (align == "center") _s.StripPx = (int)Math.Round(nt - (ph - Height) / 2);
+                else _s.StripPx = (int)Math.Round(nt);
+            }
+            _gripGrab = s;
+            ApplyStripLayout();
+        }
+        catch { }
+    }
+
+    private void EndGripDrag(int id, bool touch)
+    {
+        try
+        {
+            if (touch && (!_gripTouch || id != _gripTouchId)) return;
+            if (touch) { _gripTouch = false; _gripTouchId = -1; }
+            else _gripMouse = false;
+            _s.Save();
         }
         catch { }
     }

@@ -62,31 +62,32 @@
                     <TextBlock x:Name="OpacityVal" Grid.Column="1" FontWeight="Bold" VerticalAlignment="Center"/>
                 </Grid>
                 <Slider x:Name="OpacityS" Minimum="0.2" Maximum="1" TickFrequency="0.05"/>
-                <TextBlock Text="마우스" FontWeight="Bold" Foreground="#35C4FF" Margin="0,12,0,0"/>
+                <TextBlock Text="동작" FontWeight="Bold" Foreground="#35C4FF" Margin="0,12,0,0"/>
                 <Grid Margin="0,6,0,0">
                     <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                     <TextBlock Text="커서 속도배율 (0.2x ~ 5.0x)" VerticalAlignment="Center"/>
                     <TextBlock x:Name="SpeedVal" Grid.Column="1" FontWeight="Bold" VerticalAlignment="Center"/>
                 </Grid>
                 <Slider x:Name="Speed" Minimum="0.2" Maximum="5" TickFrequency="0.1"/>
-                <TextBlock Text="동작" FontWeight="Bold" Foreground="#35C4FF" Margin="0,12,0,0"/>
                 <TextBlock Text="동작 판정 시간 (ms): 떼면 탭, 계속 누르면 홀드" Margin="0,6,0,0"/>
                 <Slider x:Name="TapJudgeMs" Minimum="50" Maximum="1000" TickFrequency="50"/>
-                <CheckBox x:Name="TapClick" Content="탭 = 클릭 (끄면 탭 무시)" Margin="0,6,0,0"/>
-                <CheckBox x:Name="SwapBtn" Content="좌/우 버튼 반전" Margin="0,4,0,0"/>
-                <CheckBox x:Name="ScrollInv" Content="스크롤 상하반전" Margin="0,4,0,0"/>
-                <CheckBox x:Name="DebugLbl" Content="디버그 라벨 표시 (zone/status/actual)" Margin="0,4,0,0"/>
-                <TextBlock Text="더블/트리플 탭 판정 (ms)" Margin="0,8,0,0"/>
+                <TextBlock Text="더블/트리플 탭 판정 (ms): 탭 사이 간격" Margin="0,8,0,0"/>
                 <Slider x:Name="MultiMs" Minimum="200" Maximum="1000" TickFrequency="50"/>
+                <UniformGrid Columns="2" Margin="0,6,0,0">
+                    <CheckBox x:Name="TapClick" Content="Pad tap = click" Margin="0,2,4,2"/>
+                    <CheckBox x:Name="SwapBtn" Content="좌/우 버튼 반전" Margin="0,2,0,2"/>
+                    <CheckBox x:Name="ScrollInv" Content="스크롤 상하반전" Margin="0,2,4,2"/>
+                    <CheckBox x:Name="DebugLbl" Content="디버그 라벨 표시" Margin="0,2,0,2"/>
+                </UniformGrid>
                 <TextBlock Text="레이아웃 (원본 INI 섹션)" Margin="0,8,0,0"/>
                 <ComboBox x:Name="LayoutBox"/>
                 <TextBlock Text="스트립 설정" FontWeight="Bold" Foreground="#35C4FF" Margin="0,12,0,0"/>
                 <StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
                     <TextBlock Text="위치" VerticalAlignment="Center"/>
                     <ComboBox x:Name="StripEdgeBox" Width="64" Margin="4,0,0,0"/>
-                    <ComboBox x:Name="StripSideBox" Width="52" Margin="4,0,0,0"/>
+                    <ComboBox x:Name="StripSideBox" Width="64" Margin="4,0,0,0"/>
                     <TextBox x:Name="StripPxBox" Width="60" Margin="4,0,0,0" VerticalContentAlignment="Center"/>
-                    <TextBlock Text="px (음수 중앙)" FontSize="11" Foreground="Gray" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                    <TextBlock Text="px (-1 중앙, 중앙: +오른쪽/-왼쪽)" FontSize="11" Foreground="Gray" VerticalAlignment="Center" Margin="4,0,0,0"/>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
                     <TextBlock Text="크기" VerticalAlignment="Center"/>
@@ -245,7 +246,7 @@
                 <ComboBox x:Name="PadScroll" Margin="0,2,0,2"/>
                 <TextBlock Text="좌/우 버튼 반전"/>
                 <ComboBox x:Name="PadSwap" Margin="0,2,0,2"/>
-                <TextBlock Text="탭 = 클릭"/>
+                <TextBlock Text="Pad tap = click"/>
                 <ComboBox x:Name="PadTap" Margin="0,2,0,6"/>
                 <Button x:Name="PadPreview" Content="미리보기 (해당 패드 적용)" Width="170" HorizontalAlignment="Left" Margin="0,4,0,0"/>
             </StackPanel>
