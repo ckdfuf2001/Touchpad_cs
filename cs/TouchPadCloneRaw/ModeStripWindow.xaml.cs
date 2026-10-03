@@ -419,7 +419,7 @@ public partial class ModeStripWindow : Window
         {
             if (_gripWin == null)
             {
-                _gripWin = MakeChromeBtn("≡", "스트립 이동 (드래그)");
+                _gripWin = MakeChromeBtn(TriPoints(close: false), "스트립 이동 (드래그)");
                 _gripWin.PreviewTouchDown += (_, e) =>
                 {
                     try { _gripWin.CaptureTouch(e.TouchDevice); } catch { }
@@ -457,23 +457,45 @@ public partial class ModeStripWindow : Window
             }
             if (_closeWin == null)
             {
-                _closeWin = MakeChromeBtn("X", "패드 닫기");
+                _closeWin = MakeChromeBtn(TriPoints(close: true), "패드 닫기");
                 _closeWin.PreviewTouchDown += (_, e) => { ClosePad?.Invoke(); e.Handled = true; };
-                _closeWin.MouseLeftButtonUp += (_, _) => ClosePad?.Invoke();
+                _closeWin.PreviewMouseLeftButtonUp += (_, e) => { ClosePad?.Invoke(); e.Handled = true; };
             }
         }
         catch { }
     }
 
-    private static Window MakeChromeBtn(string text, string tip)
+    /// <summary>Corner-grip triangle points (28x28 box), pad-resizer
+    /// style: grip leans into the bar from the left, close from the
+    /// right, diagonal edge like the pad resize triangles.</summary>
+    private static System.Windows.Media.PointCollection TriPoints(bool close)
     {
-        var b = new System.Windows.Controls.Button
+        var pts = new System.Windows.Media.PointCollection();
+        if (close)
         {
-            Content = text, FontSize = 13, Foreground = System.Windows.Media.Brushes.WhiteSmoke,
-            Background = new System.Windows.Media.SolidColorBrush(
-                System.Windows.Media.Color.FromArgb(0x59, 0x10, 0x13, 0x1A)),
-            BorderBrush = System.Windows.Media.Brushes.Transparent,
-            ToolTip = tip,
+            pts.Add(new Point(4, 4));
+            pts.Add(new Point(24, 4));
+            pts.Add(new Point(4, 24));
+        }
+        else
+        {
+            pts.Add(new Point(24, 4));
+            pts.Add(new Point(24, 24));
+            pts.Add(new Point(4, 24));
+        }
+        return pts;
+    }
+
+    private static Window MakeChromeBtn(
+        System.Windows.Media.PointCollection tri, string tip)
+    {
+        var poly = new System.Windows.Shapes.Polygon
+        {
+            Points = tri,
+            Fill = new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromArgb(0xAA, 0x9A, 0xA6, 0xBD)),
+            Stroke = System.Windows.Media.Brushes.Gray,
+            StrokeThickness = 1,
         };
         var w = new Window
         {
@@ -481,7 +503,7 @@ public partial class ModeStripWindow : Window
             Background = System.Windows.Media.Brushes.Transparent,
             Topmost = true, ShowInTaskbar = false, ShowActivated = false,
             ResizeMode = ResizeMode.NoResize, Width = 28, Height = 28,
-            Content = b, ToolTip = tip,
+            Content = poly, ToolTip = tip, Cursor = System.Windows.Input.Cursors.Hand,
         };
         Core.NoActivate.Apply(w);
         Core.TabletTweaks.DisableSystemGestures(w);
