@@ -153,6 +153,24 @@ public partial class SettingsWindow : Window
         DebugLbl.IsChecked = s.DebugLabels;
         DebugLbl.Click += (_, _) => ApplySave();
         // Strip placement + size (reference General).
+        RefreshMonitorList();
+        StripMonBox.SelectionChanged += (_, _) =>
+        {
+            if (StripMonBox.SelectedItem is ComboBoxItem it)
+            {
+                string dev = it.Tag as string ?? "";
+                if (dev == PrimaryDevice()) dev = "";
+                _s.StripMonitor = dev;
+                _s.Save();
+                _onApply();
+            }
+        };
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnSysDisplayChanged;
+        Closed += (_, _) =>
+        {
+            try { Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnSysDisplayChanged; }
+            catch { }
+        };
         StripEdgeBox.ItemsSource = StripEdges;
         StripEdgeBox.SelectedItem = EdgeLabel(s.StripEdge);
         StripEdgeBox.SelectionChanged += (_, _) =>
@@ -278,6 +296,69 @@ public partial class SettingsWindow : Window
         foreach (var r in _s.StripLayout) { while (r.Cells.Count < 4) r.Cells.Add(""); }
         _s.Save();
         _onApply();
+    }
+
+    /// <summary>Strip monitor dropdown: rebuilt live so plugged /
+    /// unplugged monitors appear and vanish. A vanished selection
+    /// falls back to primary (model resolves live too).</summary>
+    private void RefreshMonitorList()
+    {
+        try
+        {
+            var mons = Core.MonitorList.All();
+            StripMonBox.Items.Clear();
+            foreach (var m in mons)
+            {
+                var item = new ComboBoxItem
+                {
+                    Content = m.label + $"  ({m.device})",
+                    Tag = m.device,
+                };
+                StripMonBox.Items.Add(item);
+            }
+            ComboBoxItem? sel = null;
+            foreach (ComboBoxItem it in StripMonBox.Items)
+                if ((it.Tag as string) == _s.StripMonitor) sel = it;
+            if (sel == null)
+                foreach (ComboBoxItem it in StripMonBox.Items)
+                    if (string.IsNullOrEmpty(it.Tag as string)) sel = it;
+            if (sel == null && StripMonBox.Items.Count > 0)
+                sel = StripMonBox.Items[0] as ComboBoxItem;
+            StripMonBox.SelectedItem = sel;
+        }
+        catch { }
+    }
+
+    private void OnSysDisplayChanged(object? sender, EventArgs e) =>
+        Dispatcher.InvokeAsync(() => OnDisplayChanged());
+
+    private void OnDisplayChanged()
+    {
+        try
+        {
+            // A vanished monitor: re-resolve now (attach to next).
+            var sc = Core.MonitorList.Resolve(_s.StripMonitor);
+            string prim = PrimaryDevice();
+            if (sc != null && sc.DeviceName != _s.StripMonitor)
+            {
+                _s.StripMonitor = sc.DeviceName == prim ? "" : sc.DeviceName;
+                _s.Save();
+            }
+            RefreshMonitorList();
+            _onApply();
+        }
+        catch { }
+    }
+
+    private static string PrimaryDevice()
+    {
+        try
+        {
+            foreach (var sc in System.Windows.Forms.Screen.AllScreens)
+                if (sc.Primary) return sc.DeviceName;
+        }
+        catch { }
+        return "";
     }
 
     private void RememberCustom(string hex)

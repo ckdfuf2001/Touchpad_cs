@@ -118,7 +118,23 @@ public partial class App : WApplication
             e.Handled = true; // utility stays alive; fault is logged
         };
         Exit += (_, _) => _pad?.EmergencyRestore();
+        // Monitors changed (plug/unplug): re-resolve the strip monitor
+        // (vanished -> next) and re-clamp everything.
+        _onDisplayChanged = (_, _) =>
+            Dispatcher.InvokeAsync(() => { try { Apply(); } catch { } });
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += _onDisplayChanged;
+        Exit += (_, _) =>
+        {
+            try
+            {
+                if (_onDisplayChanged != null)
+                    Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= _onDisplayChanged;
+            }
+            catch { }
+        };
     }
+
+    private EventHandler? _onDisplayChanged;
 
     private async void RunSelfTestAsync()
     {
@@ -380,7 +396,7 @@ public partial class App : WApplication
             if (_strip != null)
             {
                 string edge = (_settings.StripEdge ?? "top").ToLowerInvariant();
-                var home = HomeRect();
+                var home = _strip.MonitorRect();
                 double ox = home.l, oy = home.t, pw = home.w, ph = home.h;
                 if (edge == "left")
                 {

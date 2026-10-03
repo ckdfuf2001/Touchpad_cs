@@ -332,6 +332,31 @@ public partial class ModeStripWindow : Window
         }
     }
 
+    /// <summary>Strip target monitor in DIPs: the configured monitor,
+    /// or primary/first when it vanished. Used by the picker dock too.</summary>
+    public (double l, double t, double w, double h) MonitorRect()
+    {
+        try
+        {
+            double d = 1.0;
+            try
+            {
+                var s = System.Windows.Media.VisualTreeHelper.GetDpi(this);
+                if (s.DpiScaleX >= 0.5 && s.DpiScaleX <= 4) d = s.DpiScaleX;
+            }
+            catch { }
+            var sc = Core.MonitorList.Resolve(_s.StripMonitor);
+            if (sc != null)
+            {
+                var b = sc.Bounds;
+                if (b.Width >= 100 && b.Height >= 100)
+                    return (b.Left / d, b.Top / d, b.Width / d, b.Height / d);
+            }
+        }
+        catch { }
+        return HomeRect();
+    }
+
     /// <summary>Position/size from settings: edge top|bottom|left|right,
     /// align left|center|right, px offset (px &lt; 0 = centered).
     /// Center align: +px toward right/bottom, -px toward left/top.
@@ -341,7 +366,7 @@ public partial class ModeStripWindow : Window
     {
         try
         {
-            var home = HomeRect();
+            var home = MonitorRect();
             double pw = home.w, ph = home.h, ox = home.l, oy = home.t;
             string edge = (_s.StripEdge ?? "top").ToLowerInvariant();
             // Vertical edges run the bar tall: width/height swap.
@@ -472,7 +497,7 @@ public partial class ModeStripWindow : Window
         {
             EnsureChrome();
             if (_gripWin == null || _closeWin == null) return;
-            var home = HomeRect();
+            var home = MonitorRect();
             double pw = home.w, ph = home.h, ox = home.l, oy = home.t;
             bool show = Visibility == Visibility.Visible;
             bool vertical = ((_s.StripEdge ?? "top").ToLowerInvariant() == "left")
@@ -555,7 +580,7 @@ public partial class ModeStripWindow : Window
             // Move along the current edge; the offset becomes explicit px.
             string edge = (_s.StripEdge ?? "top").ToLowerInvariant();
             string align = (_s.StripSide ?? "left").ToLowerInvariant();
-            var home = HomeRect();
+            var home = MonitorRect();
             double pw = home.w, ph = home.h, ox = home.l, oy = home.t;
             if (edge == "top" || edge == "bottom")
             {

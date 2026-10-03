@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace TouchPadCloneV2.Core;
 
@@ -38,5 +40,46 @@ public static class HomeMonitor
             return (b.Left / dpi, b.Top / dpi, b.Width / dpi, b.Height / dpi);
         }
         catch { return (vx, vy, vw, vh); }
+    }
+}
+
+/// <summary>Monitor picker backing (strip settings). DeviceName-keyed;
+/// a vanished monitor resolves to primary, then to the first screen.</summary>
+public static class MonitorList
+{
+    public static List<(string device, string label, bool primary)> All()
+    {
+        var list = new List<(string, string, bool)>();
+        try
+        {
+            var screens = System.Windows.Forms.Screen.AllScreens;
+            int n = 0;
+            foreach (var sc in screens.OrderByDescending(s => s.Primary))
+            {
+                n++;
+                string tag = sc.Primary ? "주" : n.ToString();
+                list.Add((sc.DeviceName,
+                    $"{tag} {sc.Bounds.Width}x{sc.Bounds.Height}", sc.Primary));
+            }
+        }
+        catch { }
+        if (list.Count == 0) list.Add(("", "주", true));
+        return list;
+    }
+
+    public static System.Windows.Forms.Screen? Resolve(string? device)
+    {
+        try
+        {
+            var screens = System.Windows.Forms.Screen.AllScreens;
+            if (!string.IsNullOrWhiteSpace(device))
+                foreach (var sc in screens)
+                    if (sc.DeviceName == device) return sc;
+            foreach (var sc in screens)
+                if (sc.Primary) return sc;
+            if (screens.Length > 0) return screens[0];
+        }
+        catch { }
+        return null;
     }
 }

@@ -265,6 +265,10 @@ public sealed class AppSettings
     public string StripSide { get; set; } = "left";
     public int StripPx { get; set; } = -1;
 
+    /// <summary>Strip monitor (WinForms DeviceName, e.g. \\.\DISPLAY1).
+    /// Empty = primary. A vanished monitor falls back to primary live.</summary>
+    public string StripMonitor { get; set; } = "";
+
     /// <summary>Retired UI (was the reference's event-gap slider): the single
     /// TapJudgeMs is the judge time now. Kept so files still load.</summary>
     public int EventGapMs { get; set; } = 500;
