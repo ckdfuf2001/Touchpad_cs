@@ -105,6 +105,10 @@ public sealed class AppSettings
     public string PresetFile { get; set; } = "";
     public bool TapToClick { get; set; } = true;
     public bool SwapButtons { get; set; } = false;
+    /// <summary>Bottom zone/status/actual labels. Default off: the launch
+    /// environment is not reliable (Explorer keeps a stale copy of deleted
+    /// env vars), so this file-backed flag owns the decision.</summary>
+    public bool DebugLabels { get; set; } = false;
     public bool FakeCursor { get; set; } = true;
     public string CursorStyle { get; set; } = "cyan";
     public bool ShowFakeArrow { get; set; } = true;

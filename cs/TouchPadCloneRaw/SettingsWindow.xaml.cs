@@ -89,6 +89,8 @@ public partial class SettingsWindow : Window
         FakeCur.IsChecked = s.FakeCursor;
         ShowArrow.IsChecked = s.ShowFakeArrow;
         SwapBtn.IsChecked = s.SwapButtons;
+        DebugLbl.IsChecked = s.DebugLabels;
+        DebugLbl.Click += (_, _) => { _s.DebugLabels = DebugLbl.IsChecked == true; ApplySave(); };
         Speed.ValueChanged += (_, _) => Live();
         OpacityS.ValueChanged += (_, _) => Live();
         LongMs.ValueChanged += (_, _) => Live();
@@ -170,6 +172,7 @@ public partial class SettingsWindow : Window
         _s.FakeCursor = FakeCur.IsChecked == true;
         _s.ShowFakeArrow = ShowArrow.IsChecked == true;
         _s.SwapButtons = SwapBtn.IsChecked == true;
+        _s.DebugLabels = DebugLbl.IsChecked == true;
         SaveStripTab();
         foreach (var (key, _, _, set) in Slots)
         {

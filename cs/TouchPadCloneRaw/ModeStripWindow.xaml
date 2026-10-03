@@ -3,18 +3,20 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="TouchPadClone ModeStrip" WindowStyle="None" AllowsTransparency="True"
         Background="#5910131A" Topmost="True" ShowInTaskbar="False"
-        ResizeMode="NoResize" Width="380" Height="86">
+        ResizeMode="NoResize" Width="380" Height="26">
     <Border x:Name="Surface" Background="#5910131A">
         <StackPanel Orientation="Vertical">
             <Grid Height="26">
                 <TextBlock x:Name="Label" Text="◀  mode  ▶" Foreground="#9AA6BD"
-                           FontSize="11" HorizontalAlignment="Center"
-                           VerticalAlignment="Center" IsHitTestVisible="False"/>
+                            FontSize="11" HorizontalAlignment="Center"
+                            VerticalAlignment="Center" IsHitTestVisible="False"/>
                 <Button x:Name="PadClose" Content="✕" Width="34" Height="22"
-                        HorizontalAlignment="Right" VerticalAlignment="Center"
-                        Margin="0,0,2,0" FontSize="12" Visibility="Collapsed"/>
+                         HorizontalAlignment="Right" VerticalAlignment="Center"
+                         Margin="0,0,2,0" FontSize="12" Visibility="Collapsed"/>
             </Grid>
-            <StackPanel x:Name="Rows" Orientation="Vertical" />
+            <!-- Rows live in the picker popup now; the bar stays one line.
+                 Kept (collapsed) so row config code still compiles. -->
+            <StackPanel x:Name="Rows" Orientation="Vertical" Visibility="Collapsed" />
         </StackPanel>
     </Border>
 </Window>

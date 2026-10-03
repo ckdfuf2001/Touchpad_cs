@@ -148,6 +148,9 @@ public partial class ModeStripWindow : Window
         Left = (SystemParameters.PrimaryScreenWidth - Width) / 2;
         Top = 0;
         ApplyStripLayout();
+        LocationChanged += (_, _) => PublishRect();
+        SizeChanged += (_, _) => PublishRect();
+        Loaded += (_, _) => PublishRect();
         RefreshRows();
         Surface.PreviewTouchDown += OnTouchDown;
         Surface.PreviewTouchMove += OnTouchMove;
@@ -291,13 +294,14 @@ public partial class ModeStripWindow : Window
 
     // ---------------- configurable rows -------------------------------
 
-    /// <summary>Position/size from settings.</summary>
+    /// <summary>Position/size from settings. The bar itself stays one
+    /// line (26px); StripHeight sizes the picker menu instead.</summary>
     public void ApplyStripLayout()
     {
         try
         {
             Width = _s.StripWidth;
-            Height = _s.StripHeight;
+            Height = 26;
             double pw = SystemParameters.PrimaryScreenWidth;
             double ph = SystemParameters.PrimaryScreenHeight;
             switch (_s.StripPosition)
@@ -312,6 +316,26 @@ public partial class ModeStripWindow : Window
                     Left = (pw - Width) / 2; Top = 0; break;
             }
             Visibility = _s.StripVisible ? Visibility.Visible : Visibility.Hidden;
+            PublishRect();
+        }
+        catch { }
+    }
+
+    /// <summary>Publishes our bar rect (physical px) to the mouse tap hook:
+    /// touch-promoted mouse over the bar is swallowed (the bar owns its
+    /// touches), everywhere else it passes. Empty while hidden.</summary>
+    private void PublishRect()
+    {
+        try
+        {
+            if (!IsVisible || Visibility != Visibility.Visible)
+            { Core.MouseTap.SetStripRect(0, 0, 0, 0); return; }
+            var src = PresentationSource.FromVisual(this);
+            double d = src?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
+            if (d < 0.5 || d > 4) d = 1.0;
+            Core.MouseTap.SetStripRect(
+                (int)(Left * d), (int)(Top * d),
+                (int)((Left + Width) * d), (int)((Top + Height) * d));
         }
         catch { }
     }

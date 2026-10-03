@@ -22,6 +22,7 @@ Title="TouchPad Clone - 설정" Width="560" Height="620"
                 <CheckBox x:Name="FakeCur" Content="터치 중 시스템 커서 숨김 (Fake cursor)" Margin="0,4,0,0"/>
                 <CheckBox x:Name="ShowArrow" Content="가상 화살표 표시 (끄면 실커서만)" Margin="0,4,0,0"/>
                 <CheckBox x:Name="SwapBtn" Content="좌/우 버튼 반전" Margin="0,4,0,0"/>
+                <CheckBox x:Name="DebugLbl" Content="디버그 라벨 표시 (zone/status/actual)" Margin="0,4,0,0"/>
                 <CheckBox x:Name="ScrollInv" Content="스크롤 상하반전" Margin="0,4,0,0"/>
                 <TextBlock Text="물리 마우스" Margin="0,8,0,0"/>
                 <ComboBox x:Name="PhysBox"/>

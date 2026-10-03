@@ -22,9 +22,12 @@ public partial class TouchPadWindow : Window
     private const double ChromeH = 30;
 
     /// <summary>Bottom event labels (zone/status/actual) only in debug.
-    /// Normal mode hides them (cleaner pad, no per-event strings).</summary>
-    private static readonly bool ShowEvents =
-        Environment.GetEnvironmentVariable("TOUCHPAD_DEBUG") == "1";
+    /// Normal mode hides them (cleaner pad, no per-event strings).
+    /// File-backed (AppSettings.DebugLabels); TOUCHPAD_DEBUG=1 also forces on.
+    /// Env alone is unreliable: Explorer inherits a stale copy of deleted vars.</summary>
+    private bool ShowEvents =>
+        _s.DebugLabels
+        || Environment.GetEnvironmentVariable("TOUCHPAD_DEBUG") == "1";
     private const double GripZone = 20;   // visual legs
     private const double GripHit = 36;    // touch legs (bigger than visual)
     private const double TapMoveDip = 12;
@@ -163,12 +166,7 @@ public partial class TouchPadWindow : Window
             _fakeX = ccx; _fakeY = ccy;
             RenderZones();
             UpdateChrome();
-            if (!ShowEvents)
-            {
-                ZoneLabel.Visibility = Visibility.Hidden;
-                StatusLabel.Visibility = Visibility.Hidden;
-                ActualLabel.Visibility = Visibility.Hidden;
-            }
+            RefreshDebugLabels();
             Log.Write($"INIT fake=({_fakeX:0},{_fakeY:0}) dpi={_dpi}");
             Core.MouseTap.Start();   // system-wide tap: [ours]/[ext] in the log
             Core.Out.Below = BelowDeliver;   // our output over us goes below
@@ -207,6 +205,14 @@ public partial class TouchPadWindow : Window
                 if (_fingers.Count == 0
                     && Environment.TickCount64 >= _pollBlockUntil)
                 {
+                    // Publish our rect for the tap hook even when the cursor
+                    // is unknown: hidden pad = empty rect (no swallow).
+                    double pl = Left * _dpi, pt = Top * _dpi;
+                    double pr = pl + Width * _dpi, pb = pt + Height * _dpi;
+                    if (!IsVisible || Visibility != Visibility.Visible)
+                        Core.MouseTap.SetPadRect(0, 0, 0, 0);
+                    else
+                        Core.MouseTap.SetPadRect((int)pl, (int)pt, (int)pr, (int)pb);
                     var (lx, ly) = Out.Cursor();
                     // Never adopt pad coords as the next touch start:
                     // that would make the next press land on ourselves.
@@ -217,9 +223,9 @@ public partial class TouchPadWindow : Window
                 {
                     // Pad-intrusion watch: log the moment the cursor gets
                     // onto our window, plus whatever we did last.
+                    // (Rect already published above, visibility-aware.)
                     double pl = Left * _dpi, pt = Top * _dpi;
                     double pr = pl + Width * _dpi, pb = pt + Height * _dpi;
-                    Core.MouseTap.SetPadRect((int)pl, (int)pt, (int)pr, (int)pb);
                     bool inside = _lastFreeX >= pl && _lastFreeX < pr
                         && _lastFreeY >= pt && _lastFreeY < pb;
                     if (inside && !_cursorInPad)
@@ -294,8 +300,11 @@ public partial class TouchPadWindow : Window
         try
         {
             if (_chromeTouch || _chromeMouse || _resizeMode != null) return;
-            ChromeLabel.Text =
-                $"rawpad {_s.Speed:0.0}x @({Left:0},{Top:0}) {ActualWidth:0}x{ActualHeight:0} dpi={_dpi:0.00}";
+            // Normal mode: title shows only the mode. Speed/pos/size/dpi
+            // is debug detail (this is the line that kept "debug" visible).
+            ChromeLabel.Text = ShowEvents
+                ? $"rawpad {_s.Speed:0.0}x @({Left:0},{Top:0}) {ActualWidth:0}x{ActualHeight:0} dpi={_dpi:0.00}"
+                : $"rawpad · {_layoutName}";
         }
         catch { }
     }
@@ -318,6 +327,16 @@ public partial class TouchPadWindow : Window
         _layout = layout;
         _layoutName = layout?.Name ?? "floatpad";
         RenderZones();
+    }
+
+    /// <summary>Applies AppSettings.DebugLabels to the bottom labels
+    /// (called at load and on every settings apply).</summary>
+    public void RefreshDebugLabels()
+    {
+        var v = ShowEvents ? Visibility.Visible : Visibility.Hidden;
+        ZoneLabel.Visibility = v;
+        StatusLabel.Visibility = v;
+        ActualLabel.Visibility = v;
     }
 
     /// <summary>Draws the active preset tiles (visual linkage).</summary>
@@ -374,6 +393,9 @@ public partial class TouchPadWindow : Window
                         _ => "",
                     };
                 if (label.Length == 0) continue;
+                // Tile text (L/R/Wheel/..) is a wanted guide, not debug:
+                // always shown. Only the bottom event labels + title
+                // detail follow the debug flag.
                 var tb = new TextBlock
                 {
                     Text = label,

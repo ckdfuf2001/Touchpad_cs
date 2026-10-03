@@ -153,6 +153,7 @@ public partial class App : WApplication
         _pad.RefreshOpacity();
         _pad.SetLayout(_presets[_settings.Layout]);
         _pad.RefreshChrome();
+        _pad.RefreshDebugLabels();
         _pad.ApplyCursorStyle();
         // Cursor/overlay only while the pad is actually shown (launch = off).
         if (_pad.IsVisible)
@@ -330,7 +331,7 @@ public partial class App : WApplication
     {
         if (_picker != null) { _picker.Activate(); return; }
         _picker = new ModePickerWindow(
-            Core.PresetParser.OrderedNames(_presets),
+            _settings,
             _settings.Layout,
             name =>
             {
@@ -338,6 +339,16 @@ public partial class App : WApplication
                 _settings.Save();
                 Apply();
             },
+            name => ToggleAux(name),
+            action =>
+            {
+                // Custom program/cmd actions run; the rest are strip gestures.
+                if (_settings.Actions != null
+                    && _settings.Actions.TryGetValue(action, out var def))
+                    Core.ActionRunner.Run(def);
+                else HandleStripGesture(action);
+            },
+            name => _auxOn.Contains(name),
             () => OpenSettings());
         _picker.Closed += (_, _) => _picker = null;
         // Tap outside (any other window activates) collapses the panel.

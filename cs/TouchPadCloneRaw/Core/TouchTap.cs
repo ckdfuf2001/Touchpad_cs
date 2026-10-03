@@ -7,7 +7,10 @@ namespace TouchPadCloneV2.Core;
 /// System-wide low-level mouse tap (WH_MOUSE_LL): logs every mouse event
 /// on the desktop - ours (tagged) and external (physical mouse, other
 /// apps, OS) alike. Buttons/wheel always; moves throttled to a heartbeat.
-/// Read-only: never swallows or modifies.
+/// Swallows touch-promoted mouse ONLY over our touch-owned surfaces
+/// (pad + strip): the engine owns those touches and the promotion would
+/// double-drive. Everywhere else the finger's own promotion passes, or
+/// direct finger taps do nothing (settings ✕ never closes by touch).
 /// </summary>
 public static class MouseTap
 {
@@ -58,11 +61,21 @@ public static class MouseTap
     /// Used to keep pad coords out of the next-touch anchor.</summary>
     public static int PadL, PadT, PadR, PadB;
 
+    /// <summary>Our strip rect, physical px (set by the strip bar).
+    /// Empty (all zero) when the window is hidden.</summary>
+    public static int StripL, StripT, StripR, StripB;
+
     public static void SetPadRect(int l, int t, int r, int b)
     { PadL = l; PadT = t; PadR = r; PadB = b; }
 
     public static bool InPad(int x, int y) =>
         x >= PadL && x < PadR && y >= PadT && y < PadB;
+
+    public static void SetStripRect(int l, int t, int r, int b)
+    { StripL = l; StripT = t; StripR = r; StripB = b; }
+
+    public static bool InStrip(int x, int y) =>
+        x >= StripL && x < StripR && y >= StripT && y < StripB;
 
     public static void Start()
     {
@@ -93,15 +106,20 @@ public static class MouseTap
                 bool promoted = tagged && (extra & 0x80UL) != 0;
                 string tag = !tagged ? "ext" : (promoted ? "prom" : "ours");
                 long now = Environment.TickCount64;
-                // Swallow touch-promoted mouse everywhere: the panel maps
-                // 1:1 to the screen, so touches outside our window drive
-                // the real desktop (phantom clicks, cursor yank, double-
-                // click tracking reset). Our own tag never sets 0x80, the
-                // physical mouse never carries this tag, so real input
-                // always passes through. Touch messages themselves are
-                // unaffected (this hook only sees mouse).
+                // Swallow touch-promoted mouse only over our touch-owned
+                // surfaces (pad + strip): the engine owns those touches
+                // and the promotion would double-drive (phantom clicks,
+                // cursor yank, double-click tracking reset). Our own tag
+                // never sets 0x80, the physical mouse never carries this
+                // tag, so real input always passes through. Everywhere
+                // else the finger's own promotion must pass: direct finger
+                // taps (settings ✕, desktop icons) need it to do anything.
+                // Touch messages themselves are unaffected (this hook
+                // only sees mouse).
                 if (promoted)
                 {
+                    if (!InPad(ms.pt.X, ms.pt.Y) && !InStrip(ms.pt.X, ms.pt.Y))
+                        return CallNextHookEx(_hook, nCode, wParam, lParam);
                     if (what == WM_MOUSEMOVE)
                     {
                         if (now - _lastSwallowLog > 1000)
