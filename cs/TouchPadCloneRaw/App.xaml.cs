@@ -174,6 +174,32 @@ public partial class App : WApplication
         Core.TopmostKeeper.Raise(_strip);
     }
 
+    /// <summary>Pad's home monitor in DIPs (dual monitors: area modes
+    /// split this screen, never the whole virtual desktop).</summary>
+    private (double l, double t, double w, double h) HomeRect()
+    {
+        try
+        {
+            double d = 1.0;
+            try
+            {
+                var src = System.Windows.Media.VisualTreeHelper.GetDpi(_pad);
+                if (src.DpiScaleX >= 0.5 && src.DpiScaleX <= 4) d = src.DpiScaleX;
+            }
+            catch { }
+            var h = _pad == null ? IntPtr.Zero
+                : new System.Windows.Interop.WindowInteropHelper(_pad).Handle;
+            return Core.HomeMonitor.RectFor(h, d,
+                SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
+                SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight);
+        }
+        catch
+        {
+            return (SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
+                SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight);
+        }
+    }
+
     private void ApplyPad(bool fresh)
     {
         if (_pad == null) return;
@@ -183,17 +209,18 @@ public partial class App : WApplication
             StringComparison.OrdinalIgnoreCase)) mode = "full";
         if (mode != "default" && (fresh || mode != _placedMode || !_pad.IsVisible))
         {
+            var home = HomeRect();
             var (l, t, w, h) = Core.PadPlacer.RectFor(mode,
-                SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
-                SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight);
+                home.l, home.t, home.w, home.h);
             _pad.Left = l; _pad.Top = t; _pad.Width = w; _pad.Height = h;
             _placedMode = mode;
         }
         else if (mode == "default" && fresh)
         {
+            var home = HomeRect();
             _pad.SyncWindowSize();
-            _pad.Left = SystemParameters.PrimaryScreenWidth - _pad.Width - 40;
-            _pad.Top = SystemParameters.PrimaryScreenHeight - _pad.Height - 120;
+            _pad.Left = home.l + home.w - _pad.Width - 40;
+            _pad.Top = home.t + home.h - _pad.Height - 120;
             _placedMode = mode;
         }
         bool show = cfg.Visible;
@@ -352,21 +379,21 @@ public partial class App : WApplication
             if (_strip != null)
             {
                 string edge = (_settings.StripEdge ?? "top").ToLowerInvariant();
-                double pw = SystemParameters.PrimaryScreenWidth;
-                double ph = SystemParameters.PrimaryScreenHeight;
+                var home = HomeRect();
+                double ox = home.l, oy = home.t, pw = home.w, ph = home.h;
                 if (edge == "left")
                 {
-                    _picker.Left = Math.Min(_strip.Left + _strip.Width + 4, pw - _picker.Width);
-                    _picker.Top = Math.Max(0, Math.Min(ph - 200, _strip.Top));
+                    _picker.Left = Math.Min(_strip.Left + _strip.Width + 4, ox + pw - _picker.Width);
+                    _picker.Top = Math.Max(oy, Math.Min(oy + ph - 200, _strip.Top));
                 }
                 else if (edge == "right")
                 {
-                    _picker.Left = Math.Max(0, _strip.Left - _picker.Width - 4);
-                    _picker.Top = Math.Max(0, Math.Min(ph - 200, _strip.Top));
+                    _picker.Left = Math.Max(ox, _strip.Left - _picker.Width - 4);
+                    _picker.Top = Math.Max(oy, Math.Min(oy + ph - 200, _strip.Top));
                 }
                 else if (edge == "bottom")
                 {
-                    _picker.Top = Math.Max(0, _strip.Top - 400);
+                    _picker.Top = Math.Max(oy, _strip.Top - 400);
                 }
             }
         }

@@ -307,6 +307,31 @@ public partial class ModeStripWindow : Window
 
     // ---------------- configurable rows -------------------------------
 
+    /// <summary>Our home monitor in DIPs (dual monitors: the strip
+    /// lives and clamps on its own screen, like the pad modes).</summary>
+    private (double l, double t, double w, double h) HomeRect()
+    {
+        try
+        {
+            double d = 1.0;
+            try
+            {
+                var s = System.Windows.Media.VisualTreeHelper.GetDpi(this);
+                if (s.DpiScaleX >= 0.5 && s.DpiScaleX <= 4) d = s.DpiScaleX;
+            }
+            catch { }
+            var h = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+            return Core.HomeMonitor.RectFor(h, d,
+                SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
+                SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight);
+        }
+        catch
+        {
+            return (SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
+                SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight);
+        }
+    }
+
     /// <summary>Position/size from settings: edge top|bottom|left|right,
     /// align left|center|right, px offset (px &lt; 0 = centered).
     /// Center align: +px toward right/bottom, -px toward left/top.
@@ -316,8 +341,8 @@ public partial class ModeStripWindow : Window
     {
         try
         {
-            double pw = SystemParameters.PrimaryScreenWidth;
-            double ph = SystemParameters.PrimaryScreenHeight;
+            var home = HomeRect();
+            double pw = home.w, ph = home.h, ox = home.l, oy = home.t;
             string edge = (_s.StripEdge ?? "top").ToLowerInvariant();
             // Vertical edges run the bar tall: width/height swap.
             bool vertical = edge == "left" || edge == "right";
@@ -336,21 +361,21 @@ public partial class ModeStripWindow : Window
             int px = _s.StripPx;
             if (edge == "bottom" || edge == "top")
             {
-                Top = edge == "bottom" ? ph - Height : 0;
-                if (px < 0) Left = (pw - Width) / 2;
-                else if (align == "right") Left = pw - Width - px;
-                else if (align == "center") Left = (pw - Width) / 2 + px;
-                else Left = px;
-                Left = Math.Max(0, Math.Min(pw - Width, Left));
+                Top = oy + (edge == "bottom" ? ph - Height : 0);
+                if (px < 0) Left = ox + (pw - Width) / 2;
+                else if (align == "right") Left = ox + pw - Width - px;
+                else if (align == "center") Left = ox + (pw - Width) / 2 + px;
+                else Left = ox + px;
+                Left = Math.Max(ox, Math.Min(ox + pw - Width, Left));
             }
             else
             {
-                Left = edge == "right" ? pw - Width : 0;
-                if (px < 0) Top = (ph - Height) / 2;
-                else if (align == "right") Top = ph - Height - px;
-                else if (align == "center") Top = (ph - Height) / 2 + px;
-                else Top = px;
-                Top = Math.Max(0, Math.Min(ph - Height, Top));
+                Left = ox + (edge == "right" ? pw - Width : 0);
+                if (px < 0) Top = oy + (ph - Height) / 2;
+                else if (align == "right") Top = oy + ph - Height - px;
+                else if (align == "center") Top = oy + (ph - Height) / 2 + px;
+                else Top = oy + px;
+                Top = Math.Max(oy, Math.Min(oy + ph - Height, Top));
             }
             Visibility = _s.StripVisible ? Visibility.Visible : Visibility.Hidden;
             PositionChrome();
@@ -443,8 +468,8 @@ public partial class ModeStripWindow : Window
         {
             EnsureChrome();
             if (_gripWin == null || _closeWin == null) return;
-            double pw = SystemParameters.PrimaryScreenWidth;
-            double ph = SystemParameters.PrimaryScreenHeight;
+            var home = HomeRect();
+            double pw = home.w, ph = home.h, ox = home.l, oy = home.t;
             bool show = Visibility == Visibility.Visible;
             bool vertical = ((_s.StripEdge ?? "top").ToLowerInvariant() == "left")
                 || ((_s.StripEdge ?? "top").ToLowerInvariant() == "right");
@@ -455,19 +480,19 @@ public partial class ModeStripWindow : Window
                 // when that space is off-screen.
                 gx = Left + (Width - _gripWin.Width) / 2;
                 gy = Top - _gripWin.Height;
-                if (gy < 0) gy = Top + 2;
+                if (gy < oy) gy = Top + 2;
                 cx = Left + (Width - _closeWin.Width) / 2;
                 cy = Top + Height;
-                if (cy + _closeWin.Height > ph) cy = Top + Height - _closeWin.Height - 2;
+                if (cy + _closeWin.Height > oy + ph) cy = Top + Height - _closeWin.Height - 2;
             }
             else
             {
                 // Wide bar: grip outside-left, close outside-right.
                 gx = Left - _gripWin.Width;
-                if (gx < 0) gx = Left + 2;
+                if (gx < ox) gx = Left + 2;
                 gy = Top + (Height - _gripWin.Height) / 2;
                 cx = Left + Width;
-                if (cx + _closeWin.Width > pw) cx = Left + Width - _closeWin.Width - 2;
+                if (cx + _closeWin.Width > ox + pw) cx = Left + Width - _closeWin.Width - 2;
                 cy = Top + (Height - _closeWin.Height) / 2;
             }
             _gripWin.Left = gx; _gripWin.Top = gy;
@@ -526,23 +551,23 @@ public partial class ModeStripWindow : Window
             // Move along the current edge; the offset becomes explicit px.
             string edge = (_s.StripEdge ?? "top").ToLowerInvariant();
             string align = (_s.StripSide ?? "left").ToLowerInvariant();
-            double pw = SystemParameters.PrimaryScreenWidth;
-            double ph = SystemParameters.PrimaryScreenHeight;
+            var home = HomeRect();
+            double pw = home.w, ph = home.h, ox = home.l, oy = home.t;
             if (edge == "top" || edge == "bottom")
             {
                 double nl = Left + dx;
-                nl = Math.Max(0, Math.Min(pw - Width, nl));
-                if (align == "right") _s.StripPx = (int)Math.Round(pw - Width - nl);
-                else if (align == "center") _s.StripPx = (int)Math.Round(nl - (pw - Width) / 2);
-                else _s.StripPx = (int)Math.Round(nl);
+                nl = Math.Max(ox, Math.Min(ox + pw - Width, nl));
+                if (align == "right") _s.StripPx = (int)Math.Round(ox + pw - Width - nl);
+                else if (align == "center") _s.StripPx = (int)Math.Round(nl - (ox + (pw - Width) / 2));
+                else _s.StripPx = (int)Math.Round(nl - ox);
             }
             else
             {
                 double nt = Top + dy;
-                nt = Math.Max(0, Math.Min(ph - Height, nt));
-                if (align == "right") _s.StripPx = (int)Math.Round(ph - Height - nt);
-                else if (align == "center") _s.StripPx = (int)Math.Round(nt - (ph - Height) / 2);
-                else _s.StripPx = (int)Math.Round(nt);
+                nt = Math.Max(oy, Math.Min(oy + ph - Height, nt));
+                if (align == "right") _s.StripPx = (int)Math.Round(oy + ph - Height - nt);
+                else if (align == "center") _s.StripPx = (int)Math.Round(nt - (oy + (ph - Height) / 2));
+                else _s.StripPx = (int)Math.Round(nt - oy);
             }
             _gripGrab = s;
             ApplyStripLayout();
