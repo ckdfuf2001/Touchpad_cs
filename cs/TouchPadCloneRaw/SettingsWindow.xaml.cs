@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using Microsoft.Win32;
 using TouchPadCloneV2.Core;
 using WComboBox = System.Windows.Controls.ComboBox;
@@ -17,25 +18,55 @@ public partial class SettingsWindow : Window
     private readonly Dictionary<string, WComboBox> _gestures = new();
     private readonly Action<string, bool>? _showAux;
 
-    /// <summary>Label, stored value, explanation (shown under the box).</summary>
-    private static readonly (string label, string value, string hint)[] PhysModes =
-    [
-        ("가상 마우스 존중 (물리 마우스 그대로)", "preserve",
-            "가상 클릭·드래그가 실제 커서를 옮긴 뒤 원래 물리 마우스 위치로 되돌립니다. "
-          + "물리 마우스는 가상 커서를 조종하지 않습니다. 대신 툴팁 등 호버 반응은 "
-          + "동작 사이에는 물리 커서를 따릅니다."),
-        ("물리 마우스와 통합 (기존 동작)", "unified",
-            "실제 커서를 가상 커서 아래에 붙여 둡니다. 호버 반응이 항상 가상 커서를 "
-          + "따르지만, 물리 마우스 커서가 가상 커서 위치로 끌려갑니다."),
-    ];
+    // Own-titlebar drag state (pad chrome pattern).
+    private bool _chromeTouch, _chromeMouse;
+    private int _chromeTouchId = -1;
+    private double _grabX, _grabY;
 
-    private void ApplyPhysHint()
+    /// <summary>Keeps the grabbed bar point under the pointer.</summary>
+    private void MoveChrome(Point rp)
     {
-        string v = PhysBox.SelectedItem as string ?? "preserve";
-        foreach (var m in PhysModes)
-            if (m.value == v) { PhysHint.Text = m.hint; return; }
-        PhysHint.Text = "";
+        double tx = rp.X + Left - _grabX;
+        double ty = rp.Y + Top - _grabY;
+        if (Math.Abs(tx - Left) < 0.5 && Math.Abs(ty - Top) < 0.5) return;
+        var vx = SystemParameters.VirtualScreenLeft;
+        var vy = SystemParameters.VirtualScreenTop;
+        var vw = SystemParameters.VirtualScreenWidth;
+        var vh = SystemParameters.VirtualScreenHeight;
+        Left = Math.Max(vx, Math.Min(vx + vw - Width, tx));
+        Top = Math.Max(vy, Math.Min(vy + vh - Height, ty));
     }
+
+    private static readonly string[] StripEdges = ["상", "하", "좌", "우"];
+    private static readonly string[] StripSides = ["좌", "우"];
+
+    private static string SideLabel(string? v) => v switch
+    {
+        "right" => "우",
+        _ => "좌",
+    };
+
+    private static string SideValue(string? l) => l switch
+    {
+        "우" => "right",
+        _ => "left",
+    };
+
+    private static string EdgeLabel(string? v) => v switch
+    {
+        "bottom" => "하",
+        "left" => "좌",
+        "right" => "우",
+        _ => "상",
+    };
+
+    private static string EdgeValue(string? l) => l switch
+    {
+        "하" => "bottom",
+        "좌" => "left",
+        "우" => "right",
+        _ => "top",
+    };
 
     private static readonly (string key, string label, Func<GestureMap, string> get, Action<GestureMap, string> set)[] Slots =
     [
@@ -58,58 +89,133 @@ public partial class SettingsWindow : Window
         _onApply = onApply;
         _showAux = showAux;
         InitializeComponent();
+        // Own title bar: touch-reachable close + drag to move (mouse/touch).
+        TitleCloseBtn.Click += (_, _) => Close();
+        // Title drag, same as the pad chrome: grab-offset absolute
+        // positioning (the grabbed point stays under the finger).
+        // Absolute targets are idempotent, so touch and promoted-mouse
+        // paths converge instead of doubling deltas.
+        TitleBar.PreviewTouchDown += (_, e) =>
+        {
+            if (Core.WpfHit.IsButton(e.OriginalSource)) return;
+            _chromeTouch = true;
+            _chromeTouchId = e.TouchDevice.Id;
+            var rp = e.GetTouchPoint(TitleBar).Position;
+            _grabX = rp.X; _grabY = rp.Y;
+            TitleBar.CaptureTouch(e.TouchDevice);
+            e.Handled = true;
+        };
+        TitleBar.PreviewTouchMove += (_, e) =>
+        {
+            if (!_chromeTouch || e.TouchDevice.Id != _chromeTouchId) return;
+            MoveChrome(e.GetTouchPoint(TitleBar).Position);
+            e.Handled = true;
+        };
+        TitleBar.PreviewTouchUp += (_, e) =>
+        {
+            if (!_chromeTouch || e.TouchDevice.Id != _chromeTouchId) return;
+            _chromeTouch = false;
+            _chromeTouchId = -1;
+            TitleBar.ReleaseTouchCapture(e.TouchDevice);
+            e.Handled = true;
+        };
+        TitleBar.PreviewMouseDown += (_, e) =>
+        {
+            if (Core.WpfHit.IsButton(e.OriginalSource)) return;
+            _chromeMouse = true;
+            var rp = e.GetPosition(TitleBar);
+            _grabX = rp.X; _grabY = rp.Y;
+            TitleBar.CaptureMouse();
+            e.Handled = true;
+        };
+        TitleBar.PreviewMouseMove += (_, e) =>
+        {
+            if (!_chromeMouse) return;
+            MoveChrome(e.GetPosition(TitleBar));
+            e.Handled = true;
+        };
+        TitleBar.PreviewMouseUp += (_, _) =>
+        {
+            _chromeMouse = false;
+            try { TitleBar.ReleaseMouseCapture(); } catch { }
+        };
         Speed.Value = s.Speed;
         OpacityS.Value = s.Opacity;
         TapJudgeMs.Value = s.TapJudgeMs;
-        HoldSlop.Value = s.HoldCancelDip;
-        HoldDampS.Value = s.HoldDamp;
         MultiMs.Value = s.MultiTapMs;
         LayoutBox.ItemsSource = layouts;
         LayoutBox.SelectedItem = layouts.Contains(s.Layout) ? s.Layout : layouts.FirstOrDefault();
+        LayoutBox.SelectionChanged += (_, _) => ApplySave();
         TapClick.IsChecked = s.TapToClick;
+        TapClick.Click += (_, _) => ApplySave();
         ScrollInv.IsChecked = s.ScrollInvert;
-        ScrollInv.Click += (_, _) => { _s.ScrollInvert = ScrollInv.IsChecked == true; ApplySave(); };
-        PhysBox.ItemsSource = PhysModes.Select(m => m.label).ToList();
-        PhysBox.SelectedItem = PhysModes.FirstOrDefault(
-            m => m.value == s.PhysicalMouseMode).label ?? PhysModes[0].label;
-        PhysBox.SelectionChanged += (_, _) =>
+        ScrollInv.Click += (_, _) => ApplySave();
+        SwapBtn.IsChecked = s.SwapButtons;
+        SwapBtn.Click += (_, _) => ApplySave();
+        DebugLbl.IsChecked = s.DebugLabels;
+        DebugLbl.Click += (_, _) => ApplySave();
+        // Strip placement + size (reference General).
+        StripEdgeBox.ItemsSource = StripEdges;
+        StripEdgeBox.SelectedItem = EdgeLabel(s.StripEdge);
+        StripEdgeBox.SelectionChanged += (_, _) =>
         {
-            string lbl = PhysBox.SelectedItem as string ?? "";
-            foreach (var m in PhysModes)
-                if (m.label == lbl) { _s.PhysicalMouseMode = m.value; break; }
-            ApplyPhysHint();
+            _s.StripEdge = EdgeValue(StripEdgeBox.SelectedItem as string);
             _s.Save();
             _onApply();
         };
-        ApplyPhysHint();
-        SwapBtn.IsChecked = s.SwapButtons;
-        DebugLbl.IsChecked = s.DebugLabels;
-        DebugLbl.Click += (_, _) => { _s.DebugLabels = DebugLbl.IsChecked == true; ApplySave(); };
+        StripSideBox.ItemsSource = StripSides;
+        StripSideBox.SelectedItem = SideLabel(s.StripSide);
+        StripSideBox.SelectionChanged += (_, _) =>
+        {
+            _s.StripSide = SideValue(StripSideBox.SelectedItem as string);
+            _s.Save();
+            _onApply();
+        };
+        StripPxBox.Text = s.StripPx.ToString();
+        StripWBox.Text = s.StripWidth.ToString();
+        StripHBox.Text = s.StripHeight.ToString();
+        StripPxBox.LostFocus += (_, _) => CommitStripNumbers();
+        StripWBox.LostFocus += (_, _) => CommitStripNumbers();
+        StripHBox.LostFocus += (_, _) => CommitStripNumbers();
+        CellKindBox.ItemsSource = KindItems;
+        CellFuncBox.ItemsSource = FuncItems.Select(f => f.show).ToList();
+        CellKindBox.SelectionChanged += (_, _) => { SyncCellValueInput(); CommitDetail(); };
+        CellFuncBox.SelectionChanged += (_, _) => CommitDetail();
+        CellLabelBox.LostFocus += (_, _) => CommitDetail();
+        CellValueBox.LostFocus += (_, _) => CommitDetail();
+        CellIconPicker.BasePalette = ColorPalettes.Zones;
+        CellIconPicker.CustomColors = _s.CustomColors;
+        CellIconPicker.AllowFollow = false;
+        CellIconPicker.Picked += _ => CommitDetail();
+        CellDelBtn.Click += (_, _) => DeleteSelCell();
+        CellClearBtn.Click += (_, _) => ClearSelCell();
+        CellInsertBtn.Click += (_, _) => { ImgPathBox.Text = _selImage; InsertPopup.IsOpen = true; };
+        ImgBrowseBtn.Click += (_, _) => { try { var dlg = new Microsoft.Win32.OpenFileDialog { Filter = "image|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.ico|all|*.*" }; if (dlg.ShowDialog() == true) ImgPathBox.Text = dlg.FileName; } catch { } };
+        ImgAttachBtn.Click += (_, _) => { _selImage = (ImgPathBox.Text ?? "").Trim(); CommitDetail(); InsertPopup.IsOpen = false; };
+        BuildInsertGrids();
+        StripRowAdd2.Click += (_, _) => { _s.StripLayout.Add(new StripRow()); _s.Save(); RebuildStripRows(); };
+        SyncCellValueInput();
+        RebuildStripRows();
         Speed.ValueChanged += (_, _) => Live();
         OpacityS.ValueChanged += (_, _) => Live();
         TapJudgeMs.ValueChanged += (_, _) => Live();
-        HoldSlop.ValueChanged += (_, _) => Live();
-        HoldDampS.ValueChanged += (_, _) => Live();
         MultiMs.ValueChanged += (_, _) => Live();
+        UpdateValLabels();
+        WirePicker(EffectPicker, ColorPalettes.Effects, false, () => _s.EffectColor, v => _s.EffectColor = v ?? ColorPalettes.Effects[0]);
+        WirePicker(ZoneLPicker, ColorPalettes.Zones, false, () => _s.ZoneLeft, v => _s.ZoneLeft = v ?? "없음");
+        WirePicker(ZoneRPicker, ColorPalettes.Zones, false, () => _s.ZoneRight, v => _s.ZoneRight = v ?? "없음");
+        WirePicker(ZoneWPicker, ColorPalettes.Zones, false, () => _s.ZoneWheel, v => _s.ZoneWheel = v ?? "없음");
+        WirePicker(ZonePPicker, ColorPalettes.Zones, false, () => _s.ZonePad, v => _s.ZonePad = v ?? "없음");
+        WirePicker(ZoneBgPicker, ColorPalettes.Zones, false, () => _s.ZoneBg, v => _s.ZoneBg = v ?? "#8C1B1E24");
 
         BuildGestureGrid(FloatGrid, s.Gestures, "float");
         BuildGestureGrid(ArtistGrid, s.ArtistGestures, "artist");
         BuildGestureGrid(VirtualGrid, s.VirtualGestures, "virtual");
         InitAuxTabs();
-        InitStripTab();
         InitPadsTab();
         InitActionsTab();
 
-        PresetBtn.Click += (_, _) =>
-        {
-            var dlg = new OpenFileDialog { Filter = "TouchMousePointer preset (*.ini)|*.ini" };
-            if (dlg.ShowDialog() == true) { _s.PresetFile = dlg.FileName; ApplySave(); }
-        };
         SaveBtn.Click += (_, _) => ApplySave();
-
-        VjoyStatus.Text = "상태: " + (VjoyInstalled() ? "설치됨" : "미설치");
-        VjoyDl.Click += (_, _) => OpenUrl("https://sourceforge.net/projects/vjoystick/files/");
-        VjoyFork.Click += (_, _) => OpenUrl("https://github.com/jshafer817/vJoy");
     }
 
     private void BuildGestureGrid(Grid grid, GestureMap map, string prefix)
@@ -140,10 +246,19 @@ public partial class SettingsWindow : Window
         _s.Speed = Speed.Value;
         _s.Opacity = OpacityS.Value;
         _s.TapJudgeMs = (int)TapJudgeMs.Value;
-        _s.HoldCancelDip = HoldSlop.Value;
-        _s.HoldDamp = HoldDampS.Value;
         _s.MultiTapMs = (int)MultiMs.Value;
+        UpdateValLabels();
         _onApply();
+    }
+
+    private void UpdateValLabels()
+    {
+        try
+        {
+            SpeedVal.Text = $"{Speed.Value:0.0}x";
+            OpacityVal.Text = $"{OpacityS.Value * 100:0}%";
+        }
+        catch { }
     }
 
     private void ApplySave()
@@ -151,99 +266,240 @@ public partial class SettingsWindow : Window
         _s.Speed = Speed.Value;
         _s.Opacity = OpacityS.Value;
         _s.TapJudgeMs = (int)TapJudgeMs.Value;
-        _s.HoldCancelDip = HoldSlop.Value;
-        _s.HoldDamp = HoldDampS.Value;
         _s.MultiTapMs = (int)MultiMs.Value;
         if (LayoutBox.SelectedItem is string l) _s.Layout = l;
         _s.TapToClick = TapClick.IsChecked == true;
         _s.ScrollInvert = ScrollInv.IsChecked == true;
         _s.SwapButtons = SwapBtn.IsChecked == true;
         _s.DebugLabels = DebugLbl.IsChecked == true;
-        SaveStripTab();
+        _s.StripEdge = EdgeValue(StripEdgeBox.SelectedItem as string);
+        _s.StripSide = SideValue(StripSideBox.SelectedItem as string);
+        TryParseStripNumbers();
         foreach (var (key, _, _, set) in Slots)
         {
             if (_gestures.TryGetValue("float:" + key, out var a)) set(_s.Gestures, Sel(a));
             if (_gestures.TryGetValue("artist:" + key, out var b)) set(_s.ArtistGestures, Sel(b));
             if (_gestures.TryGetValue("virtual:" + key, out var c2)) set(_s.VirtualGestures, Sel(c2));
         }
+        foreach (var r in _s.StripLayout) { while (r.Cells.Count < 4) r.Cells.Add(""); }
         _s.Save();
         _onApply();
     }
 
-    // ---------------- strip menu tab -------------------------------
-
-    private void InitStripTab()
+    private void RememberCustom(string hex)
     {
-        StripVisible.IsChecked = _s.StripVisible;
-        foreach (var p in new[] { "top", "bottom", "left", "right" }) StripPos.Items.Add(p);
-        SelBox(StripPos, _s.StripPosition);
-        foreach (var k in new[] { "radio", "toggle" }) StripKind.Items.Add(k);
-        StripKind.SelectedIndex = 0;
-        StripW.Text = _s.StripWidth.ToString();
-        StripH.Text = _s.StripHeight.ToString();
-        RefreshStripLists();
-        StripAdd1.Click += (_, _) => AddStripItem(_s.StripRow1);
-        StripAdd2.Click += (_, _) => AddStripItem(_s.StripRow2);
-        StripDel.Click += (_, _) => DelStripItem();
+        if (ColorPalettes.Effects.Contains(hex)) return;
+        if (ColorPalettes.Zones.Contains(hex)) return;
+        if (_s.CustomColors.Contains(hex)) return;
+        _s.CustomColors.Add(hex);
+        while (_s.CustomColors.Count > 12) _s.CustomColors.RemoveAt(0);
     }
 
-    private static void SelBox(WComboBox c, string v)
+    private void CommitStripNumbers()
     {
-        for (int i = 0; i < c.Items.Count; i++)
-            if ((c.Items[i] as string) == v) { c.SelectedIndex = i; return; }
-        if (c.Items.Count > 0) c.SelectedIndex = 0;
-    }
-
-    private void RefreshStripLists()
-    {
-        StripVisible.IsChecked = _s.StripVisible;
-        StripRow1.Items.Clear();
-        foreach (var it in _s.StripRow1)
-            StripRow1.Items.Add($"{it.Name} [{it.Kind}] -> {it.Target}{(it.Fixed ? " (고정)" : "")}");
-        StripRow2.Items.Clear();
-        foreach (var it in _s.StripRow2)
-            StripRow2.Items.Add($"{it.Name} [{it.Kind}] -> {it.Target}{(it.Fixed ? " (고정)" : "")}");
-    }
-
-    private void SaveStripTab()
-    {
-        _s.StripVisible = StripVisible.IsChecked == true;
-        string p = StripPos.SelectedItem as string ?? "top";
-        if (p.Length > 0) _s.StripPosition = p;
-        if (double.TryParse(StripW.Text, out double w)) _s.StripWidth = w;
-        if (double.TryParse(StripH.Text, out double h)) _s.StripHeight = h;
-    }
-
-    private void AddStripItem(List<StripRowItem> row)
-    {
-        SaveStripTab();
-        if (StripName.Text.Length == 0) return;
-        row.Add(new StripRowItem
+        if (TryParseStripNumbers())
         {
-            Name = StripName.Text,
-            Kind = StripKind.SelectedItem as string ?? "toggle",
-            Target = StripTarget.Text.Length > 0 ? StripTarget.Text : StripName.Text,
-        });
-        _s.Save();
-        RefreshStripLists();
-        _onApply();
-    }
-
-    private void DelStripItem()
-    {
-        if (StripRow1.SelectedIndex >= 0)
-        {
-            var it = _s.StripRow1[StripRow1.SelectedIndex];
-            if (!it.Fixed) _s.StripRow1.RemoveAt(StripRow1.SelectedIndex);
+            _s.Save();
+            _onApply();
         }
-        else if (StripRow2.SelectedIndex >= 0)
+    }
+
+    private bool TryParseStripNumbers()
+    {
+        if (!int.TryParse((StripPxBox.Text ?? "").Trim(), out int p)) { StripPxBox.Text = _s.StripPx.ToString(); return false; }
+        if (!double.TryParse((StripWBox.Text ?? "").Trim(), out double w) || w < 40) { StripWBox.Text = _s.StripWidth.ToString(); return false; }
+        if (!double.TryParse((StripHBox.Text ?? "").Trim(), out double h) || h < 12) { StripHBox.Text = _s.StripHeight.ToString(); return false; }
+        _s.StripPx = p;
+        _s.StripWidth = w;
+        _s.StripHeight = h;
+        return true;
+    }
+
+    private void WirePicker(PalettePicker box, IEnumerable<string> basePal, bool allowFollow, Func<string?> get, Action<string?> set)
+    {
+        box.BasePalette = basePal;
+        box.CustomColors = _s.CustomColors;
+        box.AllowFollow = allowFollow;
+        box.Selected = get() ?? "";
+        box.Picked += v => CommitPickerValue(box, v, allowFollow, get, set);
+    }
+
+    private void CommitPickerValue(PalettePicker box, string? v, bool allowFollow, Func<string?> get, Action<string?> set)
+    {
+        string val = (v ?? "").Trim();
+        if (allowFollow && (val == ColorPalettes.Follow || val == "")) set(null);
+        else if (ColorPalettes.IsNone(val)) set(ColorPalettes.None);
+        else
         {
-            var it = _s.StripRow2[StripRow2.SelectedIndex];
-            if (!it.Fixed) _s.StripRow2.RemoveAt(StripRow2.SelectedIndex);
+            try { var _ = (Color)ColorConverter.ConvertFromString(val); set(val); RememberCustom(val); }
+            catch { box.Selected = get() ?? ""; return; }
         }
         _s.Save();
-        RefreshStripLists();
         _onApply();
+    }
+
+    private static readonly string[] KindItems = ["기능", "cmd", "프로그램", "단축키"];
+
+    private static readonly (string show, string val)[] FuncItems =
+    [
+        ("레이아웃: float", "layout:floatpad"),
+        ("레이아웃: Left", "layout:leftpad"),
+        ("레이아웃: Right", "layout:rightpad"),
+        ("레이아웃: Full Screen", "layout:fullscreen"),
+        ("레이아웃: ArtistPad", "layout:ArtistPad"),
+        ("레이아웃: Virtual Ctrl", "layout:virtualctrls"),
+        ("이전 레이아웃", "prev_layout"),
+        ("다음 레이아웃", "next_layout"),
+        ("모드 패널", "show_modes"),
+        ("설정 열기", "open_settings"),
+        ("전체화면 토글", "toggle_fullscreen"),
+        ("보조패드", "show_assist"),
+        ("패드 켜기/끄기", "toggle_pad"),
+    ];
+
+    private int _selRow = -1, _selCol = -1;
+    private string _selImage = "";
+
+    private static string FuncLabel(string v) => FuncItems.FirstOrDefault(f => f.val == v).show ?? FuncItems[0].show;
+
+    private static string FuncValue(string? s) => FuncItems.FirstOrDefault(f => f.show == s).val ?? FuncItems[0].val;
+
+    private void SyncCellValueInput()
+    {
+        bool fn = (CellKindBox.SelectedItem as string ?? "기능") == "기능";
+        CellFuncBox.Visibility = fn ? Visibility.Visible : Visibility.Collapsed;
+        CellValueBox.Visibility = fn ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void RebuildStripRows()
+    {
+        try
+        {
+            StripRows.Children.Clear();
+            for (int ri = 0; ri < _s.StripLayout.Count; ri++)
+            {
+                int r = ri;
+                var row = _s.StripLayout[r];
+                var sp = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+                var del = new Button { Content = "행삭제", Width = 52, Margin = new Thickness(0, 0, 4, 0) };
+                del.Click += (_, _) => { _s.StripLayout.RemoveAt(r); _selRow = -1; _selCol = -1; _s.Save(); RebuildStripRows(); };
+                sp.Children.Add(del);
+                for (int ci = 0; ci < row.Cells.Count && ci < 6; ci++)
+                {
+                    int c = ci;
+                    var cell = StripCell.Parse(row.Cells[c]);
+                    var b = new Button { Content = cell.IsEmpty ? "빈칸" : cell.Label, MinWidth = 64, Margin = new Thickness(0, 0, 4, 0), Padding = new Thickness(6, 2, 6, 2) };
+                    try
+                    {
+                        if (cell.Color == "") { }
+                        else if (ColorPalettes.IsNone(cell.Color)) b.Background = Brushes.Transparent;
+                        else b.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(cell.Color));
+                    }
+                    catch { }
+                    if (r == _selRow && c == _selCol) { b.BorderBrush = Brushes.Black; b.BorderThickness = new Thickness(2); }
+                    b.Click += (_, _) => SelectStripCell(r, c);
+                    sp.Children.Add(b);
+                }
+                var add = new Button { Content = "+", Width = 30, ToolTip = "열추가" };
+                add.Click += (_, _) => { row.Cells.Add(""); _s.Save(); RebuildStripRows(); };
+                sp.Children.Add(add);
+                StripRows.Children.Add(sp);
+            }
+        }
+        catch { }
+    }
+
+    private void SelectStripCell(int r, int c)
+    {
+        try
+        {
+            _selRow = r; _selCol = c;
+            var cell = StripCell.Parse(_s.StripLayout[r].Cells[c]);
+            CellLabelBox.Text = cell.Label;
+            _selImage = cell.Image;
+            CellIconPicker.Selected = cell.Color;
+            CellKindBox.SelectedItem = KindItems.Contains(cell.Kind) ? cell.Kind : "기능";
+            SyncCellValueInput();
+            CellValueBox.Text = cell.Value;
+            CellValueBox.ToolTip = (CellKindBox.SelectedItem as string) == "cmd" ? "명령줄 (백그라운드 실행)" : ((CellKindBox.SelectedItem as string) == "프로그램" ? "exe 경로" : "예: Ctrl+C");
+            CellFuncBox.SelectedItem = FuncLabel(cell.Value);
+            RebuildStripRows();
+        }
+        catch { }
+    }
+
+    private void CommitDetail()
+    {
+        try
+        {
+            if (_selRow < 0 || _selCol < 0 || _selRow >= _s.StripLayout.Count) return;
+            var row = _s.StripLayout[_selRow];
+            if (_selCol >= row.Cells.Count) return;
+            string kind = CellKindBox.SelectedItem as string ?? "기능";
+            string val = kind == "기능" ? FuncValue(CellFuncBox.SelectedItem as string) : (CellValueBox.Text ?? "").Trim();
+            string col = (CellIconPicker.Selected ?? "").Trim();
+            if (ColorPalettes.IsHex(col)) RememberCustom(col);
+            row.Cells[_selCol] = (CellLabelBox.Text ?? "").Trim() + "|" + kind + "|" + val + "|" + col + "|" + _selImage;
+            _s.Save();
+            RebuildStripRows();
+        }
+        catch { }
+    }
+
+    private void ClearSelCell()
+    {
+        try
+        {
+            if (_selRow < 0 || _selCol < 0 || _selRow >= _s.StripLayout.Count) return;
+            var row = _s.StripLayout[_selRow];
+            if (_selCol >= row.Cells.Count) return;
+            row.Cells[_selCol] = "";
+            _s.Save();
+            RebuildStripRows();
+            SelectStripCell(_selRow, _selCol);
+        }
+        catch { }
+    }
+
+    private void DeleteSelCell()
+    {
+        try
+        {
+            if (_selRow < 0 || _selCol < 0 || _selRow >= _s.StripLayout.Count) return;
+            var row = _s.StripLayout[_selRow];
+            if (_selCol >= row.Cells.Count) return;
+            row.Cells.RemoveAt(_selCol);
+            if (_selCol >= row.Cells.Count) _selCol = row.Cells.Count - 1;
+            if (row.Cells.Count == 0) { _selRow = -1; _selCol = -1; }
+            _s.Save();
+            RebuildStripRows();
+            if (_selRow >= 0 && _selCol >= 0) SelectStripCell(_selRow, _selCol);
+        }
+        catch { }
+    }
+
+    private static readonly string[] EmojiItems = ["\U0001F600", "\U0001F601", "\U0001F602", "\U0001F923", "\U0001F60A", "\U0001F60D", "\U0001F60E", "\U0001F914", "\U0001F44D", "\U0001F44E", "\U0001F44F", "\U0001F64F", "\U0001F4AA", "\U0001F525", "\U00002B50", "\U0001F319", "\U00002600", "\U0001F308", "\U0001F389", "\U0001F381", "\U000026BD", "\U0001F3E0", "\U0001F697", "\U00002708", "\U000026FA", "\U0001F338", "\U0001F355", "\U00002615", "\U0001F4A1", "\U0001F514", "\U0001F50B", "\U0001F4CC", "\U0001F4C1", "\U0001F4BE", "\U00002764", "\U0001F494", "\U00002705", "\U0000274C", "\U00002753", "\U00002757", "\U0001F4AF", "\U0001F512", "\U0001F513", "\U0001F3B5", "\U0001F4F7"];
+
+    private static readonly string[] SymItems = ["\u2605", "\u2606", "\u25CF", "\u25CB", "\u25C6", "\u25C7", "\u25B2", "\u25B3", "\u25BC", "\u25BD", "\u25A0", "\u25A1", "\u25AA", "\u25AB", "\u2190", "\u2191", "\u2192", "\u2193", "\u2194", "\u2195", "\u2715", "\u2713", "\u2714", "\u2766", "\u25B6", "\u25B7", "\u2665", "\u2666", "\u2663", "\u2660", "\u266A", "\u266B", "\u00A9", "\u00AE", "\u2122", "\u00A7", "\u00B6", "\u00B0", "\u00B1", "\u00D7", "\u00F7", "\u2260", "\u2248", "\u221E", "\u03C0", "\u03A9", "\u03B1", "\u2026", "\u2014", "\u2500", "\u2502", "\u250C", "\u2510", "\u2514", "\u2518", "\u2550", "\u203C", "\u2049"];
+
+    private void BuildInsertGrids()
+    {
+        try
+        {
+            foreach (var e in EmojiItems)
+            {
+                var b = new Button { Content = e, FontSize = 15, Width = 32, Height = 30, Margin = new Thickness(1), ToolTip = e };
+                b.Click += (_, _) => { CellLabelBox.Text += e; };
+                EmojiGrid.Children.Add(b);
+            }
+            foreach (var e in SymItems)
+            {
+                var b = new Button { Content = e, FontSize = 15, Width = 32, Height = 30, Margin = new Thickness(1), ToolTip = e };
+                b.Click += (_, _) => { CellLabelBox.Text += e; };
+                SymGrid.Children.Add(b);
+            }
+        }
+        catch { }
     }
 
     // ---------------- per-pad tab ------------------------------------
@@ -413,20 +669,10 @@ public partial class SettingsWindow : Window
 
     private static string Sel(WComboBox cb) => cb.SelectedItem as string ?? "none";
 
-    private static bool VjoyInstalled()
+    private static void SelBox(WComboBox c, string v)
     {
-        try
-        {
-            using var key = Registry.LocalMachine.OpenSubKey(
-                @"SYSTEM\CurrentControlSet\Services\vjoy");
-            return key != null;
-        }
-        catch { return false; }
-    }
-
-    private static void OpenUrl(string url)
-    {
-        try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
-        catch { }
+        for (int i = 0; i < c.Items.Count; i++)
+            if ((c.Items[i] as string) == v) { c.SelectedIndex = i; return; }
+        if (c.Items.Count > 0) c.SelectedIndex = 0;
     }
 }

@@ -1,0 +1,22 @@
+<UserControl x:Class="TouchPadCloneV2.PalettePicker"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid>
+        <Border x:Name="Face" Width="46" Height="26" BorderBrush="Gray" BorderThickness="1"
+                Background="#FFF0F0F0" Cursor="Hand" ToolTip="클릭하면 팔레트">
+            <Border x:Name="Swatch" Margin="3" BorderBrush="Gray" BorderThickness="1"/>
+        </Border>
+        <Popup x:Name="DropPopup" Placement="Bottom" PlacementTarget="{Binding ElementName=Face}"
+               StaysOpen="False" PopupAnimation="Fade">
+            <Border Background="#FFF5F5F5" BorderBrush="Gray" BorderThickness="1" Padding="6">
+                <StackPanel>
+                    <UniformGrid x:Name="Cells" Columns="6"/>
+                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                        <TextBox x:Name="CustomBox" Width="140" VerticalContentAlignment="Center"/>
+                        <Button x:Name="CustomApply" Content="적용" Width="46" Margin="4,0,0,0"/>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Popup>
+    </Grid>
+</UserControl>

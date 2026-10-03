@@ -57,6 +57,49 @@ public sealed class StripRowItem
     public bool Visible { get; set; } = true;
 }
 
+/// <summary>Per-family color overrides (null/empty = follow General).</summary>
+public sealed class PadColorSet
+{
+    public string? EffectColor { get; set; }
+    public string? ZoneLeft { get; set; }
+    public string? ZoneRight { get; set; }
+    public string? ZoneWheel { get; set; }
+    public string? ZonePad { get; set; }
+    public string? ZoneBg { get; set; }
+}
+
+/// <summary>One strip menu cell. Serialized as
+/// Label|Kind|Value|Color|Image. Kind: 기능 | cmd | 프로그램 | 단축키.</summary>
+public sealed class StripCell
+{
+    public string Label = "";
+    public string Kind = "기능";
+    public string Value = "";
+    public string Color = "";
+    public string Image = "";
+    public bool IsEmpty => Label == "" && Value == "";
+    public static StripCell Parse(string? s)
+    {
+        var c = new StripCell();
+        if (string.IsNullOrWhiteSpace(s)) return c;
+        var p = s.Split("|");
+        c.Label = p[0].Trim();
+        if (p.Length > 1 && p[1].Trim() != "") c.Kind = p[1].Trim().ToLowerInvariant();
+        if (p.Length > 2) c.Value = p[2].Trim();
+        if (p.Length > 3) c.Color = p[3].Trim();
+        if (p.Length > 4) c.Image = p[4].Trim();
+        if (c.Label == "") c.Label = c.Value;
+        if (c.Value == "" && (c.Kind == "기능" || c.Kind == "layout")) c.Value = "layout:" + c.Label;
+        return c;
+    }
+    public override string ToString() => $"{Label}|{Kind}|{Value}|{Color}|{Image}";
+}
+
+public sealed class StripRow
+{
+    public List<string> Cells { get; set; } = new() { "", "", "", "" };
+}
+
 /// <summary>Per-pad override: area mode, visibility, opacity, and the
 /// touch globals (speed / judge time / scroll-invert / swap / tap-click).
 /// Same-as-global by default; any set value overwrites for that pad.</summary>
@@ -197,11 +240,11 @@ public sealed class AppSettings
     /// <summary>Tap judgment window ms (first touch to action decision).</summary>
     public int TapJudgeMs { get; set; } = 500;
 
-    /// <summary>Configurable strip rows. Row1 = group radios (pad select,
-    /// one at a time), row2 = individual toggles + customs (program/cmd).</summary>
+    /// <summary>Legacy row model (superseded by StripLayout cells below).
+    /// Kept so old files still load; nothing reads it anymore.</summary>
     public string StripPosition { get; set; } = "top";  // top | bottom | left | right
     public double StripWidth { get; set; } = 380;
-    public double StripHeight { get; set; } = 86;
+    public double StripHeight { get; set; } = 26;
     public bool StripVisible { get; set; } = true;
     public List<StripRowItem> StripRow1 { get; set; } = new()
     {
@@ -215,6 +258,70 @@ public sealed class AppSettings
         new StripRowItem { Name = "artist", Kind = "toggle", Target = "artist", Fixed = true },
         new StripRowItem { Name = "virtual", Kind = "toggle", Target = "virtual", Fixed = true },
     };
+
+    /// <summary>Strip placement (General tab): edge top|bottom|left|right,
+    /// side left|right, px offset along the edge (-1 = centered).</summary>
+    public string StripEdge { get; set; } = "top";
+    public string StripSide { get; set; } = "left";
+    public int StripPx { get; set; } = -1;
+
+    /// <summary>Retired UI (was the reference's event-gap slider): the single
+    /// TapJudgeMs is the judge time now. Kept so files still load.</summary>
+    public int EventGapMs { get; set; } = 500;
+
+    /// <summary>Pad colors (General tab). Stored here; pad render wiring
+    /// follows (ZonePalette stays the live source until then).</summary>
+    public string EffectColor { get; set; } = "#FF7FE0A8";
+    public string ZoneLeft { get; set; } = "#40206040";
+    public string ZoneRight { get; set; } = "#40402060";
+    public string ZoneWheel { get; set; } = "#40602020";
+    public string ZonePad { get; set; } = "#30404040";
+    public string ZoneBg { get; set; } = "#40204060";
+    public List<string> CustomColors { get; set; } = new();
+    public PadColorSet FloatColors { get; set; } = new();
+    public PadColorSet ArtistColors { get; set; } = new();
+    public PadColorSet VirtualColors { get; set; } = new();
+
+    public string ZoneColor(string role) => role switch
+    {
+        "left" => ZoneLeft,
+        "right" => ZoneRight,
+        "wheel" => ZoneWheel,
+        "pad" => ZonePad,
+        "bg" => ZoneBg,
+        _ => "",
+    };
+
+    public PadColorSet ForColors(string layoutName)
+    {
+        if (layoutName.Contains("Artist", StringComparison.OrdinalIgnoreCase))
+            return ArtistColors;
+        if (layoutName.Contains("virtual", StringComparison.OrdinalIgnoreCase))
+            return VirtualColors;
+        return FloatColors;
+    }
+
+    private static string PickColor(string? o, string d) =>
+        string.IsNullOrWhiteSpace(o) ? d : o;
+
+    public string EffEffect(string layoutName) => PickColor(ForColors(layoutName).EffectColor, EffectColor);
+    public string EffZoneLeft(string layoutName) => PickColor(ForColors(layoutName).ZoneLeft, ZoneLeft);
+    public string EffZoneRight(string layoutName) => PickColor(ForColors(layoutName).ZoneRight, ZoneRight);
+    public string EffZoneWheel(string layoutName) => PickColor(ForColors(layoutName).ZoneWheel, ZoneWheel);
+    public string EffZonePad(string layoutName) => PickColor(ForColors(layoutName).ZonePad, ZonePad);
+    public string EffBackground(string layoutName) => PickColor(ForColors(layoutName).ZoneBg, ZoneBg);
+
+    /// <summary>Strip menu cells (General tab editor, picker reads them).
+    /// Format per cell: Label|Kind|Value|Color|Image.</summary>
+    public System.Collections.ObjectModel.ObservableCollection<StripRow> StripLayout { get; set; } = DefaultStripLayout();
+
+    public static System.Collections.ObjectModel.ObservableCollection<StripRow> DefaultStripLayout()
+    {
+        var rows = new System.Collections.ObjectModel.ObservableCollection<StripRow>();
+        rows.Add(new StripRow { Cells = new() { "float|기능|layout:floatpad|", "Left|기능|layout:leftpad|", "Right|기능|layout:rightpad|", "Full Screen|기능|layout:fullscreen|" } });
+        rows.Add(new StripRow { Cells = new() { "ArtistPad|기능|layout:ArtistPad|", "Virtual Ctrl|기능|layout:virtualctrls|", "", "" } });
+        return rows;
+    }
 
     /// <summary>Per-pad overrides (same-as-global + overwrite).</summary>
     public Dictionary<string, PadConfig> Pads { get; set; } = new()
@@ -322,6 +429,32 @@ public sealed class AppSettings
                     s.Artist ??= new();
                     s.Virtual ??= new();
                     s.Actions ??= new();
+                    s.EffectColor ??= "#FF7FE0A8";
+                    s.ZoneLeft ??= "#40206040";
+                    s.ZoneRight ??= "#40402060";
+                    s.ZoneWheel ??= "#40602020";
+                    s.ZonePad ??= "#30404040";
+                    if (s.ZoneBg == null || s.ZoneBg == "#8C1B1E24") s.ZoneBg = "#40204060";
+                    s.CustomColors ??= new();
+                    s.FloatColors ??= new();
+                    s.ArtistColors ??= new();
+                    s.VirtualColors ??= new();
+                    if (s.StripLayout == null || s.StripLayout.Count == 0) s.StripLayout = DefaultStripLayout();
+
+                    foreach (var r in s.StripLayout)
+                    {
+                        while (r.Cells.Count < 4) r.Cells.Add("");
+                        for (int i = 0; i < r.Cells.Count; i++)
+                        {
+                            var c = StripCell.Parse(r.Cells[i]);
+                            if (c.IsEmpty) continue;
+                            bool ch = false;
+                            if (c.Kind == "layout") { c.Kind = "기능"; c.Value = "layout:" + c.Value; ch = true; }
+                            else if (c.Kind == "hotkey") { c.Kind = "단축키"; ch = true; }
+                            else if (c.Kind == "run") { c.Kind = "프로그램"; ch = true; }
+                            if (ch) r.Cells[i] = c.ToString();
+                        }
+                    }
                     MigrateLegacySecondHold(s);
                     return s;
                 }

@@ -330,7 +330,7 @@ public partial class App : WApplication
     {
         if (_picker != null) { _picker.Activate(); return; }
         _picker = new ModePickerWindow(
-            Core.PresetParser.OrderedNames(_presets),
+            _settings,
             _settings.Layout,
             name =>
             {
@@ -338,6 +338,9 @@ public partial class App : WApplication
                 _settings.Save();
                 Apply();
             },
+            name => ToggleAux(name),
+            action => RunPickerAction(action),
+            name => _auxOn.Contains(name),
             () => OpenSettings());
         _picker.Closed += (_, _) => _picker = null;
         // Tap outside (any other window activates) collapses the panel.
@@ -358,6 +361,24 @@ public partial class App : WApplication
         _picker.Show();
         Core.TopmostKeeper.Raise(_picker);
         if (_strip != null) Core.TopmostKeeper.Raise(_strip);
+    }
+
+    /// <summary>Picker cell action: direct cmd/program/shortcut,
+    /// named custom action, or strip gesture. UI wiring only.</summary>
+    private void RunPickerAction(string action)
+    {
+        if (action.StartsWith("cmd:", StringComparison.OrdinalIgnoreCase))
+            Core.ActionRunner.Run(new Core.ActionDef
+                { Kind = "cmd", Path = action.Substring(4) });
+        else if (action.StartsWith("program:", StringComparison.OrdinalIgnoreCase))
+            Core.ActionRunner.Run(new Core.ActionDef
+                { Kind = "program", Path = action.Substring(8) });
+        else if (action.StartsWith("shortcut:", StringComparison.OrdinalIgnoreCase))
+            Core.ActionRunner.RunShortcut(action.Substring(9));
+        else if (_settings.Actions != null
+            && _settings.Actions.TryGetValue(action, out var def))
+            Core.ActionRunner.Run(def);
+        else HandleStripGesture(action);
     }
 
     private void CycleLayout(int step)

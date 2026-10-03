@@ -1,52 +1,162 @@
 <Window x:Class="TouchPadCloneV2.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-Title="TouchPad Clone - 설정" Width="560" Height="620"
-        Topmost="True" WindowStartupLocation="CenterScreen">
-    <TabControl x:Name="Tabs" TabStripPlacement="Left">
+        xmlns:local="clr-namespace:TouchPadCloneV2"
+        Title="TouchPad Clone - 설정" Width="560" Height="620"
+        Topmost="True" WindowStartupLocation="CenterScreen"
+        WindowStyle="None" ResizeMode="NoResize">
+    <Grid>
+    <Grid.RowDefinitions>
+        <RowDefinition Height="34"/>
+        <RowDefinition Height="*"/>
+    </Grid.RowDefinitions>
+    <!-- Our own title bar (no system caption): drag to move, touch close. -->
+    <Border x:Name="TitleBar" Grid.Row="0" Background="#FF141922">
+        <Grid>
+            <TextBlock Text="TouchPad Setting" Foreground="#E8ECF4"
+                       FontSize="13" VerticalAlignment="Center" Margin="10,0,0,0"
+                       IsHitTestVisible="False"/>
+            <Button x:Name="TitleCloseBtn" Content="X" MinWidth="44" MinHeight="28"
+                    HorizontalAlignment="Right" VerticalAlignment="Center"
+                    Margin="0,0,6,0" FontSize="14" Foreground="White"
+                    Background="Transparent" BorderBrush="Transparent"
+                    IsCancel="True"/>
+        </Grid>
+    </Border>
+    <TabControl x:Name="Tabs" Grid.Row="1" TabStripPlacement="Left">
         <TabItem Header="General">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="14">
-                <TextBlock Text="커서·입력" FontWeight="Bold" Foreground="#35C4FF"/>
-                <TextBlock Text="커서 속도" Margin="0,6,0,0"/>
-                <Slider x:Name="Speed" Minimum="0.2" Maximum="5" TickFrequency="0.1"/>
-                <CheckBox x:Name="TapClick" Content="탭 = 클릭 (끄면 탭 무시)" Margin="0,8,0,0"/>
-                <CheckBox x:Name="SwapBtn" Content="좌/우 버튼 반전" Margin="0,4,0,0"/>
-                <CheckBox x:Name="DebugLbl" Content="디버그 라벨 표시 (zone/status/actual)" Margin="0,4,0,0"/>
-                <CheckBox x:Name="ScrollInv" Content="스크롤 상하반전" Margin="0,4,0,0"/>
-                <TextBlock Text="물리 마우스" Margin="0,8,0,0"/>
-                <ComboBox x:Name="PhysBox"/>
-                <TextBlock x:Name="PhysHint" Foreground="Gray" TextWrapping="Wrap"
-                           FontSize="11" Margin="0,2,0,0"/>
-                <TextBlock Text="동작 판정 시간 (ms): 떼면 탭, 계속 누르면 홀드" Margin="0,8,0,0"/>
-                <Slider x:Name="TapJudgeMs" Minimum="50" Maximum="1000" TickFrequency="50"/>
-                <TextBlock Text="홀드 중 드래그로 간주하는 이동 (DIP/150ms)" Margin="0,8,0,0"/>
-                <Slider x:Name="HoldSlop" Minimum="2" Maximum="60" TickFrequency="2"/>
-                <TextBlock Text="홀드 중 커서 감쇠 (1 = 즉시 이동)" Margin="0,8,0,0"/>
-                <Slider x:Name="HoldDampS" Minimum="0.2" Maximum="1" TickFrequency="0.05"/>
+                <TextBlock Text="Pad 색상" FontWeight="Bold" Foreground="#35C4FF" Margin="0,8,0,0"/>
+                <UniformGrid Columns="6" Margin="0,4,0,0">
+                    <StackPanel Margin="0,0,4,0">
+                        <TextBlock Text="이펙트" FontSize="11" Foreground="Gray"/>
+                        <local:PalettePicker x:Name="EffectPicker"/>
+                    </StackPanel>
+                    <StackPanel Margin="0,0,4,0">
+                        <TextBlock Text="L" FontSize="11" Foreground="Gray"/>
+                        <local:PalettePicker x:Name="ZoneLPicker"/>
+                    </StackPanel>
+                    <StackPanel Margin="0,0,4,0">
+                        <TextBlock Text="R" FontSize="11" Foreground="Gray"/>
+                        <local:PalettePicker x:Name="ZoneRPicker"/>
+                    </StackPanel>
+                    <StackPanel Margin="0,0,4,0">
+                        <TextBlock Text="Wheel" FontSize="11" Foreground="Gray"/>
+                        <local:PalettePicker x:Name="ZoneWPicker"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Text="Pad" FontSize="11" Foreground="Gray"/>
+                        <local:PalettePicker x:Name="ZonePPicker"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Text="배경" FontSize="11" Foreground="Gray"/>
+                        <local:PalettePicker x:Name="ZoneBgPicker"/>
+                    </StackPanel>
+                </UniformGrid>
                 <TextBlock Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,0"
-                           Text="이 패드는 손가락을 가만히 있어도 초당 약 0.4 DIP씩 서서히 새는 것으로 보고됩니다. 거리 기준으로 홀드 판정하면 0.2초 만에 취소되고, 커서를 멈추게 하면 패드가 0.5초 동안 죽습니다. 실측값(150ms 구간 순이동 기준)은 가만히 있는 손가락 약 0.06, 느린 조작 약 19, 빠른 드래그 104~150이므로 기본값 10은 그 사이에 있습니다. 값을 올리면 작은 이동을 롱프레스로 보고, 내리면 가만히 있어도 롱프레스가 취소됩니다. 감쇠를 낮추면 홀드 중 커서가 덜 새지만 즉시 이동도 함께 느려집니다."/>
+                           Text="클릭하면 팔레트(없음 포함)가 열립니다. 팔레트 끝에서 현재값을 확인하고 직접 입력도 가능합니다."/>
+                <Grid Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <TextBlock Text="투명도 (20% ~ 100%)" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="OpacityVal" Grid.Column="1" FontWeight="Bold" VerticalAlignment="Center"/>
+                </Grid>
+                <Slider x:Name="OpacityS" Minimum="0.2" Maximum="1" TickFrequency="0.05"/>
+                <TextBlock Text="마우스" FontWeight="Bold" Foreground="#35C4FF" Margin="0,12,0,0"/>
+                <Grid Margin="0,6,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <TextBlock Text="커서 속도배율 (0.2x ~ 5.0x)" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="SpeedVal" Grid.Column="1" FontWeight="Bold" VerticalAlignment="Center"/>
+                </Grid>
+                <Slider x:Name="Speed" Minimum="0.2" Maximum="5" TickFrequency="0.1"/>
+                <TextBlock Text="동작" FontWeight="Bold" Foreground="#35C4FF" Margin="0,12,0,0"/>
+                <TextBlock Text="동작 판정 시간 (ms): 떼면 탭, 계속 누르면 홀드" Margin="0,6,0,0"/>
+                <Slider x:Name="TapJudgeMs" Minimum="50" Maximum="1000" TickFrequency="50"/>
+                <CheckBox x:Name="TapClick" Content="탭 = 클릭 (끄면 탭 무시)" Margin="0,6,0,0"/>
+                <CheckBox x:Name="SwapBtn" Content="좌/우 버튼 반전" Margin="0,4,0,0"/>
+                <CheckBox x:Name="ScrollInv" Content="스크롤 상하반전" Margin="0,4,0,0"/>
+                <CheckBox x:Name="DebugLbl" Content="디버그 라벨 표시 (zone/status/actual)" Margin="0,4,0,0"/>
                 <TextBlock Text="더블/트리플 탭 판정 (ms)" Margin="0,8,0,0"/>
                 <Slider x:Name="MultiMs" Minimum="200" Maximum="1000" TickFrequency="50"/>
-                <Separator Margin="0,12,0,12"/>
-                <TextBlock Text="패드 모양" FontWeight="Bold" Foreground="#35C4FF"/>
-                <TextBlock Text="패드 투명도" Margin="0,6,0,0"/>
-                <Slider x:Name="OpacityS" Minimum="0.2" Maximum="1" TickFrequency="0.05"/>
                 <TextBlock Text="레이아웃 (원본 INI 섹션)" Margin="0,8,0,0"/>
                 <ComboBox x:Name="LayoutBox"/>
-                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                    <Button x:Name="PresetBtn" Content="프리셋 INI 열기…" Width="130"/>
-                    <Button x:Name="SaveBtn" Content="적용·저장" Width="100" Margin="8,0,0,0"/>
+                <TextBlock Text="스트립 설정" FontWeight="Bold" Foreground="#35C4FF" Margin="0,12,0,0"/>
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="위치" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="StripEdgeBox" Width="64" Margin="4,0,0,0"/>
+                    <ComboBox x:Name="StripSideBox" Width="52" Margin="4,0,0,0"/>
+                    <TextBox x:Name="StripPxBox" Width="60" Margin="4,0,0,0" VerticalContentAlignment="Center"/>
+                    <TextBlock Text="px (음수 중앙)" FontSize="11" Foreground="Gray" VerticalAlignment="Center" Margin="4,0,0,0"/>
                 </StackPanel>
-                <Separator Margin="0,12,0,12"/>
-                <TextBlock Text="게임 프리셋용 vJoy" FontWeight="Bold" Foreground="#35C4FF"/>
-                <TextBlock x:Name="VjoyStatus" Foreground="Gray"/>
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="크기" VerticalAlignment="Center"/>
+                    <TextBox x:Name="StripWBox" Width="60" Margin="4,0,0,0" VerticalContentAlignment="Center"/>
+                    <TextBlock Text="x" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                    <TextBox x:Name="StripHBox" Width="60" Margin="4,0,0,0" VerticalContentAlignment="Center"/>
+                    <TextBlock Text="가로 x 세로" FontSize="11" Foreground="Gray" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                </StackPanel>
+                <TextBlock Text="레이아웃" FontWeight="Bold" Foreground="#35C4FF" Margin="0,12,0,0"/>
+                <StackPanel x:Name="StripRows" Margin="0,4,0,0"/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
-                    <Button x:Name="VjoyDl" Content="다운로드 페이지" Width="130"/>
-                    <Button x:Name="VjoyFork" Content="Win10/11 포크" Width="120" Margin="8,0,0,0"/>
+                    <Button x:Name="StripRowAdd2" Content="행 추가" Width="80"/>
                 </StackPanel>
-                <TextBlock Text="vJoy 없이도 WASD 프리셋은 키보드 입력으로 대체 동작."
-                           Foreground="Gray" TextWrapping="Wrap" Margin="0,4,0,0"/>
+                <TextBlock Text="레이아웃 상세 (위 메뉴 클릭 시)" FontWeight="Bold" Foreground="#35C4FF" Margin="0,8,0,0"/>
+                <Border BorderBrush="#335C6C7D" BorderThickness="1" CornerRadius="6" Background="#155C6C7D" Margin="0,4,0,0" Padding="6">
+                <Grid Margin="0,4,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="90"/><ColumnDefinition/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Text="표시명" Grid.Row="0" VerticalAlignment="Center"/>
+                    <TextBlock Text="배경색" Grid.Row="1" VerticalAlignment="Center"/>
+                    <local:PalettePicker x:Name="CellIconPicker" Grid.Row="1" Grid.Column="1" Margin="4,2,0,2" HorizontalAlignment="Left"/>
+                    <TextBlock Text="구분" Grid.Row="2" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="CellKindBox" Grid.Row="2" Grid.Column="1" Margin="4,2,0,2"/>
+                    <TextBlock Text="값 입력" Grid.Row="3" VerticalAlignment="Center"/>
+                    <TextBox x:Name="CellValueBox" Grid.Row="3" Grid.Column="1" Margin="4,2,0,2"/>
+                    <ComboBox x:Name="CellFuncBox" Grid.Row="3" Grid.Column="1" Margin="4,2,0,2"/>
+                    <TextBlock Text="" Grid.Row="4"/>
+                    <StackPanel Orientation="Horizontal" Grid.Row="4" Grid.Column="1" Margin="4,2,0,2">
+                        <Button x:Name="CellClearBtn" Content="지우기" Width="80"/>
+                        <Button x:Name="CellDelBtn" Content="셀삭제" Width="80" Margin="8,0,0,0"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Grid.Row="0" Grid.Column="1" Margin="4,2,0,2">
+                        <TextBox x:Name="CellLabelBox" Width="200"/>
+                        <Button x:Name="CellInsertBtn" Content="삽입" Width="52" Margin="4,0,0,0"/>
+                        <Popup x:Name="InsertPopup" Placement="Bottom" StaysOpen="False">
+                            <Border Background="#FFF5F5F5" BorderBrush="Gray" BorderThickness="1" Padding="6">
+                                <TabControl x:Name="InsertTabs" Width="330" Height="240">
+                                    <TabItem Header="이모지">
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                            <UniformGrid x:Name="EmojiGrid" Columns="8"/>
+                                        </ScrollViewer>
+                                    </TabItem>
+                                    <TabItem Header="특수문자">
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                            <UniformGrid x:Name="SymGrid" Columns="8"/>
+                                        </ScrollViewer>
+                                    </TabItem>
+                                    <TabItem Header="이미지">
+                                        <StackPanel Margin="4">
+                                            <TextBox x:Name="ImgPathBox"/>
+                                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                                <Button x:Name="ImgBrowseBtn" Content="찾아보기" Width="80"/>
+                                                <Button x:Name="ImgAttachBtn" Content="첨부" Width="60" Margin="8,0,0,0"/>
+                                            </StackPanel>
+                                            <TextBlock Text="첨부하면 셀 버튼에 이미지와 표시명이 함께 보입니다." Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,0"/>
+                                        </StackPanel>
+                                    </TabItem>
+                                </TabControl>
+                            </Border>
+                        </Popup>
+                    </StackPanel>
+                </Grid>
+                </Border>
+                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                    <Button x:Name="SaveBtn" Content="적용·저장" Width="100"/>
+                </StackPanel>
             </StackPanel>
             </ScrollViewer>
         </TabItem>
@@ -116,34 +226,6 @@ Title="TouchPad Clone - 설정" Width="560" Height="620"
             </StackPanel>
             </ScrollViewer>
         </TabItem>
-        <TabItem Header="스트립">
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="14">
-                <CheckBox x:Name="StripVisible" Content="스트립 보이기" Margin="0,0,0,6"/>
-                <TextBlock Text="위치"/>
-                <ComboBox x:Name="StripPos" Margin="0,2,0,6"/>
-                <StackPanel Orientation="Horizontal">
-                    <StackPanel Width="120"><TextBlock Text="너비"/><TextBox x:Name="StripW"/></StackPanel>
-                    <StackPanel Width="120" Margin="8,0,0,0"><TextBlock Text="높이"/><TextBox x:Name="StripH"/></StackPanel>
-                </StackPanel>
-                <TextBlock Text="1열: 그룹 라운드 버튼 (하나만 선택)" Margin="0,8,0,2"/>
-                <ListBox x:Name="StripRow1" Height="80"/>
-                <TextBlock Text="2열: 개별 토글 버튼" Margin="0,6,0,2"/>
-                <ListBox x:Name="StripRow2" Height="80"/>
-                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                    <TextBox x:Name="StripName" Width="100" ToolTip="이름"/>
-                    <ComboBox x:Name="StripKind" Width="76" Margin="4,0,0,0"/>
-                    <TextBox x:Name="StripTarget" Width="120" Margin="4,0,0,0" ToolTip="대상 패드/액션키"/>
-                </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                    <Button x:Name="StripAdd1" Content="1열 추가" Width="76"/>
-                    <Button x:Name="StripAdd2" Content="2열 추가" Width="76" Margin="4,0,0,0"/>
-                    <Button x:Name="StripDel" Content="삭제(고정 제외)" Width="104" Margin="4,0,0,0"/>
-                </StackPanel>
-                <TextBlock Text="대상: floatpad/leftpad/rightpad/fullscreen/artist/virtual/액션키/strip 액션" Foreground="Gray" TextWrapping="Wrap" Margin="0,4,0,0"/>
-            </StackPanel>
-            </ScrollViewer>
-        </TabItem>
         <TabItem Header="패드별">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="14">
@@ -191,4 +273,5 @@ Title="TouchPad Clone - 설정" Width="560" Height="620"
             </ScrollViewer>
         </TabItem>
     </TabControl>
+    </Grid>
 </Window>

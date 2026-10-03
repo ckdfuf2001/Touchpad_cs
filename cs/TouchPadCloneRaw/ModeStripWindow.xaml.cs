@@ -291,7 +291,8 @@ public partial class ModeStripWindow : Window
 
     // ---------------- configurable rows -------------------------------
 
-    /// <summary>Position/size from settings.</summary>
+    /// <summary>Position/size from settings: edge top|bottom|left|right,
+    /// side left|right, px offset along the edge (-1 = centered).</summary>
     public void ApplyStripLayout()
     {
         try
@@ -300,16 +301,31 @@ public partial class ModeStripWindow : Window
             Height = _s.StripHeight;
             double pw = SystemParameters.PrimaryScreenWidth;
             double ph = SystemParameters.PrimaryScreenHeight;
-            switch (_s.StripPosition)
+            string edge = (_s.StripEdge ?? "top").ToLowerInvariant();
+            bool right = (_s.StripSide ?? "left").ToLowerInvariant() == "right";
+            double px = _s.StripPx;
+            switch (edge)
             {
                 case "bottom":
-                    Left = (pw - Width) / 2; Top = ph - Height; break;
+                    Top = ph - Height;
+                    Left = px < 0 ? (pw - Width) / 2
+                        : right ? pw - Width - px : px;
+                    break;
                 case "left":
-                    Left = 0; Top = (ph - Height) / 2; break;
+                    Left = 0;
+                    Top = px < 0 ? (ph - Height) / 2
+                        : right ? ph - Height - px : px;
+                    break;
                 case "right":
-                    Left = pw - Width; Top = (ph - Height) / 2; break;
-                default:
-                    Left = (pw - Width) / 2; Top = 0; break;
+                    Left = pw - Width;
+                    Top = px < 0 ? (ph - Height) / 2
+                        : right ? ph - Height - px : px;
+                    break;
+                default:   // top
+                    Top = 0;
+                    Left = px < 0 ? (pw - Width) / 2
+                        : right ? pw - Width - px : px;
+                    break;
             }
             Visibility = _s.StripVisible ? Visibility.Visible : Visibility.Hidden;
         }

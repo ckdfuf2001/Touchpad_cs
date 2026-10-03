@@ -3,46 +3,73 @@ using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using TouchPadCloneV2.Core;
 
 namespace TouchPadCloneV2;
 
 /// <summary>
-/// Mode buttons popup: swipe up/down on the top strip shows every layout
-/// as a big touch button. Selecting switches layout and closes.
+/// Mode buttons popup: the strip's second tap opens the configured
+/// StripLayout cells as big touch buttons (our row layout kept).
+/// Selecting switches layout and closes.
 /// </summary>
 public partial class ModePickerWindow : Window
 {
     private readonly System.Windows.Threading.DispatcherTimer _autoClose;
 
-    public ModePickerWindow(List<string> names, string current,
-        Action<string> onSelect, Action onSettings)
+    public ModePickerWindow(AppSettings s, string current,
+        Action<string> onLayout, Action<string> onAux, Action<string> onAction,
+        Func<string, bool> auxOn, Action onSettings)
     {
         InitializeComponent();
         // Docked flush under the top strip: reads as one expanded area.
         Left = (SystemParameters.PrimaryScreenWidth - Width) / 2;
         Top = 30;
-        foreach (string name in names)
+        foreach (var row in s.StripLayout)
         {
-            var b = new Button
+            var panel = new WrapPanel
             {
-                Content = (name == current ? "● " : "○ ") + name,
-                FontSize = 16,
-                Margin = new Thickness(2),
-                Padding = new Thickness(8),
-                MinHeight = 48,
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Center,
             };
-            string n = name;
-            // Touch first (promotion-independent), mouse Click as fallback.
-            b.PreviewTouchDown += (_, e) =>
+            bool any = false;
+            foreach (var raw in row.Cells)
             {
-                DebugLog.Write($"PICKER select {n}");
-                onSelect(n);
-                Close();
-                e.Handled = true;
-            };
-            b.Click += (_, _) => { onSelect(n); Close(); };
-            List.Children.Add(b);
+                var cell = StripCell.Parse(raw);
+                if (cell.IsEmpty) continue;
+                bool on = IsOn(cell, current, auxOn);
+                var b = new Button
+                {
+                    Content = (on ? "● " : "○ ") + cell.Label,
+                    FontSize = 16,
+                    Margin = new Thickness(2),
+                    Padding = new Thickness(8),
+                    MinHeight = 48,
+                    MinWidth = 100,
+                };
+                try
+                {
+                    if (ColorPalettes.IsNone(cell.Color))
+                        b.Background = Brushes.Transparent;
+                    else if (!string.IsNullOrWhiteSpace(cell.Color))
+                        b.Background = new SolidColorBrush(
+                            (Color)ColorConverter.ConvertFromString(cell.Color));
+                }
+                catch { }
+                if (!string.IsNullOrWhiteSpace(cell.Image))
+                    b.ToolTip = cell.Image;
+                // Touch first (promotion-independent), mouse Click as fallback.
+                b.PreviewTouchDown += (_, e) =>
+                {
+                    Fire(cell, s, onLayout, onAux, onAction);
+                    Close();
+                    e.Handled = true;
+                };
+                b.Click += (_, _) => { Fire(cell, s, onLayout, onAux, onAction); Close(); };
+                panel.Children.Add(b);
+                any = true;
+            }
+            if (any) List.Children.Add(panel);
         }
         var close = new Button
         {
@@ -64,7 +91,7 @@ public partial class ModePickerWindow : Window
         };
         settings.Click += (_, _) => { onSettings(); Close(); };
         List.Children.Add(settings);
-        DebugLog.Write($"PICKER open n={names.Count} current={current}");
+        DebugLog.Write($"PICKER open current={current}");
         _autoClose = new System.Windows.Threading.DispatcherTimer
         {
             Interval = TimeSpan.FromSeconds(10),
@@ -81,6 +108,47 @@ public partial class ModePickerWindow : Window
             var p = e.GetTouchPoint(this).Position;
             DebugLog.Write($"PICKER touch @{p.X:0},{p.Y:0} src={e.Source?.GetType().Name}");
         };
+    }
+
+    /// <summary>Radio/on state: layout cells match current layout,
+    /// artist/virtual cells follow the aux toggles.</summary>
+    private static bool IsOn(StripCell cell, string current,
+        Func<string, bool> auxOn)
+    {
+        if (cell.Value.StartsWith("layout:", StringComparison.OrdinalIgnoreCase))
+        {
+            string name = cell.Value.Substring(7);
+            if (name.Contains("artist", StringComparison.OrdinalIgnoreCase))
+                return auxOn("artist");
+            if (name.Contains("virtual", StringComparison.OrdinalIgnoreCase))
+                return auxOn("virtual");
+            return string.Equals(name, current, StringComparison.OrdinalIgnoreCase);
+        }
+        return false;
+    }
+
+    /// <summary>Routes a cell: layout select, aux toggle, custom action,
+    /// strip gesture, or direct cmd/program/shortcut.</summary>
+    private static void Fire(StripCell cell, AppSettings s,
+        Action<string> onLayout, Action<string> onAux, Action<string> onAction)
+    {
+        DebugLog.Write($"PICKER fire {cell.Label} [{cell.Kind}] -> {cell.Value}");
+        if (cell.Kind != "기능")
+        {
+            if (cell.Kind == "cmd") onAction("cmd:" + cell.Value);
+            else if (cell.Kind == "프로그램") onAction("program:" + cell.Value);
+            else onAction("shortcut:" + cell.Value);   // 단축키
+            return;
+        }
+        if (cell.Value.StartsWith("layout:", StringComparison.OrdinalIgnoreCase))
+        {
+            string name = cell.Value.Substring(7);
+            if (name.Contains("artist", StringComparison.OrdinalIgnoreCase)) { onAux("artist"); return; }
+            if (name.Contains("virtual", StringComparison.OrdinalIgnoreCase)) { onAux("virtual"); return; }
+            onLayout(name);
+            return;
+        }
+        onAction(cell.Value);   // custom registry key or strip gesture
     }
 
     protected override void OnClosed(EventArgs e)
