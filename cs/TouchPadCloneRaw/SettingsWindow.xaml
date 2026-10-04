@@ -88,8 +88,12 @@
                     <local:PalettePicker x:Name="StripColorPicker" Margin="4,0,0,0"/>
                     <TextBlock Text="글자색" VerticalAlignment="Center" Margin="8,0,0,0"/>
                     <local:PalettePicker x:Name="StripTextPicker" Margin="4,0,0,0"/>
-                    <TextBlock x:Name="StripOpacityVal" FontWeight="Bold" VerticalAlignment="Center" Margin="8,0,0,0"/>
                 </StackPanel>
+                <Grid Margin="0,6,0,0">
+                    <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                    <TextBlock Text="투명도 (90% ~ 0%)" VerticalAlignment="Center"/>
+                    <TextBlock x:Name="StripOpacityVal" Grid.Column="1" FontWeight="Bold" VerticalAlignment="Center"/>
+                </Grid>
                 <Slider x:Name="StripOpacityS" Minimum="0.1" Maximum="1" TickFrequency="0.05" Margin="0,2,0,0"/>
                 <StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
                     <TextBlock Text="모니터" VerticalAlignment="Center"/>
