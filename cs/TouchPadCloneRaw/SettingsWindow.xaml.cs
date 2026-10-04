@@ -85,6 +85,10 @@ public partial class SettingsWindow : Window
         _ => "top",
     };
 
+    // Single-finger slots only. Two-finger gestures are recorded
+    // templates now (FloatPad list below), not fixed rows: the saved
+    // TwoFingerTap/swipe values in existing files keep working, they
+    // just have no editor anymore.
     private static readonly (string key, string label, Func<GestureMap, string> get, Action<GestureMap, string> set)[] Slots =
     [
         ("tap", "짧게 탭", m => m.Tap, (m, v) => m.Tap = v),
@@ -92,16 +96,6 @@ public partial class SettingsWindow : Window
         ("triple_tap", "세 번 탭", m => m.TripleTap, (m, v) => m.TripleTap = v),
         ("long_press", "길게 누르기", m => m.LongPress, (m, v) => m.LongPress = v),
         ("second_hold", "두번째 누른채", m => m.SecondHold, (m, v) => m.SecondHold = v),
-        ("two_finger_tap", "두손가락 탭", m => m.TwoFingerTap, (m, v) => m.TwoFingerTap = v),
-        ("two_finger_hold", "두손가락 홀드", m => m.TwoFingerHold, (m, v) => m.TwoFingerHold = v),
-        ("swipe_up", "두손가락 위로", m => m.SwipeUp, (m, v) => m.SwipeUp = v),
-        ("swipe_down", "두손가락 아래로", m => m.SwipeDown, (m, v) => m.SwipeDown = v),
-        ("swipe_left", "두손가락 왼쪽으로", m => m.SwipeLeft, (m, v) => m.SwipeLeft = v),
-        ("swipe_right", "두손가락 오른쪽으로", m => m.SwipeRight, (m, v) => m.SwipeRight = v),
-        ("swipe_up_left", "대각선 위왼쪽", m => m.SwipeUpLeft, (m, v) => m.SwipeUpLeft = v),
-        ("swipe_up_right", "대각선 위오른쪽", m => m.SwipeUpRight, (m, v) => m.SwipeUpRight = v),
-        ("swipe_down_left", "대각선 아래왼쪽", m => m.SwipeDownLeft, (m, v) => m.SwipeDownLeft = v),
-        ("swipe_down_right", "대각선 아래오른쪽", m => m.SwipeDownRight, (m, v) => m.SwipeDownRight = v),
     ];
 
     public SettingsWindow(AppSettings s, List<string> layouts, Action onApply,
@@ -1271,40 +1265,78 @@ public partial class SettingsWindow : Window
     }
 
     /// <summary>Renders a recorded template's motion into a mini
-    /// canvas (normalized path scaled to fit, green start, red end).</summary>
+    /// canvas (normalized path scaled to fit, green start, red end
+    /// plus a direction arrow; degenerate templates draw a dot so an
+    /// empty-looking row never happens silently).</summary>
     private static void RenderMotion(Canvas cv, RecordedGesture g)
     {
         try
         {
             cv.Children.Clear();
             var pts = Core.GestureMatch.Expand(g.Points ?? new List<double>());
-            if (pts.Count < 2) return;
             double w = cv.Width, h = cv.Height;
             if (w < 10 || h < 10) return;
-            double sc = Math.Min(w, h) * 0.92;
+            double sc = Math.Min(w, h) * 0.88;
             double cx = w / 2, cy = h / 2;
+            if (pts.Count < 2)
+            {
+                var dot0 = new Ellipse
+                {
+                    Width = 10,
+                    Height = 10,
+                    Fill = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0x7F, 0x7F)),
+                };
+                cv.Children.Add(dot0);
+                Canvas.SetLeft(dot0, cx - 5);
+                Canvas.SetTop(dot0, cy - 5);
+                return;
+            }
             var line = new Polyline
             {
                 Stroke = new SolidColorBrush(Color.FromArgb(0xFF, 0x7F, 0xE0, 0xA8)),
-                StrokeThickness = 1.5,
+                StrokeThickness = 2.5,
+                StrokeLineJoin = PenLineJoin.Round,
             };
             foreach (var p in pts)
                 line.Points.Add(new System.Windows.Point(cx + p.x * sc, cy + p.y * sc));
             cv.Children.Add(line);
             var p0 = pts[0];
             var p1 = pts[pts.Count - 1];
-            foreach (var (pp, col) in new[] { (p0, 0xFF7FE0A8u), (p1, 0xFFFF7F7Fu) })
+            foreach (var (pp, col, sz) in new[] { (p0, 0xFF7FE0A8u, 8.0), (p1, 0xFFFF7F7Fu, 8.0) })
             {
                 var dot = new Ellipse
                 {
-                    Width = 6,
-                    Height = 6,
+                    Width = sz,
+                    Height = sz,
                     Fill = new SolidColorBrush(Color.FromArgb(
                         (byte)(col >> 24), (byte)(col >> 16), (byte)(col >> 8), (byte)col)),
                 };
                 cv.Children.Add(dot);
-                Canvas.SetLeft(dot, cx + pp.x * sc - 3);
-                Canvas.SetTop(dot, cy + pp.y * sc - 3);
+                Canvas.SetLeft(dot, cx + pp.x * sc - sz / 2);
+                Canvas.SetTop(dot, cy + pp.y * sc - sz / 2);
+            }
+            // Direction arrow on the last segment.
+            if (pts.Count >= 2)
+            {
+                var pa = pts[pts.Count - 2];
+                double dx = p1.x - pa.x, dy = p1.y - pa.y;
+                double len = Math.Sqrt(dx * dx + dy * dy);
+                if (len > 1e-9)
+                {
+                    double ux = dx / len, uy = dy / len;
+                    double ex = cx + p1.x * sc, ey = cy + p1.y * sc;
+                    var arr = new Polygon
+                    {
+                        Fill = new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0x7F, 0x7F)),
+                        Points = new PointCollection
+                        {
+                            new System.Windows.Point(ex + ux * 9, ey + uy * 9),
+                            new System.Windows.Point(ex - uy * 5 - ux * 3, ey + ux * 5 - uy * 3),
+                            new System.Windows.Point(ex + uy * 5 - ux * 3, ey - ux * 5 - uy * 3),
+                        },
+                    };
+                    cv.Children.Add(arr);
+                }
             }
         }
         catch { }
@@ -1375,8 +1407,8 @@ public partial class SettingsWindow : Window
                 };
                 var prev = new Canvas
                 {
-                    Width = 120,
-                    Height = 56,
+                    Width = 150,
+                    Height = 68,
                     Margin = new Thickness(4, 0, 0, 0),
                     Background = new SolidColorBrush(Color.FromArgb(0xFF, 0x0A, 0x0F, 0x14)),
                 };
