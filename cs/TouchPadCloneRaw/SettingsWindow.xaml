@@ -227,7 +227,7 @@
             <StackPanel Margin="14">
                 <TextBlock Text="FloatPad 계열 레이아웃 제스처" FontWeight="Bold"/>
                 <TextBlock Text="floatpad / leftpad / rightpad / fullscreen …" Foreground="Gray"/>
-                <TextBlock Text="제스처 동작은 손가락 2개로만 실행됩니다. 한 손가락은 커서만 (이동·탭·홀드). 두 손가락 = 세로 스크롤, 가로 스와이프 내비게이션." Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"/>
+                <TextBlock Text="제스처 동작은 손가락 2개 이상에서만 실행됩니다. 한 손가락은 커서만 (이동·탭·홀드). 두 손가락 = 세로 스크롤, 가로 스와이프 내비게이션." Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                     <Button x:Name="RecBtn" Content="+ 제스처 추가" Width="100"/>
                     <TextBlock x:Name="RecStateLbl" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="Gray"/>

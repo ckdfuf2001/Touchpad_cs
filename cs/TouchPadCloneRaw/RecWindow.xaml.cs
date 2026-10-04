@@ -35,7 +35,7 @@ public sealed class RecWindow : Window
         Background = new SolidColorBrush(Color.FromArgb(0xFF, 0x10, 0x13, 0x1A));
 
         var root = new StackPanel { Margin = new Thickness(12) };
-        _status.Text = "두손가락으로 그리고 떼세요 (한손가락은 무시됨)";
+        _status.Text = "두 손가락 이상으로 그리고 떼세요 (한손가락은 무시됨)";
         _status.Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0x9A, 0xA6, 0xBD));
         _status.Margin = new Thickness(0, 0, 0, 6);
         root.Children.Add(_status);

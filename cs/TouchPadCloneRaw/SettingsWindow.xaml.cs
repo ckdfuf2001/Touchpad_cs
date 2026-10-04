@@ -5,6 +5,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Windows.Shapes;
 using Microsoft.Win32;
 using TouchPadCloneV2.Core;
 using WComboBox = System.Windows.Controls.ComboBox;
@@ -1269,6 +1270,46 @@ public partial class SettingsWindow : Window
         RebuildFloatGestures();
     }
 
+    /// <summary>Renders a recorded template's motion into a mini
+    /// canvas (normalized path scaled to fit, green start, red end).</summary>
+    private static void RenderMotion(Canvas cv, RecordedGesture g)
+    {
+        try
+        {
+            cv.Children.Clear();
+            var pts = Core.GestureMatch.Expand(g.Points ?? new List<double>());
+            if (pts.Count < 2) return;
+            double w = cv.Width, h = cv.Height;
+            if (w < 10 || h < 10) return;
+            double sc = Math.Min(w, h) * 0.92;
+            double cx = w / 2, cy = h / 2;
+            var line = new Polyline
+            {
+                Stroke = new SolidColorBrush(Color.FromArgb(0xFF, 0x7F, 0xE0, 0xA8)),
+                StrokeThickness = 1.5,
+            };
+            foreach (var p in pts)
+                line.Points.Add(new System.Windows.Point(cx + p.x * sc, cy + p.y * sc));
+            cv.Children.Add(line);
+            var p0 = pts[0];
+            var p1 = pts[pts.Count - 1];
+            foreach (var (pp, col) in new[] { (p0, 0xFF7FE0A8u), (p1, 0xFFFF7F7Fu) })
+            {
+                var dot = new Ellipse
+                {
+                    Width = 6,
+                    Height = 6,
+                    Fill = new SolidColorBrush(Color.FromArgb(
+                        (byte)(col >> 24), (byte)(col >> 16), (byte)(col >> 8), (byte)col)),
+                };
+                cv.Children.Add(dot);
+                Canvas.SetLeft(dot, cx + pp.x * sc - 3);
+                Canvas.SetTop(dot, cy + pp.y * sc - 3);
+            }
+        }
+        catch { }
+    }
+
     /// <summary>Unified gesture list: built-in slots (saved via 적용·저장
     /// below) plus recorded gestures (live) in one place.</summary>
     private void RebuildFloatGestures()
@@ -1323,9 +1364,28 @@ public partial class SettingsWindow : Window
                     RebuildFloatGestures();
                     FireApply();
                 };
+                var badge = new TextBlock
+                {
+                    Text = $"{g.Fingers}핑거",
+                    Width = 44,
+                    Margin = new Thickness(4, 0, 0, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0x9A, 0xA6, 0xBD)),
+                    FontSize = 11,
+                };
+                var prev = new Canvas
+                {
+                    Width = 120,
+                    Height = 56,
+                    Margin = new Thickness(4, 0, 0, 0),
+                    Background = new SolidColorBrush(Color.FromArgb(0xFF, 0x0A, 0x0F, 0x14)),
+                };
+                RenderMotion(prev, g);
                 row.Children.Add(name);
                 row.Children.Add(act);
                 row.Children.Add(del);
+                row.Children.Add(badge);
+                row.Children.Add(prev);
                 FloatGestureList.Children.Add(row);
             }
         }
@@ -1338,7 +1398,7 @@ public partial class SettingsWindow : Window
         {
             if (g == null || g.Points.Count == 0)
             {
-                RecStateLbl.Text = "인식 실패: 두손가락으로 길게 그리세요";
+                RecStateLbl.Text = "인식 실패: 두 손가락 이상으로 길게 그리세요";
                 return;
             }
             int n = 1;

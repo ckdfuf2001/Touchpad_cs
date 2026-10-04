@@ -643,6 +643,8 @@ public partial class TouchPadWindow : Window
     private bool CloseTwoTap(Finger f, int fx, int fy, double ms)
     {
         if (!_wasTwo || _twoSeen || _twoScrolled) return false;
+        // Two fingers only: 3+ contacts belong to recorded templates.
+        if (_twoMaxN > 2) return false;
         if (!_s.TapToClick) return false;
         if (f.Zone != "pad" && f.Zone != "left-click" && f.Zone != "right-click") return false;
         if (!_twoOk || _twoOverlap < 40 || _twoDD < 18 || ms > _s.TapJudgeMs || f.Moved) return false;
@@ -670,6 +672,9 @@ public partial class TouchPadWindow : Window
     {
         if (_twoFired || _twoScrolled) return false;
         if (!_wasTwo) return false;
+        // Two fingers only: 3+ contacts belong to recorded templates
+        // (matched at the final lift), never to the two-finger tap.
+        if (_twoMaxN > 2) return false;
         if (!_s.TapToClick) return false;
         if (f.Zone != "pad" && f.Zone != "left-click" && f.Zone != "right-click") return false;
         if (fx == int.MinValue) return false;
