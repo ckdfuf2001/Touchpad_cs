@@ -955,7 +955,7 @@ public partial class SettingsWindow : Window
                     System.Windows.Controls.Canvas.SetTop(mr, Y(b.Top));
                     var ml = new TextBlock
                     {
-                        Text = s.DeviceName.Replace("\\\\.\\", "") + (s.Primary ? " (주)" : ""),
+                        Text = s.DeviceName.Replace(@"\\.\", "") + (s.Primary ? " (주)" : ""),
                         FontSize = 9,
                         Foreground = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0x9A, 0xA6, 0xBD)),
                     };
@@ -981,14 +981,26 @@ public partial class SettingsWindow : Window
             {
                 Width = Math.Max(2, r.w * sc),
                 Height = Math.Max(2, r.h * sc),
-                Fill = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x55, 0x7F, 0xE0, 0xA8)),
+                Fill = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x18, 0x7F, 0xE0, 0xA8)),
                 Stroke = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0x7F, 0xE0, 0xA8)),
                 StrokeThickness = 1.5,
             };
             LayoutPreview.Children.Add(pr);
             System.Windows.Controls.Canvas.SetLeft(pr, X(r.l));
             System.Windows.Controls.Canvas.SetTop(pr, Y(r.t));
-            // Tiles (ini 0..100 relative -> pad rect).
+            // Tiles in the pad's REAL zone colors (no more stacked cyan):
+            // structural tiles stay quiet, interactive tiles pop.
+            System.Windows.Media.Color ZC(string hex)
+            {
+                try
+                {
+                    return (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex);
+                }
+                catch
+                {
+                    return System.Windows.Media.Color.FromArgb(0x44, 0xAA, 0xAA, 0xAA);
+                }
+            }
             int shown = 0;
             if (_presets.TryGetValue(sec, out var lay) && lay != null)
             {
@@ -1000,27 +1012,38 @@ public partial class SettingsWindow : Window
                     double tw = r.w * t.W / 100.0, th = (r.h - 30) * t.H / 100.0;
                     if (tw < 1 || th < 1) continue;
                     string kind = (t.Kind ?? "").ToLowerInvariant();
-                    byte cr = 0xAA, cg = 0xAA, cb = 0xAA;
-                    if (kind.Contains("pad")) { cr = 0x35; cg = 0xC4; cb = 0xFF; }
-                    else if (kind.Contains("wheel")) { cr = 0xFF; cg = 0x7F; cb = 0x7F; }
-                    else if (kind.Contains("click") || kind.Contains("drag") || kind.Contains("btn"))
-                    { cr = 0x7F; cg = 0xE0; cb = 0xA8; }
+                    string zhex;
+                    bool structural = false;
+                    if (kind.Contains("frame") || kind.Contains("blank"))
+                    { zhex = ""; structural = true; }
+                    else if (kind.Contains("wheel")) zhex = _s.EffZoneWheel(sec);
+                    else if (kind.Contains("lbtn")) zhex = _s.EffZoneLeft(sec);
+                    else if (kind.Contains("rbtn")) zhex = _s.EffZoneRight(sec);
+                    else if (kind.Contains("click") || kind.Contains("drag"))
+                        zhex = (t.ClickButton ?? "").ToLowerInvariant() == "right"
+                            ? _s.EffZoneRight(sec) : _s.EffZoneLeft(sec);
+                    else if (kind.Contains("pad")) zhex = _s.EffZonePad(sec);
+                    else zhex = _s.EffBackground(sec);
+                    var zc = ZC(zhex);
                     var tr = new System.Windows.Shapes.Rectangle
                     {
                         Width = Math.Max(1, tw * sc),
                         Height = Math.Max(1, th * sc),
-                        Fill = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x66, cr, cg, cb)),
-                        Stroke = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xAA, cr, cg, cb)),
+                        Fill = structural
+                            ? System.Windows.Media.Brushes.Transparent
+                            : new SolidColorBrush(zc),
+                        Stroke = new SolidColorBrush(System.Windows.Media.Color.FromArgb(
+                            structural ? (byte)0x66 : (byte)0xFF, zc.R, zc.G, zc.B)),
                         StrokeThickness = 0.75,
                     };
                     LayoutPreview.Children.Add(tr);
                     System.Windows.Controls.Canvas.SetLeft(tr, X(tx));
                     System.Windows.Controls.Canvas.SetTop(tr, Y(ty));
-                    if (tw * sc > 44 && th * sc > 12 && !string.IsNullOrWhiteSpace(t.Name))
+                    if (tw * sc > 44 && th * sc > 12 && !string.IsNullOrWhiteSpace(t.Kind))
                     {
                         var tl = new TextBlock
                         {
-                            Text = t.Name,
+                            Text = t.Kind,
                             FontSize = 9,
                             Foreground = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0xE8, 0xEC, 0xF4)),
                         };
