@@ -1004,10 +1004,10 @@ public partial class TouchPadWindow : Window
                             if (_g != G.Pending) return;
                             if (!_fingers.TryGetValue(_holdId, out var hf)) return;
                             if (hf.Moved) return;
-                            // A two-contact session owns its ending (tap or
-                            // swipe below): the single-press hold must not
-                            // fire into it.
-                            if (_twoSeen) return;
+                            // Ownership (TouchScript rule): the moment a pair is
+                            // live, the single-press pipeline is dead - any
+                            // live second contact kills the hold, far or not.
+                            if (_twoSeen || _fingers.Count >= 2) return;
                             DoMapAction(ActiveMap().LongPress, _downOrigX, _downOrigY);
                             Status($"hold right @({_downOrigX},{_downOrigY})");
                             _lastWhat = "hold-right";
@@ -1028,6 +1028,12 @@ public partial class TouchPadWindow : Window
             {
                 _wasTwo = true;
                 _twoJoinT = Environment.TickCount64;
+                // Decisive switch: the single press dies HERE (hold timer
+                // stops now, moves consume on live-n below) - the gesture
+                // owns the session from this contact on.
+                _holdTimer?.Stop();
+                _holdTimer = null;
+                _holdId = -1;
                 Finger? other = null;
                 foreach (var kv in _fingers)
                     if (kv.Key != e.TouchDevice.Id) { other = kv.Value; break; }
