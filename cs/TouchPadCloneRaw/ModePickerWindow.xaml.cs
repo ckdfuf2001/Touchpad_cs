@@ -27,7 +27,9 @@ public partial class ModePickerWindow : Window
         Top = 30;
         foreach (var row in s.StripLayout)
         {
-            var panel = new WrapPanel
+            // One config row = one visual row (never wraps: a 4-cell
+            // row stays 4 across, the window grows to fit).
+            var panel = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
                 HorizontalAlignment = HorizontalAlignment.Center,

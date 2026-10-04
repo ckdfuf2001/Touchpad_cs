@@ -320,6 +320,14 @@ public partial class App : WApplication
     private void HandleStripTap()
     {
         if (_pad == null || _strip == null) return;
+        // Toggle: open -> tap again closes. Tap never fires;
+        // execution is the mode triangle / picker items.
+        if (_picker != null)
+        {
+            try { _picker.Close(); } catch (InvalidOperationException) { }
+            _picker = null;
+            return;
+        }
         ShowModePicker();
     }
 
@@ -437,7 +445,8 @@ public partial class App : WApplication
                 string edge = (_settings.StripEdge ?? "top").ToLowerInvariant();
                 var home = _strip.MonitorRect();
                 double ox = home.l, oy = home.t, pw = home.w, ph = home.h;
-                double pwid = _picker.Width;
+                // Auto width: measured, fallback 380.
+                double pwid = _picker.ActualWidth > 0 ? _picker.ActualWidth : 380;
                 double phei = _picker.ActualHeight > 0 ? _picker.ActualHeight : 300;
                 double cx = _strip.Left + (_strip.Width - pwid) / 2;
                 cx = Math.Max(ox, Math.Min(ox + pw - pwid, cx));
