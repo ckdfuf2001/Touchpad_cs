@@ -512,9 +512,33 @@ public partial class App : WApplication
             }
             catch (InvalidOperationException) { }
         };
-        _picker.Show();
+        try { _picker.Show(); }
+        catch (Exception ex)
+        {
+            Core.DebugLog.Write($"PICKER show-failed {ex.GetType().Name}: {ex.Message}");
+            try { _picker.Close(); } catch { }
+            _picker = null;
+            return;
+        }
         Core.TopmostKeeper.Raise(_picker);
         if (_strip != null) Core.TopmostKeeper.Raise(_strip);
+        // Visibility audit: log actual state 500ms after show (catches
+        // instant-close, off-screen and invisible in one shot).
+        var audit = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(500),
+        };
+        audit.Tick += (_, _) =>
+        {
+            audit.Stop();
+            try
+            {
+                if (_picker == null) { Core.DebugLog.Write("PICKER audit: gone"); return; }
+                Core.DebugLog.Write($"PICKER audit vis={_picker.IsVisible} L={_picker.Left:0} T={_picker.Top:0} W={_picker.ActualWidth:0} H={_picker.ActualHeight:0} op={_picker.Opacity}");
+            }
+            catch (Exception ex) { Core.DebugLog.Write($"PICKER audit-failed {ex.GetType().Name}"); }
+        };
+        audit.Start();
     }
 
     /// <summary>Picker cell action: direct cmd/program/shortcut,

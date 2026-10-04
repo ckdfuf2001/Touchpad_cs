@@ -545,7 +545,20 @@ public partial class TouchPadWindow : Window
                 : action == "right_click" ? "left_click" : action;
         // Windows built-ins (pad gestures + aux buttons).
         if (action.StartsWith("win_", StringComparison.Ordinal))
+        {
+            // Diagnostic: Win+Down-style actions need a minimizable
+            // foreground window; log what it is at fire time.
+            try
+            {
+                IntPtr fg = GetForegroundWindow();
+                GetWindowThreadProcessId(fg, out uint fpid);
+                string fpn = "";
+                try { fpn = System.Diagnostics.Process.GetProcessById((int)fpid).ProcessName; } catch { }
+                Log.Write($"WINACT {action} fg=0x{fg.ToInt64():X} ({fpn})");
+            }
+            catch { }
             return Core.ActionRunner.RunWinAction(action);
+        }
         switch (action)
         {
             case "left_click":
@@ -1766,6 +1779,9 @@ public partial class TouchPadWindow : Window
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
