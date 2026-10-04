@@ -553,6 +553,8 @@ public partial class App : WApplication
                 { Kind = "program", Path = action.Substring(8) });
         else if (action.StartsWith("shortcut:", StringComparison.OrdinalIgnoreCase))
             Core.ActionRunner.RunShortcut(action.Substring(9));
+        else if (action.StartsWith("window:", StringComparison.OrdinalIgnoreCase))
+            Core.ActionRunner.WindowOps.RunOp(action);
         else if (_settings.Actions != null
             && _settings.Actions.TryGetValue(action, out var def))
             Core.ActionRunner.Run(def);

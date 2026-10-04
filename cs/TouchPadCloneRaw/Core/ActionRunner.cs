@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace TouchPadCloneV2.Core;
 
@@ -93,16 +94,15 @@ public static class ActionRunner
 
     /// <summary>Windows built-in features: pad gesture id -> shortcut
     /// spec (RunShortcut syntax). Strip window cells use the same specs
-    /// as "shortcut:spec" values (executed by the existing path).</summary>
+    /// as "shortcut:spec" values (executed by the existing path).
+    /// minimize/maximize/close have NO spec here: they run explicitly
+    /// on the top user window (WindowOps) so focus never matters.</summary>
     public static readonly (string id, string label, string spec)[] WinActions =
     [
         ("win_show_desktop", "바탕화면 보기", "Win+D"),
         ("win_task_view", "작업 보기", "Win+Tab"),
-        ("win_close_window", "창 닫기", "Alt+F4"),
         ("win_snap_left", "왼쪽 스냅", "Win+Left"),
         ("win_snap_right", "오른쪽 스냅", "Win+Right"),
-        ("win_maximize", "최대화", "Win+Up"),
-        ("win_minimize", "최소화/복원", "Win+Down"),
         ("win_desk_prev", "이전 데스크톱", "Win+Ctrl+Left"),
         ("win_desk_next", "다음 데스크톱", "Win+Ctrl+Right"),
         ("win_desk_new", "새 데스크톱", "Win+Ctrl+D"),
@@ -137,6 +137,91 @@ public static class ActionRunner
         foreach (var (i, _, spec) in WinActions)
             if (i == id) return RunShortcut(spec);
         return false;
+    }
+
+    /// <summary>Window ops that must not depend on focus (Win+Down on
+    /// our own pad would minimize us): minimize/maximize/close act on
+    /// the topmost USER window directly. Everything else stays a
+    /// focus-independent system hotkey via RunShortcut.</summary>
+    public static class WindowOps
+    {
+        private delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+        [DllImport("user32.dll")]
+        private static extern bool EnumWindows(EnumProc f, IntPtr l);
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsWindowVisible(IntPtr h);
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsIconic(IntPtr h);
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindow(IntPtr h, int cmd);
+        [DllImport("user32.dll")]
+        private static extern bool PostMessage(IntPtr h, uint msg, UIntPtr w, IntPtr l);
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+        private static extern IntPtr GetWindowLongPtr(IntPtr h, int n);
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmGetWindowAttribute(IntPtr h, int a, out int v, int s);
+
+        private const int SW_MINIMIZE = 6, SW_MAXIMIZE = 3, SW_RESTORE = 9;
+        private const uint WM_CLOSE = 0x10;
+
+        /// <summary>Topmost user window: visible, not cloaked, not a
+        /// click-through overlay, never ours. Zero when none.</summary>
+        public static IntPtr TopUserWindow()
+        {
+            IntPtr found = IntPtr.Zero;
+            try
+            {
+                uint ours = (uint)Environment.ProcessId;
+                EnumWindows((h, _) =>
+                {
+                    if (found != IntPtr.Zero) return false;
+                    GetWindowThreadProcessId(h, out uint pid);
+                    if (pid == ours) return true;
+                    if (!IsWindowVisible(h)) return true;
+                    try
+                    {
+                        if (DwmGetWindowAttribute(h, 14, out int cl, 4) == 0 && cl != 0) return true;
+                        if (((long)GetWindowLongPtr(h, -20) & 0x20L) != 0) return true;
+                    }
+                    catch { }
+                    found = h;
+                    return false;
+                }, IntPtr.Zero);
+            }
+            catch { }
+            return found;
+        }
+
+        /// <summary>Runs win_minimize / win_maximize / win_close_window
+        /// ("window:" prefix accepted too). False = unknown id.</summary>
+        public static bool RunOp(string id)
+        {
+            string k = id.StartsWith("window:", StringComparison.OrdinalIgnoreCase)
+                ? "win_" + id.Substring(7) : id;
+            try
+            {
+                IntPtr h = TopUserWindow();
+                if (h == IntPtr.Zero) return false;
+                switch (k)
+                {
+                    case "win_minimize":
+                        ShowWindow(h, IsIconic(h) ? SW_RESTORE : SW_MINIMIZE);
+                        return true;
+                    case "win_maximize":
+                        ShowWindow(h, IsIconic(h) ? SW_RESTORE : SW_MAXIMIZE);
+                        return true;
+                    case "win_close_window":
+                        PostMessage(h, WM_CLOSE, UIntPtr.Zero, IntPtr.Zero);
+                        return true;
+                }
+            }
+            catch { }
+            return false;
+        }
     }
 
     /// <summary>Strip menu (StripLayout cells) routing shared by the

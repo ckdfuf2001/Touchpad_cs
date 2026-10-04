@@ -285,6 +285,12 @@
                 <ComboBox x:Name="PadSwap" Margin="0,2,0,2"/>
                 <TextBlock Text="Pad tap = click"/>
                 <ComboBox x:Name="PadTap" Margin="0,2,0,6"/>
+                <CheckBox x:Name="PadGesturesOwn" Content="이 패드만 제스처 따로 쓰기" Margin="0,2,0,2"/>
+                <Grid x:Name="PadGestureGrid" Margin="0,2,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="150"/><ColumnDefinition/>
+                    </Grid.ColumnDefinitions>
+                </Grid>
                 <Button x:Name="PadPreview" Content="미리보기 (해당 패드 적용)" Width="170" HorizontalAlignment="Left" Margin="0,4,0,0"/>
             </StackPanel>
             </ScrollViewer>

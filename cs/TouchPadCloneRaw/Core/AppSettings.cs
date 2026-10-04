@@ -22,6 +22,20 @@ public sealed class GestureMap
     public string SwipeLeft { get; set; } = "browser_back";
     public string SwipeRight { get; set; } = "browser_forward";
 
+    public GestureMap Clone() => new()
+    {
+        Tap = Tap,
+        DoubleTap = DoubleTap,
+        TripleTap = TripleTap,
+        LongPress = LongPress,
+        SecondHold = SecondHold,
+        TwoFingerTap = TwoFingerTap,
+        SwipeUp = SwipeUp,
+        SwipeDown = SwipeDown,
+        SwipeLeft = SwipeLeft,
+        SwipeRight = SwipeRight,
+    };
+
     public static readonly string[] Actions =
     [
     "none", "left_click", "right_click", "middle_click", "double_click",
@@ -132,7 +146,10 @@ public sealed class PadConfig
     public int TapJudgeMs { get; set; } = -1;     // -1 = follow global
     public bool? ScrollInvert { get; set; }       // null = follow global
     public bool? SwapButtons { get; set; }        // null = follow global
-    public bool? TapToClick { get; set; }         // null = follow global
+    public bool? TapToClick { get; set; }       // null = follow global
+    /// <summary>Per-pad gesture override (null = follow the family map).
+    /// This is how one mode (pad) gets different gestures from another.</summary>
+    public GestureMap? Gestures { get; set; }
 }
 
 /// <summary>One custom button on an artist/virtual pad.</summary>
@@ -252,6 +269,21 @@ public sealed class AppSettings
         if (layoutName.Contains("virtual", StringComparison.OrdinalIgnoreCase))
             return VirtualGestures;
         return Gestures;
+    }
+
+    /// <summary>Effective gestures for a pad: the pad's own override when
+    /// set, else the layout family map. This is how one mode (pad) gets
+    /// different gestures from another.</summary>
+    public GestureMap EffGestures(string layoutName)
+    {
+        try
+        {
+            string key = PadFamilyKey(layoutName);
+            if (Pads.TryGetValue(key, out var p) && p?.Gestures != null)
+                return p.Gestures;
+        }
+        catch { }
+        return ActiveGestures(layoutName);
     }
 
     /// <summary>Top-strip gestures, user-mappable (General tab).</summary>

@@ -485,11 +485,11 @@ public partial class SettingsWindow : Window
         ("패드", "패드 켜기/끄기", "toggle_pad"),
         ("윈도우", "바탕화면 보기", "shortcut:Win+D"),
         ("윈도우", "작업 보기", "shortcut:Win+Tab"),
-        ("윈도우", "창 닫기", "shortcut:Alt+F4"),
+        ("윈도우", "창 닫기", "window:close_window"),
         ("윈도우", "왼쪽 스냅", "shortcut:Win+Left"),
         ("윈도우", "오른쪽 스냅", "shortcut:Win+Right"),
-        ("윈도우", "최대화", "shortcut:Win+Up"),
-        ("윈도우", "최소화/복원", "shortcut:Win+Down"),
+        ("윈도우", "최대화", "window:maximize"),
+        ("윈도우", "최소화/복원", "window:minimize"),
         ("윈도우", "이전 데스크톱", "shortcut:Win+Ctrl+Left"),
         ("윈도우", "다음 데스크톱", "shortcut:Win+Ctrl+Right"),
         ("윈도우", "새 데스크톱", "shortcut:Win+Ctrl+D"),
@@ -701,6 +701,12 @@ public partial class SettingsWindow : Window
         // of "follow global" and killed taps).
         foreach (var c in new[] { PadScroll, PadSwap, PadTap })
             foreach (var o in new[] { "전역 따름", "켜기", "끄기" }) c.Items.Add(o);
+        BuildGestureGrid(PadGestureGrid, _s.Gestures, "pad:");
+        foreach (var (key, _, _, _) in Slots)
+            if (_gestures.TryGetValue("pad:" + key, out var cb))
+                cb.SelectionChanged += (_, _) => { if (!_padSync) SavePadGestures(); };
+        PadGesturesOwn.Checked += (_, _) => { PadGestureGrid.IsEnabled = true; SavePadGestures(); };
+        PadGesturesOwn.Unchecked += (_, _) => { PadGestureGrid.IsEnabled = false; SavePadGestures(); };
         PadSel.SelectionChanged += (_, _) => LoadPadTab();
         PadArea.SelectionChanged += (_, _) => SavePadTab();
         PadVisible.Click += (_, _) => SavePadTab();
@@ -710,6 +716,10 @@ public partial class SettingsWindow : Window
         PadPreview.Click += (_, _) => PreviewPad();
         LoadPadTab();
     }
+
+    /// <summary>Suppresses gesture-combo save-backs while LoadPadTab
+    /// fills them programmatically.</summary>
+    private bool _padSync;
 
     /// <summary>null(global) / true / false to combo index.</summary>
     private static int TriToIndex(bool? v) => v == null ? 0 : (v == true ? 1 : 2);
@@ -730,6 +740,46 @@ public partial class SettingsWindow : Window
         PadScroll.SelectedIndex = TriToIndex(p.ScrollInvert);
         PadSwap.SelectedIndex = TriToIndex(p.SwapButtons);
         PadTap.SelectedIndex = TriToIndex(p.TapToClick);
+        FillPadGestures(name, p);
+    }
+
+    /// <summary>Fills the per-pad gesture grid: the override when set,
+    /// else the effective family map (shown disabled).</summary>
+    private void FillPadGestures(string name, PadConfig p)
+    {
+        _padSync = true;
+        try
+        {
+            var ov = p.Gestures;
+            PadGesturesOwn.IsChecked = ov != null;
+            var disp = ov ?? _s.ActiveGestures(name);
+            foreach (var (key, _, get, _) in Slots)
+                if (_gestures.TryGetValue("pad:" + key, out var cb))
+                    cb.SelectedItem = get(disp);
+            PadGestureGrid.IsEnabled = ov != null;
+        }
+        finally { _padSync = false; }
+    }
+
+    /// <summary>Writes the per-pad gesture override (or clears it when
+    /// the box is off = follow family). Live save like the rest of
+    /// this tab.</summary>
+    private void SavePadGestures()
+    {
+        string name = PadSel.SelectedItem as string ?? "floatpad";
+        if (!_s.Pads.TryGetValue(name, out var p))
+        { p = new PadConfig(); _s.Pads[name] = p; }
+        if (PadGesturesOwn.IsChecked == true)
+        {
+            var m = p.Gestures ?? new GestureMap();
+            foreach (var (key, _, _, set) in Slots)
+                if (_gestures.TryGetValue("pad:" + key, out var cb))
+                    set(m, Sel(cb));
+            p.Gestures = m;
+        }
+        else p.Gestures = null;
+        _s.Save();
+        FireApply();
     }
 
     private void SavePadTab()

@@ -397,7 +397,7 @@ public partial class TouchPadWindow : Window
 
     private Core.Layout? _layout;
     private string _layoutName = "floatpad";
-    private GestureMap ActiveMap() => _s.ActiveGestures(_layoutName);
+    private GestureMap ActiveMap() => _s.EffGestures(_layoutName);
 
     /// <summary>Called by the app on layout switch: gesture family +
     /// tile overlay refresh. Hit-testing stays cs2 zones.</summary>
@@ -547,7 +547,8 @@ public partial class TouchPadWindow : Window
         if (_s.SwapButtons)
             action = action == "left_click" ? "right_click"
                 : action == "right_click" ? "left_click" : action;
-        // Windows built-ins (pad gestures + aux buttons).
+        // Windows built-ins (pad gestures + aux buttons): explicit
+        // window ops first (focus-proof), the rest via shortcuts.
         if (action.StartsWith("win_", StringComparison.Ordinal))
         {
             // Diagnostic: Win+Down-style actions need a minimizable
@@ -561,6 +562,7 @@ public partial class TouchPadWindow : Window
                 Log.Write($"WINACT {action} fg=0x{fg.ToInt64():X} ({fpn})");
             }
             catch { }
+            if (Core.ActionRunner.WindowOps.RunOp(action)) return true;
             return Core.ActionRunner.RunWinAction(action);
         }
         switch (action)
