@@ -1788,9 +1788,6 @@ public partial class TouchPadWindow : Window
                 _lastWhat = "session-end";
                 _twoScrolled = false;
                 _twoFired = false;
-                // Recording completes on session end (two fingers or more
-                // only - singles never reach the recorder).
-                Core.GestureRecorder.CompleteIfRecording(_twoTrail, _twoMaxN);
             }
             _liveTouches--;
             Surface.ReleaseTouchCapture(e.TouchDevice);
