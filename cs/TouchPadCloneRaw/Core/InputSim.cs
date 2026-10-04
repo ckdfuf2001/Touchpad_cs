@@ -77,6 +77,9 @@ public static class InputSim
     private static extern bool GetCursorPos(out POINT2 lpPoint);
 
     [DllImport("user32.dll")]
+    private static extern uint MapVirtualKey(uint uCode, uint uMapType);
+
+    [DllImport("user32.dll")]
     private static extern int GetSystemMetrics(int nIndex);
 
 
@@ -104,7 +107,9 @@ public static class InputSim
         }
         uint flags = (up ? KEYEVENTF_KEYUP : 0)
             | (IsExtendedKey(vk) ? KEYEVENTF_EXTENDEDKEY : 0);
-        keybd_event((byte)vk, 0, flags, UIntPtr.Zero);
+        // Extended keys need a real scan code (0 = ignored).
+        uint scan = MapVirtualKey(vk, 0);
+        keybd_event((byte)vk, (byte)scan, flags, UIntPtr.Zero);
     }
 
     public static (int X, int Y) Cursor()
