@@ -301,9 +301,44 @@ public partial class App : WApplication
         }
         _settingsWin = new SettingsWindow(_settings,
             Core.PresetParser.OrderedNames(_presets), () => Apply(),
-            (name, on) => ShowAux(name, on), () => ShowPad(), _presets);
+            (name, on) => ShowAux(name, on), () => ShowPad(), _presets,
+            cb => OpenRecWindow(cb));
         _settingsWin.Closed += (_, _) => _settingsWin = null;
         _settingsWin.Show();
+    }
+
+    /// <summary>Dedicated recording window: the pad and strip hide so
+    /// nothing can act mid-recording, and come back afterwards.</summary>
+    private RecWindow? _recWin;
+
+    private void OpenRecWindow(Action<Core.RecordedGesture?> done)
+    {
+        try
+        {
+            if (_recWin != null) { _recWin.Activate(); return; }
+            bool padWas = _pad != null && _pad.IsVisible;
+            bool stripWas = _strip != null && _strip.IsVisible;
+            try
+            {
+                if (_picker != null) { _picker.Close(); _picker = null; }
+            }
+            catch (InvalidOperationException) { _picker = null; }
+            try { _pad?.Hide(); } catch { }
+            try { if (_strip != null) _strip.Visibility = Visibility.Hidden; } catch { }
+            _recWin = new RecWindow(done);
+            _recWin.Closed += (_, _) =>
+            {
+                _recWin = null;
+                try { if (padWas && _pad != null) _pad.Show(); } catch { }
+                try
+                {
+                    if (stripWas && _strip != null) _strip.Visibility = Visibility.Visible;
+                }
+                catch { }
+            };
+            _recWin.Show();
+        }
+        catch { }
     }
 
     private void ToggleAssist()

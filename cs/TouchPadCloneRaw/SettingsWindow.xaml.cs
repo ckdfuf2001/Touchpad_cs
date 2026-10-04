@@ -19,6 +19,7 @@ public partial class SettingsWindow : Window
     private readonly Dictionary<string, WComboBox> _gestures = new();
     private readonly Action<string, bool>? _showAux;
     private readonly Action? _showPad;
+    private readonly Action<Action<RecordedGesture?>>? _showRec;
 
     /// <summary>True while the constructor sets initial control values:
     /// those fire change events that must not Apply (opening settings
@@ -104,12 +105,14 @@ public partial class SettingsWindow : Window
 
     public SettingsWindow(AppSettings s, List<string> layouts, Action onApply,
         Action<string, bool>? showAux = null, Action? showPad = null,
-        Dictionary<string, Layout>? presets = null)
+        Dictionary<string, Layout>? presets = null,
+        Action<Action<RecordedGesture?>>? showRec = null)
     {
         _s = s;
         _onApply = onApply;
         _showAux = showAux;
         _showPad = showPad;
+        _showRec = showRec;
         _presets = presets ?? new Dictionary<string, Layout>(StringComparer.OrdinalIgnoreCase);
         InitializeComponent();
         // Own title bar: touch-reachable close + drag to move (mouse/touch).
@@ -274,7 +277,6 @@ public partial class SettingsWindow : Window
         WirePicker(ZonePPicker, ColorPalettes.Zones, false, () => _s.ZonePad, v => _s.ZonePad = v ?? "없음");
         WirePicker(ZoneBgPicker, ColorPalettes.Zones, false, () => _s.ZoneBg, v => _s.ZoneBg = v ?? "#8C1B1E24");
 
-        BuildGestureGrid(FloatGrid, s.Gestures, "float");
         BuildGestureGrid(ArtistGrid, s.ArtistGestures, "artist");
         BuildGestureGrid(VirtualGrid, s.VirtualGestures, "virtual");
         InitAuxTabs();
@@ -282,7 +284,6 @@ public partial class SettingsWindow : Window
         InitActionsTab();
         InitLayoutTab();
         InitRecTab();
-        Closed += (_, _) => Core.GestureRecorder.Cancel();
 
         SaveBtn.Click += (_, _) => ApplySave();
         SaveBtnFloat.Click += (_, _) => ApplySave();
@@ -1260,58 +1261,42 @@ public partial class SettingsWindow : Window
 
     private void InitRecTab()
     {
-        RecBtn.Click += (_, _) => ToggleRecording();
-        RebuildRecList();
-    }
-
-    private void ToggleRecording()
-    {
-        if (Core.GestureRecorder.IsRecording)
+        RecBtn.Click += (_, _) =>
         {
-            Core.GestureRecorder.Cancel();
-            RecBtn.Content = "+ 제스처 추가";
-            RecStateLbl.Text = "";
-            return;
-        }
-        Core.GestureRecorder.IsRecording = true;
-        Core.GestureRecorder.OnFinished = OnRecorded;
-        RecBtn.Content = "녹화 중지";
-        RecStateLbl.Text = "패드에서 두손가락 동작을 그리고 떼세요";
-        try { _showPad?.Invoke(); } catch { }
+            RecStateLbl.Text = "녹화창에 두손가락으로 그리고 떼세요";
+            try { _showRec?.Invoke(OnRecorded); } catch { }
+        };
+        RebuildFloatGestures();
     }
 
-    private void OnRecorded(RecordedGesture? g)
+    /// <summary>Unified gesture list: built-in slots (saved via 적용·저장
+    /// below) plus recorded gestures (live) in one place.</summary>
+    private void RebuildFloatGestures()
     {
         try
         {
-            RecBtn.Content = "+ 제스처 추가";
-            if (g == null || g.Points.Count == 0)
+            FloatGestureList.Children.Clear();
+            foreach (var (key, label, get, _) in Slots)
             {
-                RecStateLbl.Text = "인식 실패: 두손가락으로 길게 그리세요";
-                return;
+                var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+                row.Children.Add(new TextBlock
+                {
+                    Text = label, Width = 150, VerticalAlignment = VerticalAlignment.Center,
+                });
+                var cb = new WComboBox
+                {
+                    ItemsSource = GestureMap.Actions,
+                    SelectedItem = get(_s.Gestures),
+                    Width = 200,
+                };
+                _gestures["float:" + key] = cb;
+                row.Children.Add(cb);
+                FloatGestureList.Children.Add(row);
             }
-            int n = 1;
-            foreach (var r in _s.RecordedGestures)
-                if (r.Name.StartsWith("제스처 ")) n++;
-            g.Name = $"제스처 {n}";
-            _s.RecordedGestures.Add(g);
-            _s.Save();
-            RebuildRecList();
-            FireApply();
-            RecStateLbl.Text = $"저장됨: {g.Name} ({g.Points.Count / 2}pts)";
-        }
-        catch { }
-    }
-
-    private void RebuildRecList()
-    {
-        try
-        {
-            RecList.Children.Clear();
             foreach (var g in _s.RecordedGestures.ToList())
             {
                 var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
-                var name = new TextBox { Text = g.Name, Width = 110 };
+                var name = new TextBox { Text = g.Name, Width = 150 };
                 name.LostFocus += (_, _) =>
                 {
                     g.Name = name.Text;
@@ -1321,7 +1306,7 @@ public partial class SettingsWindow : Window
                 {
                     ItemsSource = GestureMap.Actions,
                     SelectedItem = g.Action,
-                    Width = 150,
+                    Width = 200,
                     Margin = new Thickness(4, 0, 0, 0),
                 };
                 act.SelectionChanged += (_, _) =>
@@ -1335,14 +1320,36 @@ public partial class SettingsWindow : Window
                 {
                     _s.RecordedGestures.Remove(g);
                     _s.Save();
-                    RebuildRecList();
+                    RebuildFloatGestures();
                     FireApply();
                 };
                 row.Children.Add(name);
                 row.Children.Add(act);
                 row.Children.Add(del);
-                RecList.Children.Add(row);
+                FloatGestureList.Children.Add(row);
             }
+        }
+        catch { }
+    }
+
+    private void OnRecorded(RecordedGesture? g)
+    {
+        try
+        {
+            if (g == null || g.Points.Count == 0)
+            {
+                RecStateLbl.Text = "인식 실패: 두손가락으로 길게 그리세요";
+                return;
+            }
+            int n = 1;
+            foreach (var r in _s.RecordedGestures)
+                if (r.Name.StartsWith("제스처 ")) n++;
+            g.Name = $"제스처 {n}";
+            _s.RecordedGestures.Add(g);
+            _s.Save();
+            RebuildFloatGestures();
+            FireApply();
+            RecStateLbl.Text = $"저장됨: {g.Name} ({g.Points.Count / 2}pts)";
         }
         catch { }
     }
