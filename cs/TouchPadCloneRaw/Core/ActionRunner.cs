@@ -132,7 +132,9 @@ public static class ActionRunner
                 if (row < 0 || row >= rows.Count) row = 0;
                 if (dRow != 0)
                 {
-                    row = Math.Max(0, Math.Min(rows.Count - 1, row + dRow));
+                    // Rows wrap like columns do: edge rows must visibly
+                    // move too (a clamped no-op reads as "swipe broken").
+                    row = (row + dRow + rows.Count) % rows.Count;
                     col = Math.Min(Math.Max(col, 0), rows[row].Count - 1);
                 }
                 else

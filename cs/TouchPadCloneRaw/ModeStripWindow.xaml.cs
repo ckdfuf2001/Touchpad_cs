@@ -220,11 +220,29 @@ public partial class ModeStripWindow : Window
 
     private void OnTouchDown(object sender, TouchEventArgs e)
     {
+        // Log entry FIRST (even rejections): silent drops are undebuggable.
+        System.Windows.Point sp;
+        try { sp = e.GetTouchPoint(this).Position; }
+        catch (Exception ex)
+        {
+            // A bad point must never wedge _touchId (all future touches
+            // would die silently): reset and report.
+            _touchId = -1;
+            DebugLog.Write($"STRIPDOWN-FAIL id={e.TouchDevice.Id} {ex.GetType().Name}");
+            e.Handled = true;
+            return;
+        }
+        DebugLog.Write($"STRIPDOWN-SEE id={e.TouchDevice.Id} @{sp.X:0},{sp.Y:0} src={e.OriginalSource?.GetType().Name}");
         if (Core.WpfHit.IsButton(e.OriginalSource)) return; // ✕ owns it
         if (InRows(e.OriginalSource)) return; // row items own it
-        if (_touchId != -1) { e.Handled = true; return; }
+        if (_touchId != -1)
+        {
+            DebugLog.Write($"STRIPDOWN-BUSY id={e.TouchDevice.Id} held={_touchId}");
+            e.Handled = true;
+            return;
+        }
         _touchId = e.TouchDevice.Id;
-        _start = _last = e.GetTouchPoint(this).Position;
+        _start = _last = sp;
         _t0 = DateTime.Now;
         _moved = false;
         Pressed?.Invoke();
