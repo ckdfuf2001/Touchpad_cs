@@ -29,8 +29,14 @@ public partial class AuxPadWindow : Window
         _pad = pad;
         InitializeComponent();
         ShowActivated = false;
+        // Own X: touch first, mouse Click as fallback. The app clears
+        // its toggle state (RequestClose) so the next toggle re-opens.
+        AuxCloseBtn.PreviewTouchDown += (_, e) => { RequestClose?.Invoke(); e.Handled = true; };
+        AuxCloseBtn.Click += (_, _) => RequestClose?.Invoke();
         Refresh();
     }
+
+    public event Action? RequestClose;
 
     private List<PadButton> Buttons =>
         _pad == "artist" ? _s.Artist.Buttons : _s.Virtual.Buttons;

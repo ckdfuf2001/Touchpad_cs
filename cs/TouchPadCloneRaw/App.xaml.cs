@@ -262,6 +262,12 @@ public partial class App : WApplication
             {
                 w = new AuxPadWindow(_settings, name);
                 if (name == "artist") _artistPad = w; else _virtualPad = w;
+                string n = name;
+                w.RequestClose += () =>
+                {
+                    _auxOn.Remove(n);
+                    ShowAux(n, false);
+                };
                 w.Show();
             }
             if (w != null)

@@ -1139,9 +1139,23 @@ public partial class TouchPadWindow : Window
         catch { return false; }
     }
 
+    /// <summary>True when the point (Surface coords) is on the X
+    /// (chrome drag must not swallow it, like the gear).</summary>
+    private bool OnX(Point p)
+    {
+        try
+        {
+            var o = XLabel.TranslatePoint(new Point(0, 0), Surface);
+            return p.X >= o.X - 6 && p.X <= o.X + XLabel.ActualWidth + 6
+                && p.Y >= o.Y - 6 && p.Y <= o.Y + XLabel.ActualHeight + 6;
+        }
+        catch { return false; }
+    }
+
     private void OnChromeTouchDown(object sender, TouchEventArgs e)
     {
-        if (OnGear(e.GetTouchPoint(Surface).Position)) return;
+        var pp = e.GetTouchPoint(Surface).Position;
+        if (OnGear(pp) || OnX(pp)) return;
         _chromeTouch = true;
         _chromeTouchId = e.TouchDevice.Id;
         var rp = e.GetTouchPoint(Surface).Position;
@@ -1181,6 +1195,7 @@ public partial class TouchPadWindow : Window
     private void OnChromeMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (OnGear(e.GetPosition(Surface))) return;
+        if (OnX(e.GetPosition(Surface))) return;
         _chromeMouse = true;
         var rp = e.GetPosition(Surface);
         var sp = new Point(rp.X + Left, rp.Y + Top);

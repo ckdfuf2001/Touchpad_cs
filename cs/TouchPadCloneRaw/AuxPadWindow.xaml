@@ -5,8 +5,16 @@
         Background="#B0141922" Topmost="True" ShowInTaskbar="False"
         ShowActivated="False" ResizeMode="NoResize" Width="340" Height="140">
     <StackPanel>
-        <TextBlock x:Name="Title" Text="pad" Foreground="#E0C87F"
-                   FontSize="12" Margin="8,4,0,2"/>
+        <Grid>
+            <TextBlock x:Name="Title" Text="pad" Foreground="#E0C87F"
+                       FontSize="12" Margin="8,4,0,2"
+                       VerticalAlignment="Center"/>
+            <Button x:Name="AuxCloseBtn" Content="X" Width="40" Height="24"
+                    HorizontalAlignment="Right" VerticalAlignment="Center"
+                    Margin="0,2,6,0" FontSize="12" FontWeight="Bold"
+                    Foreground="White" Background="Transparent"
+                    BorderBrush="Transparent" ToolTip="닫기"/>
+        </Grid>
         <WrapPanel x:Name="Keys" Orientation="Horizontal" Margin="4"/>
     </StackPanel>
 </Window>
