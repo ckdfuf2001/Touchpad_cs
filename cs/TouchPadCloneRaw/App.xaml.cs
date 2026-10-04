@@ -46,6 +46,14 @@ public partial class App : WApplication
         }
 
         _settings = Core.AppSettings.Load();
+        // Auto-start intent survives exe moves/updates: re-register the
+        // running path when the flag is on but the key is missing.
+        try
+        {
+            if (_settings.AutoStart && !SettingsWindow.IsAutoStartOn())
+                SettingsWindow.SetAutoStart(true);
+        }
+        catch { }
         // Crash recovery: a previous run may have left the cursor hidden.
         // Relaunching the app always repairs it (touch works cursor-free).
         Core.InputSim.RestoreCursor();

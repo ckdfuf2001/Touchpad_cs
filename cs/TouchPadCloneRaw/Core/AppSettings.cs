@@ -274,6 +274,10 @@ public sealed class AppSettings
     public string StripColor { get; set; } = "#10131A";
     public double StripOpacity { get; set; } = 0.35;
 
+    /// <summary>Windows logon auto-start (mirrors the Run registry key;
+    /// the registry is the truth, this keeps the intent across moves).</summary>
+    public bool AutoStart { get; set; } = false;
+
     /// <summary>Retired UI (was the reference's event-gap slider): the single
     /// TapJudgeMs is the judge time now. Kept so files still load.</summary>
     public int EventGapMs { get; set; } = 500;

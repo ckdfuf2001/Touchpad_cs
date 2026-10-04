@@ -163,6 +163,13 @@ public partial class SettingsWindow : Window
         SwapBtn.Click += (_, _) => ApplySave();
         DebugLbl.IsChecked = s.DebugLabels;
         DebugLbl.Click += (_, _) => ApplySave();
+        AutoStart.IsChecked = IsAutoStartOn();
+        AutoStart.Click += (_, _) =>
+        {
+            SetAutoStart(AutoStart.IsChecked == true);
+            _s.AutoStart = AutoStart.IsChecked == true;
+            _s.Save();
+        };
         // Strip placement + size (reference General).
         RefreshMonitorList();
         StripMonBox.SelectionChanged += (_, _) =>
@@ -762,6 +769,42 @@ public partial class SettingsWindow : Window
     }
 
     private static string Sel(WComboBox cb) => cb.SelectedItem as string ?? "none";
+
+    private const string AutoStartKey = "TouchPadCloneRaw";
+    private const string RunSubkey =
+        @"Software\Microsoft\Windows\CurrentVersion\Run";
+
+    /// <summary>Registry truth (the file flag mirrors it).</summary>
+    internal static bool IsAutoStartOn()
+    {
+        try
+        {
+            using var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunSubkey, false);
+            return k?.GetValue(AutoStartKey) != null;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Registers/unregisters this exe for Windows logon.</summary>
+    internal static void SetAutoStart(bool on)
+    {
+        try
+        {
+            using var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunSubkey, true);
+            if (k == null) return;
+            if (on)
+            {
+                string exe = System.Diagnostics.Process.GetCurrentProcess()
+                    .MainModule?.FileName ?? "";
+                if (exe.Length > 0) k.SetValue(AutoStartKey, "\"" + exe + "\"");
+            }
+            else
+            {
+                try { k.DeleteValue(AutoStartKey, false); } catch { }
+            }
+        }
+        catch { }
+    }
 
     private static void SelBox(WComboBox c, string v)
     {
