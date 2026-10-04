@@ -70,7 +70,9 @@ public sealed class PadColorSet
 }
 
 /// <summary>One strip menu cell. Serialized as
-/// Label|Kind|Value|Color|Image. Kind: 기능 | cmd | 프로그램 | 단축키.</summary>
+/// Label|Kind|Value|Color|Image|TextColor|W|H. Kind: 기능 | cmd |
+/// 프로그램 | 단축키. Empty color = none, empty text color = gray,
+/// 0 size = auto-fit to text.</summary>
 public sealed class StripCell
 {
     public string Label = "";
@@ -78,6 +80,9 @@ public sealed class StripCell
     public string Value = "";
     public string Color = "";
     public string Image = "";
+    public string TextColor = "";
+    public double CellW;
+    public double CellH;
     public bool IsEmpty => Label == "" && Value == "";
     public static StripCell Parse(string? s)
     {
@@ -89,11 +94,15 @@ public sealed class StripCell
         if (p.Length > 2) c.Value = p[2].Trim();
         if (p.Length > 3) c.Color = p[3].Trim();
         if (p.Length > 4) c.Image = p[4].Trim();
+        if (p.Length > 5) c.TextColor = p[5].Trim();
+        if (p.Length > 6) double.TryParse(p[6].Trim(), out c.CellW);
+        if (p.Length > 7) double.TryParse(p[7].Trim(), out c.CellH);
         if (c.Label == "") c.Label = c.Value;
         if (c.Value == "" && (c.Kind == "기능" || c.Kind == "layout")) c.Value = "layout:" + c.Label;
         return c;
     }
-    public override string ToString() => $"{Label}|{Kind}|{Value}|{Color}|{Image}";
+    public override string ToString() =>
+        $"{Label}|{Kind}|{Value}|{Color}|{Image}|{TextColor}|{CellW}|{CellH}";
 }
 
 public sealed class StripRow

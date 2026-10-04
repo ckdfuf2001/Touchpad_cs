@@ -227,6 +227,12 @@ public partial class SettingsWindow : Window
         CellIconPicker.CustomColors = _s.CustomColors;
         CellIconPicker.AllowFollow = false;
         CellIconPicker.Picked += _ => CommitDetail();
+        CellTextPicker.BasePalette = ColorPalettes.Effects;
+        CellTextPicker.CustomColors = _s.CustomColors;
+        CellTextPicker.AllowFollow = false;
+        CellTextPicker.Picked += _ => CommitDetail();
+        CellWBox.LostFocus += (_, _) => CommitDetail();
+        CellHBox.LostFocus += (_, _) => CommitDetail();
         CellDelBtn.Click += (_, _) => DeleteSelCell();
         CellClearBtn.Click += (_, _) => ClearSelCell();
         CellInsertBtn.Click += (_, _) => { ImgPathBox.Text = _selImage; InsertPopup.IsOpen = true; };
@@ -522,6 +528,9 @@ public partial class SettingsWindow : Window
             CellLabelBox.Text = cell.Label;
             _selImage = cell.Image;
             CellIconPicker.Selected = cell.Color;
+            CellTextPicker.Selected = cell.TextColor;
+            CellWBox.Text = cell.CellW > 0 ? cell.CellW.ToString() : "";
+            CellHBox.Text = cell.CellH > 0 ? cell.CellH.ToString() : "";
             CellKindBox.SelectedItem = KindItems.Contains(cell.Kind) ? cell.Kind : "기능";
             SyncCellValueInput();
             CellValueBox.Text = cell.Value;
@@ -543,7 +552,15 @@ public partial class SettingsWindow : Window
             string val = kind == "기능" ? FuncValue(CellFuncBox.SelectedItem as string) : (CellValueBox.Text ?? "").Trim();
             string col = (CellIconPicker.Selected ?? "").Trim();
             if (ColorPalettes.IsHex(col)) RememberCustom(col);
-            row.Cells[_selCol] = (CellLabelBox.Text ?? "").Trim() + "|" + kind + "|" + val + "|" + col + "|" + _selImage;
+            string tcol = (CellTextPicker.Selected ?? "").Trim();
+            if (ColorPalettes.IsHex(tcol)) RememberCustom(tcol);
+            double cw = 0, ch = 0;
+            double.TryParse((CellWBox.Text ?? "").Trim(), out cw);
+            double.TryParse((CellHBox.Text ?? "").Trim(), out ch);
+            if (cw < 0) cw = 0;
+            if (ch < 0) ch = 0;
+            row.Cells[_selCol] = (CellLabelBox.Text ?? "").Trim() + "|" + kind + "|" + val + "|" + col + "|" + _selImage
+                + "|" + tcol + "|" + (cw > 0 ? cw.ToString() : "") + "|" + (ch > 0 ? ch.ToString() : "");
             _s.Save();
             RebuildStripRows();
         }

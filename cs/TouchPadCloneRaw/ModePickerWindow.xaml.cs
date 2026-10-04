@@ -92,9 +92,12 @@ public partial class ModePickerWindow : Window
                     FontSize = 16,
                     Margin = new Thickness(2),
                     Padding = new Thickness(8),
-                    MinHeight = 48,
-                    MinWidth = 100,
+                    MinHeight = 40,
+                    Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0x80, 0x80, 0x80)),
                 };
+                // Explicit cell size wins; otherwise fit to text.
+                if (cell.CellW > 0) { b.Width = cell.CellW; b.MinWidth = 0; }
+                if (cell.CellH > 0) { b.Height = cell.CellH; b.MinHeight = 0; }
                 // Strip swipe selection shows as a bold frame.
                 if (!string.IsNullOrEmpty(selectedValue)
                     && cell.Value.Equals(selectedValue,
@@ -105,11 +108,19 @@ public partial class ModePickerWindow : Window
                 }
                 try
                 {
-                    if (ColorPalettes.IsNone(cell.Color))
+                    if (ColorPalettes.IsNone(cell.Color) || string.IsNullOrWhiteSpace(cell.Color))
                         b.Background = Brushes.Transparent;
-                    else if (!string.IsNullOrWhiteSpace(cell.Color))
+                    else
                         b.Background = new SolidColorBrush(
                             (Color)ColorConverter.ConvertFromString(cell.Color));
+                }
+                catch { }
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(cell.TextColor)
+                        && !ColorPalettes.IsNone(cell.TextColor))
+                        b.Foreground = new SolidColorBrush(
+                            (Color)ColorConverter.ConvertFromString(cell.TextColor));
                 }
                 catch { }
                 if (!string.IsNullOrWhiteSpace(cell.Image))
