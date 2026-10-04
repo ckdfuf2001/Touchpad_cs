@@ -80,9 +80,13 @@ public partial class TouchPadWindow : Window
     private long _twoT0;
     // Live two-finger scroll: centroid wheel accumulators (same notch
     // size as the scroll zone). _twoMoveT0 = first travel tick (stroke
-    // age for the swipe-vs-scroll call at lift).
+    // age). _twoLock = decisive stroke: live wheel stops, the lift fires
+    // the swipe alone (no scroll+action double). _twoLockNet = travel
+    // at lock (release when the pan drags on).
     private double _twoWheelX, _twoWheelY;
     private long _twoMoveT0;
+    private bool _twoLock;
+    private double _twoLockNet;
     // _twoScrolled = a wheel notch went out this session: the lift
     // stays silent (no tap/swipe after a scroll), far pair or not.
     private bool _twoScrolled;
@@ -605,6 +609,7 @@ public partial class TouchPadWindow : Window
         _twoT0 = Environment.TickCount64;
         _twoWheelX = 0; _twoWheelY = 0;
         _twoMoveT0 = 0;
+        _twoLock = false; _twoLockNet = 0;
         f.Start = f.Last; f.Moved = false;
         if (other != null) { other.Start = other.Last; other.Moved = false; }
         Log.Write($"2FINGER begin d={dd:0} ({why})");
@@ -701,15 +706,12 @@ public partial class TouchPadWindow : Window
             }
             if (moved)
             {
-                // Stroke rule: a short decisive stroke (travel started
-                // <800ms ago, 60+ DIP, dominant axis) fires the mapped
-                // swipe; extended panning already scrolled live and lands
-                // silent. Slow deliberate strokes count - velocity doesn't.
-                long nowL = Environment.TickCount64;
-                long strokeAge = _twoMoveT0 == 0 ? long.MaxValue : nowL - _twoMoveT0;
-                if (_twoMoveT0 == 0 || strokeAge > 800 || _twoMaxNet < 60)
+                // Locked stroke fires the mapped swipe alone (the couple
+                // of notches before the lock are negligible). Anything
+                // else already scrolled live and lands silent.
+                if (!_twoLock)
                 {
-                    Log.Write($"2FINGER scroll (silent age={(strokeAge == long.MaxValue ? -1 : strokeAge)}ms travel={_twoMaxNet:0})");
+                    Log.Write($"2FINGER scroll (silent travel={_twoMaxNet:0})");
                     _lastWhat = "two-scroll";
                     _lastTapTick = 0;
                     _tapChain = 0;
@@ -1193,24 +1195,47 @@ public partial class TouchPadWindow : Window
                 }
                 long nowW = Environment.TickCount64;
                 if (_twoMoveT0 == 0 && net > TapMoveDip) _twoMoveT0 = nowW;
-                _twoWheelX += dx2 / _fingers.Count;
-                _twoWheelY += dy2 / _fingers.Count;
-                int notch = _s.ScrollInvert ? -120 : 120;
-                while (Math.Abs(_twoWheelY) >= WheelDip)
+                // Swipe lock: a decisive stroke (60+ DIP, dominant axis,
+                // younger than 800ms) stops the live wheel - the lift fires
+                // the swipe alone. Release when it drags on (long pan) or
+                // ages out, so scrolling never dies mid-pan.
+                if (!_twoLock && _twoSeen && _twoMaxNet >= 60)
                 {
-                    int s = Math.Sign(_twoWheelY);
-                    _twoWheelY -= s * WheelDip;
-                    Out.Wheel(s * notch);
-                    _twoScrolled = true;
+                    double lax = Math.Abs(_twoVX), lay = Math.Abs(_twoVY);
+                    if ((lax >= lay * 1.5 || lay > lax * 1.5) && nowW - _twoMoveT0 <= 800)
+                    {
+                        _twoLock = true;
+                        _twoLockNet = _twoMaxNet;
+                        Log.Write("2FINGER swipe-lock");
+                        _lastWhat = "two-lock";
+                    }
                 }
-                while (Math.Abs(_twoWheelX) >= WheelDip)
+                if (_twoLock && (nowW - _twoMoveT0 > 800 || _twoMaxNet - _twoLockNet > 150))
                 {
-                    int s = Math.Sign(_twoWheelX);
-                    _twoWheelX -= s * WheelDip;
-                    Out.HWheel(s * notch);
-                    _twoScrolled = true;
+                    _twoLock = false;
+                    Log.Write("2FINGER swipe-unlock");
                 }
-                _lastWhat = "two-scroll";
+                if (!_twoLock)
+                {
+                    _twoWheelX += dx2 / _fingers.Count;
+                    _twoWheelY += dy2 / _fingers.Count;
+                    int notch = _s.ScrollInvert ? -120 : 120;
+                    while (Math.Abs(_twoWheelY) >= WheelDip)
+                    {
+                        int s = Math.Sign(_twoWheelY);
+                        _twoWheelY -= s * WheelDip;
+                        Out.Wheel(s * notch);
+                        _twoScrolled = true;
+                    }
+                    while (Math.Abs(_twoWheelX) >= WheelDip)
+                    {
+                        int s = Math.Sign(_twoWheelX);
+                        _twoWheelX -= s * WheelDip;
+                        Out.HWheel(s * notch);
+                        _twoScrolled = true;
+                    }
+                    _lastWhat = "two-scroll";
+                }
             }
             if (e.TouchDevice.Id == _primaryId)
             {
