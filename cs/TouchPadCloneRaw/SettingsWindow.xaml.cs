@@ -723,17 +723,24 @@ public partial class SettingsWindow : Window
 
     private string LayoutKey() => LayoutSelBox.SelectedItem as string ?? _s.Layout;
 
+    /// <summary>Settings-window DPI (all preview math is DIPs; raw
+    /// Screen.Bounds pixels are divided by this).</summary>
+    private double WinDpi()
+    {
+        try
+        {
+            var s = System.Windows.Media.VisualTreeHelper.GetDpi(this);
+            if (s.DpiScaleX >= 0.5 && s.DpiScaleX <= 4) return s.DpiScaleX;
+        }
+        catch { }
+        return 1.0;
+    }
+
     /// <summary>Pad home monitor in DIPs (mirrors App.HomeRect: the
     /// configured strip monitor, primary fallback).</summary>
     private (double l, double t, double w, double h) LayoutHome()
     {
-        double d = 1.0;
-        try
-        {
-            var s = System.Windows.Media.VisualTreeHelper.GetDpi(this);
-            if (s.DpiScaleX >= 0.5 && s.DpiScaleX <= 4) d = s.DpiScaleX;
-        }
-        catch { }
+        double d = WinDpi();
         try
         {
             var sc = Core.MonitorList.Resolve(_s.StripMonitor);
@@ -929,7 +936,9 @@ public partial class SettingsWindow : Window
             double oy = (ch - vh * sc) / 2 - vt * sc;
             double X(double v) => ox + v * sc;
             double Y(double v) => oy + v * sc;
-            // Monitors.
+            // Monitors (bounds are physical px: divide into DIPs first so
+            // every layer shares one unit system).
+            double dd = WinDpi();
             string homeDev = "";
             try
             {
@@ -937,13 +946,15 @@ public partial class SettingsWindow : Window
                 foreach (var s in System.Windows.Forms.Screen.AllScreens)
                 {
                     var b = s.Bounds;
-                    bool isHome = b.Left <= hr.l + 1 && hr.l <= b.Right
-                        && b.Top <= hr.t + 1 && hr.t <= b.Bottom;
+                    double bl = b.Left / dd, bt = b.Top / dd;
+                    double bw = b.Width / dd, bh = b.Height / dd;
+                    bool isHome = bl <= hr.l + 1 && hr.l <= bl + bw
+                        && bt <= hr.t + 1 && hr.t <= bt + bh;
                     if (isHome) homeDev = s.DeviceName;
                     var mr = new System.Windows.Shapes.Rectangle
                     {
-                        Width = Math.Max(2, b.Width * sc),
-                        Height = Math.Max(2, b.Height * sc),
+                        Width = Math.Max(2, bw * sc),
+                        Height = Math.Max(2, bh * sc),
                         Fill = new SolidColorBrush(isHome
                             ? System.Windows.Media.Color.FromArgb(0x22, 0xAA, 0xAA, 0xAA)
                             : System.Windows.Media.Color.FromArgb(0xFF, 0x1A, 0x22, 0x2C)),
@@ -951,8 +962,8 @@ public partial class SettingsWindow : Window
                         StrokeThickness = 1,
                     };
                     LayoutPreview.Children.Add(mr);
-                    System.Windows.Controls.Canvas.SetLeft(mr, X(b.Left));
-                    System.Windows.Controls.Canvas.SetTop(mr, Y(b.Top));
+                    System.Windows.Controls.Canvas.SetLeft(mr, X(bl));
+                    System.Windows.Controls.Canvas.SetTop(mr, Y(bt));
                     var ml = new TextBlock
                     {
                         Text = s.DeviceName.Replace(@"\\.\", "") + (s.Primary ? " (주)" : ""),
@@ -960,8 +971,8 @@ public partial class SettingsWindow : Window
                         Foreground = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0x9A, 0xA6, 0xBD)),
                     };
                     LayoutPreview.Children.Add(ml);
-                    System.Windows.Controls.Canvas.SetLeft(ml, X(b.Left) + 3);
-                    System.Windows.Controls.Canvas.SetTop(ml, Y(b.Top) + 2);
+                    System.Windows.Controls.Canvas.SetLeft(ml, X(bl) + 3);
+                    System.Windows.Controls.Canvas.SetTop(ml, Y(bt) + 2);
                 }
             }
             catch { }
@@ -1055,7 +1066,9 @@ public partial class SettingsWindow : Window
                 }
             }
             double cov = home.w * home.h > 0 ? r.w * r.h / (home.w * home.h) * 100.0 : 0;
-            LayoutInfoLbl.Text = $"모니터: {homeDev} {home.w:0}x{home.h:0} | " +
+            string homeName = (homeDev ?? "").Replace(@"\\.\", "");
+            if (string.IsNullOrEmpty(homeName)) homeName = "주 모니터";
+            LayoutInfoLbl.Text = $"모니터: {homeName} {home.w:0}x{home.h:0} | " +
                 $"패드: {r.l:0},{r.t:0} {r.w:0}x{r.h:0} (모니터의 {cov:0}%) | " +
                 $"모드 {mode} | 타일 {shown}개";
         }

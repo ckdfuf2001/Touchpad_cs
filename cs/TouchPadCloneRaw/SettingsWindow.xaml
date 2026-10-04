@@ -199,7 +199,7 @@
                 <TextBlock Text="레이아웃 (ini 섹션)"/>
                 <ComboBox x:Name="LayoutSelBox" Margin="0,2,0,6"/>
                 <Border BorderBrush="#335C6C7D" BorderThickness="1" CornerRadius="6" Background="#0A0F14" Margin="0,0,0,4" Padding="4">
-                    <Canvas x:Name="LayoutPreview" Width="460" Height="250" Background="#0A0F14"/>
+                    <Canvas x:Name="LayoutPreview" Width="460" Height="250" Background="#0A0F14" ClipToBounds="True"/>
                 </Border>
                 <TextBlock x:Name="LayoutInfoLbl" Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
                 <TextBlock Text="영역 모드"/>
