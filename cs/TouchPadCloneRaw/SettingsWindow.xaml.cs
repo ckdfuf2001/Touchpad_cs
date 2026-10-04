@@ -1368,6 +1368,7 @@ public partial class SettingsWindow : Window
             }
             foreach (var g in _s.RecordedGestures.ToList())
             {
+                var box = new StackPanel { Orientation = Orientation.Vertical, Margin = new Thickness(0, 0, 0, 8) };
                 var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
                 var name = new TextBox { Text = g.Name, Width = 150 };
                 name.LostFocus += (_, _) =>
@@ -1396,29 +1397,32 @@ public partial class SettingsWindow : Window
                     RebuildFloatGestures();
                     FireApply();
                 };
-                var badge = new TextBlock
+                row.Children.Add(name);
+                row.Children.Add(act);
+                row.Children.Add(del);
+                box.Children.Add(row);
+                // Motion preview UNDER the name (a wide side-by-side row
+                // overflows the settings window and gets cut off).
+                var sub = new StackPanel { Orientation = Orientation.Horizontal };
+                sub.Children.Add(new TextBlock
                 {
                     Text = $"{g.Fingers}핑거",
                     Width = 44,
-                    Margin = new Thickness(4, 0, 0, 0),
                     VerticalAlignment = VerticalAlignment.Center,
                     Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0x9A, 0xA6, 0xBD)),
                     FontSize = 11,
-                };
+                });
                 var prev = new Canvas
                 {
-                    Width = 150,
-                    Height = 68,
+                    Width = 300,
+                    Height = 64,
                     Margin = new Thickness(4, 0, 0, 0),
                     Background = new SolidColorBrush(Color.FromArgb(0xFF, 0x0A, 0x0F, 0x14)),
                 };
                 RenderMotion(prev, g);
-                row.Children.Add(name);
-                row.Children.Add(act);
-                row.Children.Add(del);
-                row.Children.Add(badge);
-                row.Children.Add(prev);
-                FloatGestureList.Children.Add(row);
+                sub.Children.Add(prev);
+                box.Children.Add(sub);
+                FloatGestureList.Children.Add(box);
             }
         }
         catch { }
