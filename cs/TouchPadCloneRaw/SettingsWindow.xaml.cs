@@ -306,6 +306,7 @@ public partial class SettingsWindow : Window
             SpeedVal.Text = $"{Speed.Value:0.0}x";
             OpacityVal.Text = $"{(1 - OpacityS.Value) * 100:0}%";
             StripOpacityVal.Text = $"{(1 - StripOpacityS.Value) * 100:0}%";
+            TapJudgeVal.Text = $"{(int)TapJudgeMs.Value} ms";
         }
         catch { }
     }
