@@ -64,15 +64,6 @@ public partial class TouchPadWindow : Window
     // Tap chain across presses: 1 after a tap, 2 after a double. A third
     // quick press enters TripleHold instead of a fresh Pending.
     private int _tapChain;
-    // Deferred single (detection wait): a quick lift arms it, the
-    // click fires at the judge-window end unless the next press joins
-    // it first (double/drag/hold flush it out, async-two drops it).
-    private System.Windows.Threading.DispatcherTimer? _deferTimer;
-    private string _deferAct = "";
-    private int _deferX, _deferY;
-    // _asyncTwo = rolling two-finger (no overlap): a quick re-press
-    // FAR from the last tap joins it; its lift fires TwoFingerTap.
-    private bool _asyncTwo;
     // Two-contact session (single-contact flows never see these set):
     // _twoSeen = a second contact landed during this press;
     // _twoOk = every lift so far quick + still (gates the tap);
@@ -322,8 +313,20 @@ public partial class TouchPadWindow : Window
                         handled = true;
                         return new IntPtr(-1);
                     }
+                    // Phase 1: observe OS gestures only (never handled).
+                    if (msg == OsGestures.WM_GESTURE)
+                    {
+                        try { Log.Write(OsGestures.Describe(lp)); } catch { }
+                        return IntPtr.Zero;
+                    }
+                    if (msg == OsGestures.WM_GESTURENOTIFY)
+                    {
+                        Log.Write($"OSGESTURE NOTIFY wp=0x{wp.ToInt64():X} lp=0x{lp.ToInt64():X}");
+                        return IntPtr.Zero;
+                    }
                     return IntPtr.Zero;
                 });
+                try { OsGestures.Enable(hsrc.Handle); } catch { }
             }
             catch { }
         };
@@ -527,77 +530,6 @@ public partial class TouchPadWindow : Window
     /// <summary>Fires a gesture-map mouse action. True if it clicked.
     /// Single pairs journal as one "click" (old ClickAt semantics).
     /// SwapButtons swaps left/right globally.</summary>
-    /// <summary>Drops a waiting single (it joins the next press:
-    /// async-two replaces it, nothing went out).</summary>
-    private void CancelDefer()
-    {
-        try
-        {
-            if (_deferTimer != null)
-            {
-                _deferTimer.Stop();
-                _deferTimer = null;
-            }
-            _deferAct = "";
-        }
-        catch { }
-    }
-
-    /// <summary>Fires a waiting single now (the next press proved it
-    /// stands alone: double-second, drag, hold, far re-press).
-    /// No-op when nothing is armed.</summary>
-    private void FireDefer()
-    {
-        try
-        {
-            if (_deferTimer == null) return;
-            _deferTimer.Stop();
-            _deferTimer = null;
-            string act = _deferAct;
-            int fx = _deferX, fy = _deferY;
-            _deferAct = "";
-            if (act == "") return;
-            if (DoMapAction(act, fx, fy))
-            {
-                Log.Write($"TAP fired -> {act}");
-                Fx().Flash(fx / _dpi, fy / _dpi);
-                _lastWhat = "tap-click";
-            }
-        }
-        catch { }
-    }
-
-    /// <summary>Arms a quick lift: the click goes out at the judge-window
-    /// end unless the next press joins it first. Pair accounting below
-    /// assumes the pair went out (flush) or was dropped (async-two).</summary>
-    private void ArmDefer(string act, int fx, int fy, long now)
-    {
-        try
-        {
-            CancelDefer();
-            _deferAct = act;
-            _deferX = fx; _deferY = fy;
-            _lastTapTick = now;
-            _tapChain = 1;
-            _lastTapX = fx; _lastTapY = fy;
-            _deferTimer = new System.Windows.Threading.DispatcherTimer
-            {
-                Interval = TimeSpan.FromMilliseconds(_s.TapJudgeMs),
-            };
-            _deferTimer.Tick += (_, _) => FireDefer();
-            _deferTimer.Start();
-            Log.Write($"TAP deferred ({_s.TapJudgeMs}ms) -> {act}");
-            _lastWhat = "tap-deferred";
-        }
-        catch { }
-    }
-
-    /// <summary>Actions a waiting single may hold (it actually fires).</summary>
-    private static bool Mappable(string a) => a is "left_click"
-        or "right_click" or "middle_click" or "double_click"
-        or "triple_click" or "wheel_up" or "wheel_down"
-        or "browser_back" or "browser_forward";
-
     private bool DoMapAction(string action, int x, int y)
     {
         if (_s.SwapButtons)
@@ -993,15 +925,12 @@ public partial class TouchPadWindow : Window
                 double tdist = Math.Abs(p.X - _lastTapFX) + Math.Abs(p.Y - _lastTapFY);
                 // Unified judge: a re-touch inside the action-judge time
                 // after a tap chains. Chain 2 (after a double) arms the
-                // third tap; anything else chains a double. A quick
-                // re-press FAR from the last tap (no overlap, other
-                // finger) joins it as rolling two-finger instead.
-                bool inWin = _lastTapTick != 0
-                    && now - _lastTapTick <= _s.TapJudgeMs;
-                bool near = inWin && tdist <= SecondTapDip;
-                bool asyncTwo = inWin && !near && tdist <= 250 && _tapChain == 1;
+                // third tap; anything else chains a double.
+                bool second = _lastTapTick != 0
+                    && now - _lastTapTick <= _s.TapJudgeMs
+                    && tdist <= SecondTapDip;
 
-                if (near && _tapChain >= 2)
+                if (second && _tapChain >= 2)
                 {
                     // Third tap: quick lift fires TripleTap, moving drags.
                     _downOrigX = _lastTapX; _downOrigY = _lastTapY;
@@ -1011,32 +940,21 @@ public partial class TouchPadWindow : Window
                     Status($"triplehold @({_downOrigX},{_downOrigY})");
                     _lastWhat = "triplehold";
                 }
-                else if (near || asyncTwo)
+                else if (second)
                 {
                     // Second tap: don't press yet. Quick lift completes
                     // the double-click, moving starts a drag. (Pressing
                     // here turned every quick re-touch into a drag and
                     // every tap pair into an extra double.)
-                    // Rolling two-finger drops the waiting single (it
-                    // joins this press) and fires TwoFingerTap at lift.
-                    if (asyncTwo)
-                    {
-                        CancelDefer();
-                        _asyncTwo = true;
-                    }
                     _downOrigX = _lastTapX; _downOrigY = _lastTapY;
                     Out.SetAnchor(_downOrigX, _downOrigY);
                     _g = G.TapHold;
                     Fx().Flash(_downOrigX / _dpi, _downOrigY / _dpi);
-                    Status(asyncTwo ? $"asynctwo @({_downOrigX},{_downOrigY})" : $"taphold @({_downOrigX},{_downOrigY})");
-                    _lastWhat = asyncTwo ? "asynctwo" : "taphold";
+                    Status($"taphold @({_downOrigX},{_downOrigY})");
+                    _lastWhat = "taphold";
                 }
                 else
                 {
-                    // Fresh press: the waiting single stands alone
-                    // (flush it now), chain restarts.
-                    FireDefer();
-                    _asyncTwo = false;
                     // Fresh press: chain restarts (single tap ahead).
                     _tapChain = 0;
                     // Anchor = live cursor, not the polled cache: the cache
@@ -1090,9 +1008,6 @@ public partial class TouchPadWindow : Window
                             // swipe below): the single-press hold must not
                             // fire into it.
                             if (_twoSeen) return;
-                            // The waiting single stands alone (flush it):
-                            // tap, then hold.
-                            FireDefer();
                             DoMapAction(ActiveMap().LongPress, _downOrigX, _downOrigY);
                             Status($"hold right @({_downOrigX},{_downOrigY})");
                             _lastWhat = "hold-right";
@@ -1267,10 +1182,6 @@ public partial class TouchPadWindow : Window
                 }
                 if (f.Moved && (_g == G.TapHold || _g == G.TripleHold))
                 {
-                    // The waiting single stands alone (flush it): tap,
-                    // then drag - same as firing on lift.
-                    FireDefer();
-                    _asyncTwo = false;
                     // Drag starts now: "drag" presses and holds (no extra
                     // click), "drag_hold" clicks first, then holds.
                     // Rebase travel so the deadzone doesn't jump it.
@@ -1407,16 +1318,18 @@ public partial class TouchPadWindow : Window
                             {
                                 string act = f.Zone == "right-click"
                                     ? "right_click" : ActiveMap().Tap;
-                                // Fire on lift-window: the click waits out the
-                                // judge so a second press can still join it
-                                // (double/drag/hold flush, async-two drops).
-                                // Unmapped stays silent and chainless.
-                                if (!Mappable(act))
+                                // Fire on lift (single = instant click; the
+                                // pair accounting below assumes this pair
+                                // went out). Unmapped stays silent and
+                                // chainless.
+                                if (!DoMapAction(act, fx, fy))
                                 { _lastTapTick = 0; _tapChain = 0; _lastWhat = "tap-none"; break; }
+                                Fx().Flash(fx / _dpi, fy / _dpi);
+                                _lastTapTick = now;
+                                _tapChain = 1;
                                 _lastTapX = fx; _lastTapY = fy;
                                 _lastTapFX = f.Start.X; _lastTapFY = f.Start.Y;
-                                Fx().Flash(fx / _dpi, fy / _dpi);
-                                ArmDefer(act, fx, fy, now);
+                                _lastWhat = "tap-click";
                             }
                             else { _lastTapTick = 0; _tapChain = 0; _lastWhat = "long-idle"; }
                             break;
@@ -1427,37 +1340,6 @@ public partial class TouchPadWindow : Window
                             _lastWhat = "move-end";
                             break;
                         case G.TapHold:                       // 2nd tap lift
-                            // Flush first: the waiting single stands alone
-                            // (double = its pair + one more here). Rolling
-                            // two-finger skips the flush (dropped at DOWN)
-                            // and fires TwoFingerTap instead.
-                            FireDefer();
-                            if (_asyncTwo)
-                            {
-                                _asyncTwo = false;
-                                if (ms <= _s.TapJudgeMs && (f.Zone == "left-click"
-                                    || f.Zone == "right-click"
-                                    || (f.Zone == "pad" && _s.TapToClick)))
-                                {
-                                    string tact2 = f.Zone == "right-click"
-                                        ? "right_click" : ActiveMap().TwoFingerTap;
-                                    if (DoMapAction(tact2, fx, fy))
-                                    {
-                                        Log.Write($"2FINGER tap-rolling -> {tact2}");
-                                        Fx().Flash(fx / _dpi, fy / _dpi);
-                                        _lastWhat = "twofinger-tap";
-                                    }
-                                    else
-                                    {
-                                        Log.Write("2FINGER tap-rolling unmapped (silent)");
-                                        _lastWhat = "two-tap-none";
-                                    }
-                                }
-                                else { _lastWhat = "async-idle"; }
-                                _lastTapTick = 0;
-                                _tapChain = 0;
-                                break;
-                            }
                             // Right zone stays right (right-double pairs).
                             // "double_click" fires one pair here (the first
                             // pair already went out), completing the double.
