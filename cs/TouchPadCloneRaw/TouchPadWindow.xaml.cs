@@ -86,6 +86,12 @@ public partial class TouchPadWindow : Window
     // _twoScrolled = a wheel notch went out this session: the lift
     // stays silent (no tap/swipe after a scroll), far pair or not.
     private bool _twoScrolled;
+    // Close-pair fallback (never opened a session): _wasTwo = two
+    // contacts overlapped this press; _twoOverlap = overlapped ms
+    // (flicker reads tiny and falls back to single).
+    private bool _wasTwo;
+    private long _twoJoinT;
+    private long _twoOverlap;
     private int _gearId = -1;
     private int _xId = -1;
     private Point _xP;
@@ -567,6 +573,32 @@ public partial class TouchPadWindow : Window
         Log.Write($"2FINGER begin d={dd:0} ({why})");
     }
 
+    /// <summary>Close-pair two-finger tap (never opened a session):
+    /// real overlap (100ms+, flicker reads tiny), both calm, final
+    /// lift quick. True = consumed.</summary>
+    private bool CloseTwoTap(Finger f, int fx, int fy, double ms)
+    {
+        if (!_wasTwo || _twoSeen || _twoScrolled) return false;
+        if (!_s.TapToClick) return false;
+        if (f.Zone != "pad" && f.Zone != "left-click" && f.Zone != "right-click") return false;
+        if (!_twoOk || _twoOverlap < 100 || ms > _s.TapJudgeMs || f.Moved) return false;
+        string tact = f.Zone == "right-click" ? "right_click" : ActiveMap().TwoFingerTap;
+        if (DoMapAction(tact, fx, fy))
+        {
+            Log.Write($"2FINGER tap-close -> {tact} overlap={(int)_twoOverlap}ms");
+            Fx().Flash(fx / _dpi, fy / _dpi);
+            _lastWhat = "twofinger-tap";
+        }
+        else
+        {
+            Log.Write("2FINGER tap-close unmapped (silent)");
+            _lastWhat = "two-tap-none";
+        }
+        _lastTapTick = 0;
+        _tapChain = 0;
+        return true;
+    }
+
     /// <summary>Two-contact lift decision. True = consumed (caller skips
     /// its normal single-contact landing). Fires the mapped TwoFingerTap
     /// (quick + still, TapToClick-gated like taps) or a directional
@@ -868,6 +900,9 @@ public partial class TouchPadWindow : Window
                 _twoMaxNet = 0;
                 _twoSpoiled = false;
                 _twoScrolled = false;
+                _wasTwo = false;
+                _twoOverlap = 0;
+                _twoJoinT = 0;
                 // Stale hold from a lost UP first (safety net).
                 if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
                 _primaryId = e.TouchDevice.Id;
@@ -979,6 +1014,8 @@ public partial class TouchPadWindow : Window
             // Third contact spoils the gesture (silent, no output).
             if (_fingers.Count == 2)
             {
+                _wasTwo = true;
+                _twoJoinT = Environment.TickCount64;
                 Finger? other = null;
                 foreach (var kv in _fingers)
                     if (kv.Key != e.TouchDevice.Id) { other = kv.Value; break; }
@@ -1202,6 +1239,11 @@ public partial class TouchPadWindow : Window
                 return;
             }
             _fingers.Remove(e.TouchDevice.Id);
+            long nowU = Environment.TickCount64;
+            // Overlap ledger: 2 -> 1 banks the overlapped ms (re-joins
+            // accumulate). Flicker banks almost nothing.
+            if (_fingers.Count == 1 && _twoJoinT != 0)
+            { _twoOverlap += nowU - _twoJoinT; _twoJoinT = 0; }
             if (e.TouchDevice.Id == _holdId)
             {
                 _holdTimer?.Stop();
@@ -1228,6 +1270,7 @@ public partial class TouchPadWindow : Window
                     // Slow = the PAIR's age (since the join), not this
                     // finger's total press.
                     if (_twoSeen && (f.Moved || Environment.TickCount64 - _twoT0 > _s.TapJudgeMs)) _twoOk = false;
+                    if (_wasTwo && f.Moved) _twoOk = false;
                     _g = G.None;
                     _primaryId = -1;
                     _lastTapTick = 0;
@@ -1246,6 +1289,7 @@ public partial class TouchPadWindow : Window
                     }
                     else if (_twoScrolled) { Log.Write("2FINGER scroll-end (silent)"); _lastWhat = "two-scroll-end"; }
                     else if (TwoFingerUp(f, fx, fy, ms)) { }
+                    else if (CloseTwoTap(f, fx, fy, ms)) { }
                     else if (f.Zone == "wheel")
                     {
                         // Scroll only: the cursor never moved, keep it so.
@@ -1379,12 +1423,13 @@ public partial class TouchPadWindow : Window
                 }
                 }
             }
-            else if (_twoSeen)
+            else if (_twoSeen || _wasTwo)
             {
                 // Partner lift (not the primary): a slow or moved lift
                 // spoils only the tap (a swipe can still complete).
                 // Slow = the PAIR's age (since the join).
-                if (f.Moved || Environment.TickCount64 - _twoT0 > _s.TapJudgeMs) _twoOk = false;
+                if (_twoSeen && (f.Moved || Environment.TickCount64 - _twoT0 > _s.TapJudgeMs)) _twoOk = false;
+                if (_wasTwo && f.Moved) _twoOk = false;
                 if (_fingers.Count == 0)
                 {
                     // Last lift wasn't the primary (it cancelled when the
@@ -1392,12 +1437,13 @@ public partial class TouchPadWindow : Window
                     // session here instead of going silent. A scrolled
                     // session ends silent (no tap/swipe after a scroll).
                     if (_twoScrolled) { Log.Write("2FINGER scroll-end (silent)"); _lastWhat = "two-scroll-end"; }
+                    else if (TwoFingerUp(f, _downOrigX, _downOrigY, ms)) { }
                     else
                     {
                         int fx2 = _downOrigX, fy2 = _downOrigY;
                         if (fx2 == int.MinValue)
                         { var (gx2, gy2) = Out.Logical(); fx2 = gx2; fy2 = gy2; }
-                        TwoFingerUp(f, fx2, fy2, ms);
+                        CloseTwoTap(f, fx2, fy2, ms);
                     }
                     _heldLeft = false;
                     _g = G.None;
