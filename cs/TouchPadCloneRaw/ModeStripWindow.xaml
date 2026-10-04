@@ -2,9 +2,9 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="TouchPadClone ModeStrip" WindowStyle="None" AllowsTransparency="True"
-        Background="#5910131A" Topmost="True" ShowInTaskbar="False"
+        Background="Transparent" Topmost="True" ShowInTaskbar="False"
         ResizeMode="NoResize" Width="380" Height="86">
-    <Border x:Name="Surface" Background="#5910131A"
+    <Border x:Name="Surface" Background="Transparent"
             Stylus.IsPressAndHoldEnabled="False">
         <StackPanel Orientation="Vertical">
             <Grid Height="26">

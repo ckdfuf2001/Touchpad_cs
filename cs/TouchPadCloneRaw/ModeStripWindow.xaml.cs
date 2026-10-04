@@ -656,7 +656,7 @@ public partial class ModeStripWindow : Window
                     System.Windows.Media.Color.FromArgb((byte)(op * 255), c.R, c.G, c.B));
             }
             Surface.Background = brush;
-            try { Background = brush; } catch { }
+            try { Background = System.Windows.Media.Brushes.Transparent; } catch { }
             if (_gripPoly != null) _gripPoly.Fill = brush;
             if (_modePoly != null) _modePoly.Fill = brush;
         }
