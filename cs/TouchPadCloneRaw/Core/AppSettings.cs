@@ -18,8 +18,8 @@ public sealed class GestureMap
     public string SecondHold { get; set; } = "drag";
     public string TwoFingerTap { get; set; } = "right_click";
     public string TwoFingerHold { get; set; } = "none";
-    public string SwipeUp { get; set; } = "wheel_up";
-    public string SwipeDown { get; set; } = "wheel_down";
+    public string SwipeUp { get; set; } = "win_maximize";
+    public string SwipeDown { get; set; } = "win_minimize";
     public string SwipeLeft { get; set; } = "browser_back";
     public string SwipeRight { get; set; } = "browser_forward";
     public string SwipeUpLeft { get; set; } = "none";

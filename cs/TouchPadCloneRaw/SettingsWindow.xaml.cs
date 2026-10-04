@@ -351,6 +351,9 @@ public partial class SettingsWindow : Window
             if (_gestures.TryGetValue("artist:" + key, out var b)) set(_s.ArtistGestures, Sel(b));
             if (_gestures.TryGetValue("virtual:" + key, out var c2)) set(_s.VirtualGestures, Sel(c2));
         }
+        // Default two-finger strokes live outside Slots (FloatPad only).
+        if (_gestures.TryGetValue("float:swipe_up", out var su)) _s.Gestures.SwipeUp = Sel(su);
+        if (_gestures.TryGetValue("float:swipe_down", out var sd)) _s.Gestures.SwipeDown = Sel(sd);
         foreach (var r in _s.StripLayout) { while (r.Cells.Count < 4) r.Cells.Add(""); }
         _s.Save();
         FireApply();
@@ -1364,6 +1367,42 @@ public partial class SettingsWindow : Window
                 };
                 _gestures["float:" + key] = cb;
                 row.Children.Add(cb);
+                FloatGestureList.Children.Add(row);
+            }
+            // Default two-finger strokes (up = maximize, down = minimize):
+            // fixed rows with mapping + clear-to-none.
+            foreach (var (key, label, get, set) in new[] {
+                ("swipe_up", "두손가락 위로",
+                    (Func<GestureMap, string>)(m => m.SwipeUp),
+                    (Action<GestureMap, string>)((m, v) => m.SwipeUp = v)),
+                ("swipe_down", "두손가락 아래로",
+                    (Func<GestureMap, string>)(m => m.SwipeDown),
+                    (Action<GestureMap, string>)((m, v) => m.SwipeDown = v)),
+            })
+            {
+                var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+                row.Children.Add(new TextBlock
+                {
+                    Text = label, Width = 150, VerticalAlignment = VerticalAlignment.Center,
+                });
+                var cb = new WComboBox
+                {
+                    ItemsSource = GestureMap.Actions,
+                    SelectedItem = get(_s.Gestures),
+                    Width = 200,
+                    Margin = new Thickness(0, 0, 0, 0),
+                };
+                _gestures["float:" + key] = cb;
+                var clr = new Button { Content = "✕", Width = 30, Margin = new Thickness(4, 0, 0, 0), ToolTip = "매핑 해제 (none)" };
+                clr.Click += (_, _) =>
+                {
+                    cb.SelectedItem = "none";
+                    set(_s.Gestures, "none");
+                    _s.Save();
+                    FireApply();
+                };
+                row.Children.Add(cb);
+                row.Children.Add(clr);
                 FloatGestureList.Children.Add(row);
             }
             foreach (var g in _s.RecordedGestures.ToList())
