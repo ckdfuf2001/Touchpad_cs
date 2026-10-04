@@ -662,9 +662,21 @@ public partial class ModeStripWindow : Window
         catch { }
     }
 
-    private void PositionChrome()
+    /// <summary>Raises grip/mode with the bar (same tick): the effect
+    /// overlay pops above them on every touch/mouse, which flickered
+    /// until the 1s keeper restored order.</summary>
+    public void RaiseChrome()
     {
         try
+        {
+            if (_gripWin != null) Core.TopmostKeeper.Raise(_gripWin);
+            if (_modeWin != null) Core.TopmostKeeper.Raise(_modeWin);
+        }
+        catch { }
+    }
+
+    private void PositionChrome()
+    {        try
         {
             EnsureChrome();
             if (_gripWin == null || _modeWin == null) return;

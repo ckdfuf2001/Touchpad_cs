@@ -96,6 +96,7 @@ public partial class App : WApplication
             if (_picker != null) Core.TopmostKeeper.Raise(_picker);
             if (_assist != null) Core.TopmostKeeper.Raise(_assist);
             if (_strip != null) Core.TopmostKeeper.Raise(_strip);
+            _strip?.RaiseChrome();
         };
 
         _tray = new TrayManager(
