@@ -48,10 +48,13 @@ public static class OsGestures
         public uint cbExtraArgs;
     }
 
-    [DllImport("user32.dll")]
-    private static extern bool SetGestureConfig(IntPtr hwnd, int dwReserved,
-        [In] GESTURECONFIG[] pGestureConfig, int cIDs,
-        IntPtr pUnknown, int cbExtraArgs, IntPtr pExtraArgs);
+    // NOTE: exact native shape (cf. MS MTGestures sample): 5 params,
+    // cbSize = sizeof(GESTURECONFIG). A 7-param variant floating around
+    // the web stack-imbalances and always returns False.
+    [DllImport("user32")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetGestureConfig(IntPtr hWnd, int dwReserved,
+        int cIDs, ref GESTURECONFIG pGestureConfig, int cbSize);
 
     [DllImport("user32.dll")]
     private static extern bool GetGestureInfo(IntPtr hGestureInfo, ref GESTUREINFO pGestureInfo);
@@ -59,14 +62,16 @@ public static class OsGestures
     [DllImport("user32.dll")]
     private static extern bool CloseGestureInfoHandle(IntPtr pGestureInfo);
 
-    /// <summary>Opts the window into all OS gestures. Best-effort.</summary>
-    public static void Enable(IntPtr hwnd)
+    /// <summary>Opts the window into all OS gestures. Best-effort.
+    /// The sample configures on WM_GESTURENOTIFY, so callers retry
+    /// there too (pass retry=true once, from the hook).</summary>
+    public static void Enable(IntPtr hwnd, string why)
     {
         try
         {
-            var cfg = new[] { new GESTURECONFIG { dwID = 0, dwWant = GC_ALLGESTURES, dwBlock = 0 } };
-            bool ok = SetGestureConfig(hwnd, 0, cfg, 1, IntPtr.Zero, 0, IntPtr.Zero);
-            Log.Write($"OSGESTURE config all={ok}");
+            var gc = new GESTURECONFIG { dwID = 0, dwWant = GC_ALLGESTURES, dwBlock = 0 };
+            bool ok = SetGestureConfig(hwnd, 0, 1, ref gc, Marshal.SizeOf<GESTURECONFIG>());
+            Log.Write($"OSGESTURE config all={ok} ({why})");
         }
         catch (Exception ex) { Log.Write("OSGESTURE config failed: " + ex.Message); }
     }

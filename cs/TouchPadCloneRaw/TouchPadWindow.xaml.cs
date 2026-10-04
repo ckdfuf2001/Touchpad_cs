@@ -327,11 +327,12 @@ public partial class TouchPadWindow : Window
                     if (msg == OsGestures.WM_GESTURENOTIFY)
                     {
                         Log.Write($"OSGESTURE NOTIFY wp=0x{wp.ToInt64():X} lp=0x{lp.ToInt64():X}");
+                        try { OsGestures.Enable(hwnd, "notify-retry"); } catch { }
                         return IntPtr.Zero;
                     }
                     return IntPtr.Zero;
                 });
-                try { OsGestures.Enable(hsrc.Handle); } catch { }
+                try { OsGestures.Enable(hsrc.Handle, "init"); } catch { }
             }
             catch { }
         };
@@ -1388,6 +1389,15 @@ public partial class TouchPadWindow : Window
                                 if (!DoMapAction(act, fx, fy))
                                 { _lastTapTick = 0; _tapChain = 0; _lastWhat = "tap-none"; break; }
                                 Fx().Flash(fx / _dpi, fy / _dpi);
+                                // Passive roll survey (no behavior): consecutive
+                                // quick taps log gap + separation, so device
+                                // tests reveal the natural rolling rhythm.
+                                long gap0 = _lastTapTick == 0 ? -1 : now - _lastTapTick;
+                                if (gap0 >= 0 && gap0 <= 1000)
+                                {
+                                    double rd0 = Math.Abs(fx - _lastTapX) + Math.Abs(fy - _lastTapY);
+                                    Log.Write($"ROLL? gap={gap0}ms d={rd0:0} chain={_tapChain}");
+                                }
                                 _lastTapTick = now;
                                 _tapChain = 1;
                                 _lastTapX = fx; _lastTapY = fy;
