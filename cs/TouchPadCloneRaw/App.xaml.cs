@@ -60,6 +60,7 @@ public partial class App : WApplication
 
         _pad = new TouchPadWindow(_settings);
         _pad.RequestSettings += OpenSettings;
+        _pad.RequestHide += () => HidePad();
         _pad.RequestAssist += ToggleAssist;
         _pad.RequestFullscreenToggle += ToggleFullscreen;
         // The pad never activates (NOACTIVATE), so outside-tap-collapse of

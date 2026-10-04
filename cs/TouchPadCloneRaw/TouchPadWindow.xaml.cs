@@ -61,6 +61,9 @@ public partial class TouchPadWindow : Window
     private G _g = G.None;
     private int _primaryId = -1;
     private int _gearId = -1;
+    private int _xId = -1;
+    private Point _xP;
+    private DateTime _xT0;
     private Point _gearP;
     private DateTime _gearT0;
     private long _lastTapTick;
@@ -200,6 +203,25 @@ public partial class TouchPadWindow : Window
             e.Handled = true;
         };
         GearLabel.MouseLeftButtonUp += (_, e) => { RequestSettings?.Invoke(); e.Handled = true; };
+        // X (next to gear): own touch/mouse tap, hides the pad.
+        XLabel.TouchDown += (_, e) =>
+        {
+            _xId = e.TouchDevice.Id;
+            _xP = e.GetTouchPoint(Surface).Position;
+            _xT0 = DateTime.Now;
+            e.Handled = true;
+        };
+        XLabel.TouchUp += (_, e) =>
+        {
+            if (e.TouchDevice.Id != _xId) return;
+            _xId = -1;
+            var end = e.GetTouchPoint(Surface).Position;
+            double ms = (DateTime.Now - _xT0).TotalMilliseconds;
+            if (ms < 400 && Math.Abs(end.X - _xP.X) + Math.Abs(end.Y - _xP.Y) <= 14)
+                RequestHide?.Invoke();
+            e.Handled = true;
+        };
+        XLabel.MouseLeftButtonUp += (_, e) => { RequestHide?.Invoke(); e.Handled = true; };
         ActualLabel.MouseLeftButtonUp += (_, _) => OpenLog();
         _actualTimer = new System.Windows.Threading.DispatcherTimer
         {
@@ -310,6 +332,7 @@ public partial class TouchPadWindow : Window
 
     public event Action? PressedAnywhere;
     public event Action? RequestSettings;
+    public event Action? RequestHide;
     public event Action? RequestAssist;
     public event Action? RequestFullscreenToggle;
 
