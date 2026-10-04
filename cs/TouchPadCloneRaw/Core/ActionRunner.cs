@@ -164,18 +164,22 @@ public static class ActionRunner
         private static extern IntPtr GetWindowLongPtr(IntPtr h, int n);
         [DllImport("dwmapi.dll")]
         private static extern int DwmGetWindowAttribute(IntPtr h, int a, out int v, int s);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int GetClassName(IntPtr h, System.Text.StringBuilder c, int n);
 
         private const int SW_MINIMIZE = 6, SW_MAXIMIZE = 3, SW_RESTORE = 9;
         private const uint WM_CLOSE = 0x10;
 
         /// <summary>Topmost user window: visible, not cloaked, not a
-        /// click-through overlay, never ours. Zero when none.</summary>
+        /// click-through overlay, never ours, never the shell
+        /// (taskbar/desktop would swallow minimize). Zero when none.</summary>
         public static IntPtr TopUserWindow()
         {
             IntPtr found = IntPtr.Zero;
             try
             {
                 uint ours = (uint)Environment.ProcessId;
+                var sb = new System.Text.StringBuilder(256);
                 EnumWindows((h, _) =>
                 {
                     if (found != IntPtr.Zero) return false;
@@ -186,6 +190,14 @@ public static class ActionRunner
                     {
                         if (DwmGetWindowAttribute(h, 14, out int cl, 4) == 0 && cl != 0) return true;
                         if (((long)GetWindowLongPtr(h, -20) & 0x20L) != 0) return true;
+                        if (GetClassName(h, sb, sb.Capacity) > 0)
+                        {
+                            string cls = sb.ToString();
+                            if (cls == "Shell_TrayWnd" || cls == "Shell_SecondaryTrayWnd"
+                                || cls == "Progman" || cls == "WorkerW"
+                                || cls == "MultitaskingViewFrame")
+                                return true;
+                        }
                     }
                     catch { }
                     found = h;
@@ -205,6 +217,17 @@ public static class ActionRunner
             try
             {
                 IntPtr h = TopUserWindow();
+                string target = "none";
+                try
+                {
+                    if (h != IntPtr.Zero)
+                    {
+                        GetWindowThreadProcessId(h, out uint tpid);
+                        target = $"0x{h.ToInt64():X} pid={tpid} ({System.Diagnostics.Process.GetProcessById((int)tpid).ProcessName})";
+                    }
+                }
+                catch { }
+                Log.Write($"WINOP {k} target={target}");
                 if (h == IntPtr.Zero) return false;
                 switch (k)
                 {
