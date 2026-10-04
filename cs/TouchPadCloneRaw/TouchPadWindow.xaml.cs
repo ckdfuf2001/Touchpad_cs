@@ -87,6 +87,9 @@ public partial class TouchPadWindow : Window
     private long _twoMoveT0;
     private bool _twoLock;
     private double _twoLockNet;
+    // Actually emitted deltas this session: rewound when the lift fires
+    // a swipe, so a swipe never leaves scroll behind.
+    private int _twoSentX, _twoSentY;
     // _twoScrolled = a wheel notch went out this session: the lift
     // stays silent (no tap/swipe after a scroll), far pair or not.
     private bool _twoScrolled;
@@ -610,6 +613,7 @@ public partial class TouchPadWindow : Window
         _twoVX = 0; _twoVY = 0;
         _twoT0 = Environment.TickCount64;
         _twoWheelX = 0; _twoWheelY = 0;
+        _twoSentX = 0; _twoSentY = 0;
         _twoMoveT0 = 0;
         _twoLock = false; _twoLockNet = 0;
         f.Start = f.Last; f.Moved = false;
@@ -739,7 +743,13 @@ public partial class TouchPadWindow : Window
                 }
                 else
                 {
-                    Log.Write($"2FINGER swipe {act} -> {mapped}");
+                    // Rewind the live scroll first: the page ends where it
+                    // started, so a swipe never leaves scroll behind.
+                    if (_twoSentY != 0) Out.Wheel(-_twoSentY);
+                    if (_twoSentX != 0) Out.HWheel(-_twoSentX);
+                    int rewound = _twoSentY + _twoSentX;
+                    _twoSentX = 0; _twoSentY = 0;
+                    Log.Write($"2FINGER swipe {act} -> {mapped} (rewound {rewound})");
                     Fx().Flash(fx / _dpi, fy / _dpi);
                     _lastWhat = "two-swipe";
                 }
@@ -1227,6 +1237,7 @@ public partial class TouchPadWindow : Window
                         int s = Math.Sign(_twoWheelY);
                         _twoWheelY -= s * WheelDip;
                         Out.Wheel(s * notch);
+                        _twoSentY += s * notch;
                         _twoScrolled = true;
                     }
                     while (Math.Abs(_twoWheelX) >= WheelDip)
@@ -1234,6 +1245,7 @@ public partial class TouchPadWindow : Window
                         int s = Math.Sign(_twoWheelX);
                         _twoWheelX -= s * WheelDip;
                         Out.HWheel(s * notch);
+                        _twoSentX += s * notch;
                         _twoScrolled = true;
                     }
                     _lastWhat = "two-scroll";
