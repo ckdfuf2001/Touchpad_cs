@@ -29,8 +29,11 @@ public partial class ModeStripWindow : Window
     /// <summary>Raw tap: the app decides by pad state (activate vs panel).</summary>
     public event Action? Tap;
 
-    /// <summary>Close (✕) button on the strip's right side.</summary>
+    /// <summary>Close (X) button on the strip: hides the pad.</summary>
     public event Action? ClosePad;
+
+    /// <summary>Mode (☰) button on the strip: opens the mode panel.</summary>
+    public event Action? ModePressed;
 
     /// <summary>Fired on press so the app can tell strip-taps apart when
     /// the mode panel auto-closes on deactivation.</summary>
@@ -174,16 +177,23 @@ public partial class ModeStripWindow : Window
             // wedge the strip: drop the stroke, collapse the bar.
             ResetTouch();
         };
-        // In-bar close button retired: close lives outside the bar now
-        // (PositionChrome). Kept in XAML collapsed for layout spacing.
-        PadClose.Visibility = Visibility.Collapsed;
+        // In-strip close + mode buttons: touch first, mouse Click
+        // as fallback. They live with the pad (SetPadActive).
+        CloseBtn.PreviewTouchDown += (_, e) => { ClosePad?.Invoke(); e.Handled = true; };
+        CloseBtn.Click += (_, _) => ClosePad?.Invoke();
+        ModeBtn.PreviewTouchDown += (_, e) => { ModePressed?.Invoke(); e.Handled = true; };
+        ModeBtn.Click += (_, _) => ModePressed?.Invoke();
+        SetPadActive(false);
     }
 
-    /// <summary>Pad-close availability: the external close button shows
-    /// while the pad is on (and hides with the strip).</summary>
+    /// <summary>Close + mode buttons live with the pad: shown while the
+    /// pad is on (and hidden with the strip).</summary>
     public void SetPadActive(bool on)
     {
         _padActive = on;
+        var v = on ? Visibility.Visible : Visibility.Collapsed;
+        CloseBtn.Visibility = v;
+        ModeBtn.Visibility = v;
         PositionChrome();
     }
 
@@ -467,12 +477,10 @@ public partial class ModeStripWindow : Window
                 };
                 _gripWin.PreviewMouseLeftButtonUp += (_, _) => EndGripDrag(null, false);
             }
-            if (_closeWin == null)
-            {
-                _closeWin = MakeChromeBtn(TriPoints(close: true), "X", "패드 닫기", false);
-                _closeWin.PreviewTouchDown += (_, e) => { ClosePad?.Invoke(); e.Handled = true; };
-                _closeWin.PreviewMouseLeftButtonUp += (_, e) => { ClosePad?.Invoke(); e.Handled = true; };
-            }
+            // External close retired: close lives in the strip bar now
+            // (CloseBtn). Only the grip rides outside.
+            try { _closeWin?.Close(); } catch { }
+            _closeWin = null;
         }
         catch { }
     }
@@ -574,25 +582,11 @@ public partial class ModeStripWindow : Window
         try
         {
             EnsureChrome();
-            if (_gripWin == null || _closeWin == null) return;
+            if (_gripWin == null) return;
             bool show = Visibility == Visibility.Visible;
-            // Chrome rides ON the strip: grip overlaps the top-left
-            // corner, close the top-right corner (their outer corners
-            // are the strip corners). Narrow bars stack close below
-            // grip instead of overlapping it.
-            double gx = Left, gy = Top;
-            double cx = Left + Width - _closeWin.Width, cy = Top;
-            if (Width < _gripWin.Width + _closeWin.Width + 4)
-            {
-                cx = Left; cy = Top + _gripWin.Height;
-            }
-            _gripWin.Left = gx; _gripWin.Top = gy;
-            _closeWin.Left = cx; _closeWin.Top = cy;
-            var gv = show ? Visibility.Visible : Visibility.Hidden;
-            _gripWin.Visibility = gv;
-            // Close keeps its pad-active rule, and hides with the strip.
-            _closeWin.Visibility = show && _padActive
-                ? Visibility.Visible : Visibility.Hidden;
+            // Grip rides with the bar (top-left corner overlap).
+            _gripWin.Left = Left; _gripWin.Top = Top;
+            _gripWin.Visibility = show ? Visibility.Visible : Visibility.Hidden;
         }
         catch { }
     }

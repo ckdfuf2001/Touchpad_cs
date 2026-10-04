@@ -7,9 +7,20 @@
     <Border x:Name="Surface" Background="#5910131A">
         <StackPanel Orientation="Vertical">
             <Grid Height="26">
-                <TextBlock x:Name="Label" Text="◀  mode  ▶" Foreground="#9AA6BD"
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="30"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="30"/>
+                </Grid.ColumnDefinitions>
+                <Button x:Name="CloseBtn" Grid.Column="0" Content="X" FontSize="12"
+                        Foreground="WhiteSmoke" Background="Transparent"
+                        BorderBrush="Transparent" ToolTip="패드 닫기"/>
+                <TextBlock x:Name="Label" Grid.Column="1" Text="◀  mode  ▶" Foreground="#9AA6BD"
                            FontSize="11" HorizontalAlignment="Center"
                            VerticalAlignment="Center" IsHitTestVisible="False"/>
+                <Button x:Name="ModeBtn" Grid.Column="2" Content="☰" FontSize="12"
+                        Foreground="WhiteSmoke" Background="Transparent"
+                        BorderBrush="Transparent" ToolTip="모드 변경"/>
                 <Button x:Name="PadClose" Content="✕" Width="34" Height="22"
                         HorizontalAlignment="Right" VerticalAlignment="Center"
                         Margin="0,0,2,0" FontSize="12" Visibility="Collapsed"/>
