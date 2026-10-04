@@ -303,13 +303,25 @@ public partial class App : WApplication
     }
 
     /// <summary>Strip tap: pad off -> activate last mode; pad on -> mapped tap.</summary>
-    /// <summary>Strip tap: fires the currently displayed (selected)
-    /// cell AND opens the mode popup. (Pad-only launch still works:
-    /// firing a layout cell shows its pad via Apply.)</summary>
+    /// <summary>Strip tap: single tap opens the mode popup; a quick
+    /// re-tap while it is open executes the displayed selection and
+    /// closes the popup. (One tap used to do both at once, which mixed
+    /// browsing with firing.)</summary>
+    private long _stripTapTick;
+
     private void HandleStripTap()
     {
         if (_pad == null || _strip == null) return;
-        FireSelected();
+        long now = Environment.TickCount64;
+        bool dbl = _picker != null && now - _stripTapTick <= 400;
+        _stripTapTick = now;
+        if (dbl)
+        {
+            try { _picker?.Close(); } catch (InvalidOperationException) { }
+            _picker = null;
+            FireSelected();
+            return;
+        }
         ShowModePicker();
     }
 

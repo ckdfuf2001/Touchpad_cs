@@ -17,9 +17,6 @@ namespace TouchPadCloneV2;
 /// </summary>
 public partial class ModeStripWindow : Window
 {
-    private const double SwipePx = 32;
-    private const double DownPx = 28;
-    private const double UpPx = 18; // top screen edge: upward travel is short
     private const double TapMs = 300;
 
     /// <summary>
@@ -240,22 +237,21 @@ public partial class ModeStripWindow : Window
     private void Decide(double dx, double dy, double ms)
     {
         var m = _s.StripGestures ?? new StripGestureMap();
-        // Raw tap goes to the app: pad off -> activate, pad on -> mapped tap.
-        if (ms < TapMs && Math.Abs(dx) + Math.Abs(dy) <= 12)
+        // Tap: quick and stationary. Anything else with a clear dominant
+        // axis is a swipe - no absolute minimums (a top-edge bar gives
+        // an upward flick ~10px of travel; a tall bar gives plenty).
+        // Safe: swipes only move the menu selection, nothing fires.
+        double ax = Math.Abs(dx), ay = Math.Abs(dy);
+        if (ms < TapMs && ax + ay <= 8)
         {
             Tap?.Invoke();
             return;
         }
         string action = "none";
-        if (Math.Abs(dx) >= SwipePx && Math.Abs(dx) >= Math.Abs(dy))
+        if (ax >= ay * 1.5)
             action = dx > 0 ? m.SwipeRight : m.SwipeLeft;
-        else if (Math.Abs(dy) > Math.Abs(dx))
-        {
-            // Top screen edge: upward travel is physically short, so the
-            // up threshold is lenient (UpPx < DownPx).
-            double need = dy > 0 ? DownPx : UpPx;
-            if (Math.Abs(dy) >= need) action = dy > 0 ? m.SwipeDown : m.SwipeUp;
-        }
+        else if (ay > ax * 1.5)
+            action = dy > 0 ? m.SwipeDown : m.SwipeUp;
         DebugLog.Write($"STRIP decide d=({dx:0},{dy:0}) {ms:0}ms -> {action}");
         if (action != "none") Gesture?.Invoke(action);
     }
