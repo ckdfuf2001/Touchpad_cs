@@ -110,6 +110,10 @@ public partial class TouchPadWindow : Window
     // flicker reads ~0 and must never tap).
     private bool _twoFired;
     private double _twoDD;
+    // Two-contact trail: joint centroid per event for recorded-gesture
+    // matching (and recording). _twoMaxN = most contacts this session.
+    private readonly List<(double x, double y)> _twoTrail = new();
+    private int _twoMaxN;
     private int _gearId = -1;
     private int _xId = -1;
     private Point _xP;
@@ -626,6 +630,10 @@ public partial class TouchPadWindow : Window
         _twoSwipeFired = false;
         f.Start = f.Last; f.Moved = false;
         if (other != null) { other.Start = other.Last; other.Moved = false; }
+        _twoTrail.Clear();
+        _twoTrail.Add(((f.Last.X + (other?.Last.X ?? f.Last.X)) / (other == null ? 1 : 2),
+            (f.Last.Y + (other?.Last.Y ?? f.Last.Y)) / (other == null ? 1 : 2)));
+        if (_twoMaxN < 2) _twoMaxN = 2;
         Log.Write($"2FINGER begin d={dd:0} ({why})");
     }
 
@@ -738,6 +746,41 @@ public partial class TouchPadWindow : Window
         {
             if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
             if (fx == int.MinValue) return false;
+            // Recorded gestures (user templates) win over tap/swipe/scroll
+            // when they match - except after a lock-fired swipe (one action
+            // per session). Short trails fall through to tap below.
+            if (!_twoSwipeFired)
+            {
+                var rec = Core.GestureMatch.MatchTwo(_s.RecordedGestures, _twoTrail, _twoMaxN);
+                if (rec != null)
+                {
+                    var (g, score) = rec.Value;
+                    if (score < Core.GestureMatch.Threshold)
+                    {
+                        if (DoMapAction(g.Action, fx, fy))
+                        {
+                            if (_twoSentY != 0) Out.Wheel(-_twoSentY);
+                            if (_twoSentX != 0) Out.HWheel(-_twoSentX);
+                            _twoSentX = 0; _twoSentY = 0;
+                            Log.Write($"2FINGER recorded '{g.Name}' -> {g.Action} ({score:0.00})");
+                            Fx().Flash(fx / _dpi, fy / _dpi);
+                            _lastWhat = "two-recorded";
+                        }
+                        else
+                        {
+                            Log.Write($"2FINGER recorded '{g.Name}' unmapped (silent)");
+                            _lastWhat = "two-recorded-none";
+                        }
+                        _lastTapTick = 0;
+                        _tapChain = 0;
+                        return true;
+                    }
+                    else if (score < 0.60)
+                    {
+                        Log.Write($"2FINGER recorded-closest '{g.Name}' ({score:0.00})");
+                    }
+                }
+            }
             bool moved = _twoMaxNet > TapMoveDip || f.Moved;
             // Slow = the PAIR's age (ms is the single finger's press,
             // which includes pre-join holding and must not judge the tap).
@@ -1013,6 +1056,7 @@ public partial class TouchPadWindow : Window
                 Zone = zone,
             };
             _fingers[e.TouchDevice.Id] = f;
+            if (_twoMaxN < _fingers.Count) _twoMaxN = _fingers.Count;
             if (_fingers.Count == 1)
             {
                 // Fresh press: single-contact state machine starts clean
@@ -1027,6 +1071,8 @@ public partial class TouchPadWindow : Window
                 _twoJoinT = 0;
                 _twoFired = false;
                 _twoDD = 0;
+                _twoTrail.Clear();
+                _twoMaxN = 1;
                 // Stale hold from a lost UP first (safety net).
                 if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
                 _primaryId = e.TouchDevice.Id;
@@ -1226,6 +1272,15 @@ public partial class TouchPadWindow : Window
             // session (tap/swipe ledger) opens lazily when they spread.
             if (_fingers.Count >= 2)
             {
+                if (_twoMaxN < _fingers.Count) _twoMaxN = _fingers.Count;
+                // Trail for recorded-gesture matching (and recording):
+                // joint centroid per move, capped.
+                if (_twoTrail.Count < 512)
+                {
+                    double sx = 0, sy = 0;
+                    foreach (var kv in _fingers) { sx += kv.Value.Last.X; sy += kv.Value.Last.Y; }
+                    _twoTrail.Add((sx / _fingers.Count, sy / _fingers.Count));
+                }
                 if (!_twoSeen)
                 {
                     Finger? o2 = null;
@@ -1696,6 +1751,9 @@ public partial class TouchPadWindow : Window
                 _lastWhat = "session-end";
                 _twoScrolled = false;
                 _twoFired = false;
+                // Recording completes on session end (two fingers or more
+                // only - singles never reach the recorder).
+                Core.GestureRecorder.CompleteIfRecording(_twoTrail, _twoMaxN);
             }
             _liveTouches--;
             Surface.ReleaseTouchCapture(e.TouchDevice);

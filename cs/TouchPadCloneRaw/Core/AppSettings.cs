@@ -187,6 +187,17 @@ public sealed class VirtualConfig
     public List<PadButton> Buttons { get; set; } = new();
 }
 
+/// <summary>A user-recorded two-finger gesture: a normalized centroid
+/// path (see GestureMatch) mapped to an action id.</summary>
+public sealed class RecordedGesture
+{
+    public string Name { get; set; } = "";
+    public string Action { get; set; } = "none";
+    public int Fingers { get; set; } = 2;
+    /// <summary>Normalized template, flat x,y * Size (GestureMatch).</summary>
+    public List<double> Points { get; set; } = new();
+}
+
 /// <summary>A runnable action: a mouse action, a program, or a cmd line.</summary>
 public sealed class ActionDef
 {
@@ -422,6 +433,9 @@ public sealed class AppSettings
     /// <summary>Named custom actions (program/cmd/mouse) for strip items
     /// and aux pad buttons.</summary>
     public Dictionary<string, ActionDef> Actions { get; set; } = new();
+
+    /// <summary>User-recorded two-finger gestures (gesture tab).</summary>
+    public List<RecordedGesture> RecordedGestures { get; set; } = new();
 
     public PadConfig Pad(string name)
     {

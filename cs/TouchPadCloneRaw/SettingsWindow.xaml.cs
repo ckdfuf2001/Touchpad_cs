@@ -281,6 +281,8 @@ public partial class SettingsWindow : Window
         InitPadsTab();
         InitActionsTab();
         InitLayoutTab();
+        InitRecTab();
+        Closed += (_, _) => Core.GestureRecorder.Cancel();
 
         SaveBtn.Click += (_, _) => ApplySave();
         SaveBtnFloat.Click += (_, _) => ApplySave();
@@ -1253,6 +1255,97 @@ public partial class SettingsWindow : Window
     }
 
     private static string Sel(WComboBox cb) => cb.SelectedItem as string ?? "none";
+
+    // ---------------- recorded gestures tab --------------------------
+
+    private void InitRecTab()
+    {
+        RecBtn.Click += (_, _) => ToggleRecording();
+        RebuildRecList();
+    }
+
+    private void ToggleRecording()
+    {
+        if (Core.GestureRecorder.IsRecording)
+        {
+            Core.GestureRecorder.Cancel();
+            RecBtn.Content = "녹화 시작";
+            RecStateLbl.Text = "";
+            return;
+        }
+        Core.GestureRecorder.IsRecording = true;
+        Core.GestureRecorder.OnFinished = OnRecorded;
+        RecBtn.Content = "녹화 중지";
+        RecStateLbl.Text = "패드에서 두손가락 동작을 그리고 떼세요";
+        try { _showPad?.Invoke(); } catch { }
+    }
+
+    private void OnRecorded(RecordedGesture? g)
+    {
+        try
+        {
+            RecBtn.Content = "녹화 시작";
+            if (g == null || g.Points.Count == 0)
+            {
+                RecStateLbl.Text = "인식 실패: 두손가락으로 길게 그리세요";
+                return;
+            }
+            int n = 1;
+            foreach (var r in _s.RecordedGestures)
+                if (r.Name.StartsWith("제스처 ")) n++;
+            g.Name = $"제스처 {n}";
+            _s.RecordedGestures.Add(g);
+            _s.Save();
+            RebuildRecList();
+            FireApply();
+            RecStateLbl.Text = $"저장됨: {g.Name} ({g.Points.Count / 2}pts)";
+        }
+        catch { }
+    }
+
+    private void RebuildRecList()
+    {
+        try
+        {
+            RecList.Children.Clear();
+            foreach (var g in _s.RecordedGestures.ToList())
+            {
+                var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+                var name = new TextBox { Text = g.Name, Width = 110 };
+                name.LostFocus += (_, _) =>
+                {
+                    g.Name = name.Text;
+                    _s.Save();
+                };
+                var act = new WComboBox
+                {
+                    ItemsSource = GestureMap.Actions,
+                    SelectedItem = g.Action,
+                    Width = 150,
+                    Margin = new Thickness(4, 0, 0, 0),
+                };
+                act.SelectionChanged += (_, _) =>
+                {
+                    g.Action = act.SelectedItem as string ?? "none";
+                    _s.Save();
+                    FireApply();
+                };
+                var del = new Button { Content = "삭제", Width = 52, Margin = new Thickness(4, 0, 0, 0) };
+                del.Click += (_, _) =>
+                {
+                    _s.RecordedGestures.Remove(g);
+                    _s.Save();
+                    RebuildRecList();
+                    FireApply();
+                };
+                row.Children.Add(name);
+                row.Children.Add(act);
+                row.Children.Add(del);
+                RecList.Children.Add(row);
+            }
+        }
+        catch { }
+    }
 
     private const string AutoStartKey = "TouchPadCloneRaw";
     private const string RunSubkey =
