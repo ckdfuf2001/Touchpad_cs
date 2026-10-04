@@ -83,6 +83,9 @@ public partial class TouchPadWindow : Window
     private double _twoWheelX, _twoWheelY;
     private long _twoSegT;
     private double _twoSegNet;
+    // _twoScrolled = a wheel notch went out this session: the lift
+    // stays silent (no tap/swipe after a scroll), far pair or not.
+    private bool _twoScrolled;
     private int _gearId = -1;
     private int _xId = -1;
     private Point _xP;
@@ -545,6 +548,25 @@ public partial class TouchPadWindow : Window
         }
     }
 
+    /// <summary>Opens the two-contact session (tap/swipe ledger).
+    /// Once per session (guarded): the join starts a fresh travel
+    /// ledger, so pre-join wiggle and a stale vector from the last
+    /// session never vote tap-vs-swipe after the join.</summary>
+    private void BeginTwo(string why, Finger f, Finger? other, double dd)
+    {
+        if (_twoSeen) return;
+        _twoSeen = true;
+        _twoOk = true;
+        _twoMaxNet = 0;
+        _twoVX = 0; _twoVY = 0;
+        _twoT0 = Environment.TickCount64;
+        _twoWheelX = 0; _twoWheelY = 0;
+        _twoSegT = _twoT0; _twoSegNet = 0;
+        f.Start = f.Last; f.Moved = false;
+        if (other != null) { other.Start = other.Last; other.Moved = false; }
+        Log.Write($"2FINGER begin d={dd:0} ({why})");
+    }
+
     /// <summary>Two-contact lift decision. True = consumed (caller skips
     /// its normal single-contact landing). Fires the mapped TwoFingerTap
     /// (quick + still, TapToClick-gated like taps) or a directional
@@ -845,6 +867,7 @@ public partial class TouchPadWindow : Window
                 _twoOk = true;
                 _twoMaxNet = 0;
                 _twoSpoiled = false;
+                _twoScrolled = false;
                 // Stale hold from a lost UP first (safety net).
                 if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
                 _primaryId = e.TouchDevice.Id;
@@ -963,23 +986,11 @@ public partial class TouchPadWindow : Window
                     Math.Abs(p.X - other.Start.X) + Math.Abs(p.Y - other.Start.Y);
                 if (dd < 40)
                 {
-                    Log.Write($"2FINGER ghost-near d={dd:0} (stays single)");
+                    Log.Write($"2FINGER ghost-near d={dd:0} (scrolls, no tap ledger)");
                 }
                 else
                 {
-                    _twoSeen = true;
-                    _twoOk = true;
-                    _twoMaxNet = 0;
-                    _twoVX = 0; _twoVY = 0;
-                    _twoT0 = Environment.TickCount64;
-                    _twoWheelX = 0; _twoWheelY = 0;
-                    _twoSegT = _twoT0; _twoSegNet = 0;
-                    // The join starts a fresh travel ledger: pre-join
-                    // wiggle (and a stale vector from the last session)
-                    // must not vote tap-vs-swipe after the join.
-                    f.Start = f.Last; f.Moved = false;
-                    if (other != null) { other.Start = other.Last; other.Moved = false; }
-                    Log.Write($"2FINGER begin d={dd:0}");
+                    BeginTwo("down", f, other, dd);
                 }
             }
             else if (_fingers.Count >= 3 && _twoSeen)
@@ -1041,11 +1052,20 @@ public partial class TouchPadWindow : Window
                 _twoVX = p.X - f.Start.X;
                 _twoVY = p.Y - f.Start.Y;
             }
-            // Two-contact move streams proportional wheel live (this IS
-            // the two-finger scroll): centroid deltas, same notch size
-            // as the scroll zone. Tap-vs-swipe still decides at lift.
-            if (_twoSeen && _fingers.Count >= 2)
+            // n == 2 drives wheel here (same detection, different action):
+            // any two live contacts scroll, far apart or not. The far-pair
+            // session (tap/swipe ledger) opens lazily when they spread.
+            if (_fingers.Count >= 2)
             {
+                if (!_twoSeen)
+                {
+                    Finger? o2 = null;
+                    foreach (var kv in _fingers)
+                        if (kv.Key != e.TouchDevice.Id) { o2 = kv.Value; break; }
+                    double dd2 = o2 == null ? 999 :
+                        Math.Abs(p.X - o2.Last.X) + Math.Abs(p.Y - o2.Last.Y);
+                    if (dd2 >= 40) BeginTwo("spread", f, o2, dd2);
+                }
                 long nowW = Environment.TickCount64;
                 if (nowW - _twoSegT > 200) { _twoSegNet = 0; _twoSegT = nowW; }
                 _twoSegNet += (Math.Abs(dx2) + Math.Abs(dy2)) / _fingers.Count;
@@ -1057,12 +1077,14 @@ public partial class TouchPadWindow : Window
                     int s = Math.Sign(_twoWheelY);
                     _twoWheelY -= s * WheelDip;
                     Out.Wheel(s * notch);
+                    _twoScrolled = true;
                 }
                 while (Math.Abs(_twoWheelX) >= WheelDip)
                 {
                     int s = Math.Sign(_twoWheelX);
                     _twoWheelX -= s * WheelDip;
                     Out.HWheel(s * notch);
+                    _twoScrolled = true;
                 }
                 _lastWhat = "two-scroll";
             }
@@ -1222,6 +1244,7 @@ public partial class TouchPadWindow : Window
                     {
                         if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
                     }
+                    else if (_twoScrolled) { Log.Write("2FINGER scroll-end (silent)"); _lastWhat = "two-scroll-end"; }
                     else if (TwoFingerUp(f, fx, fy, ms)) { }
                     else if (f.Zone == "wheel")
                     {
@@ -1366,11 +1389,16 @@ public partial class TouchPadWindow : Window
                 {
                     // Last lift wasn't the primary (it cancelled when the
                     // partner was still down): complete the two-contact
-                    // session here instead of going silent.
-                    int fx2 = _downOrigX, fy2 = _downOrigY;
-                    if (fx2 == int.MinValue)
-                    { var (gx2, gy2) = Out.Logical(); fx2 = gx2; fy2 = gy2; }
-                    TwoFingerUp(f, fx2, fy2, ms);
+                    // session here instead of going silent. A scrolled
+                    // session ends silent (no tap/swipe after a scroll).
+                    if (_twoScrolled) { Log.Write("2FINGER scroll-end (silent)"); _lastWhat = "two-scroll-end"; }
+                    else
+                    {
+                        int fx2 = _downOrigX, fy2 = _downOrigY;
+                        if (fx2 == int.MinValue)
+                        { var (gx2, gy2) = Out.Logical(); fx2 = gx2; fy2 = gy2; }
+                        TwoFingerUp(f, fx2, fy2, ms);
+                    }
                     _heldLeft = false;
                     _g = G.None;
                     _primaryId = -1;
@@ -1385,6 +1413,7 @@ public partial class TouchPadWindow : Window
                 Out.ClearAnchor();
                 Log.Write($"SESSION raw fake=({_fakeX:0},{_fakeY:0})");
                 _lastWhat = "session-end";
+                _twoScrolled = false;
             }
             _liveTouches--;
             Surface.ReleaseTouchCapture(e.TouchDevice);
