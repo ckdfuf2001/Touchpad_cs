@@ -1857,6 +1857,15 @@ public partial class TouchPadWindow : Window
     {
         _resizeMode = null;
         _rsTouchId = -1;
+        // Write back so the layout preview (settings-based) matches the
+        // real window: without this they diverge after every manual resize.
+        try
+        {
+            _s.PadWidth = Width;
+            _s.PadHeight = Height;
+            _s.Save();
+        }
+        catch { }
         UpdateChrome();
         RenderZones();
     }

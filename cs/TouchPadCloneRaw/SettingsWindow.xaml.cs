@@ -994,8 +994,10 @@ public partial class SettingsWindow : Window
             {
                 foreach (var t in lay.Tiles)
                 {
-                    double tx = r.l + r.w * t.X / 100.0, ty = r.t + r.h * t.Y / 100.0;
-                    double tw = r.w * t.W / 100.0, th = r.h * t.H / 100.0;
+                    // Same mapping as the pad (TileArea + 30px title offset).
+                    double tx = r.l + r.w * t.X / 100.0;
+                    double ty = r.t + 30 + (r.h - 30) * t.Y / 100.0;
+                    double tw = r.w * t.W / 100.0, th = (r.h - 30) * t.H / 100.0;
                     if (tw < 1 || th < 1) continue;
                     string kind = (t.Kind ?? "").ToLowerInvariant();
                     byte cr = 0xAA, cg = 0xAA, cb = 0xAA;
