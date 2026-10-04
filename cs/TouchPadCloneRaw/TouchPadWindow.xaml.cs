@@ -78,6 +78,11 @@ public partial class TouchPadWindow : Window
     private double _twoVX, _twoVY;
     private bool _twoSpoiled;
     private long _twoT0;
+    // Live two-finger scroll: centroid wheel accumulators (same notch
+    // size as the scroll zone) + trailing-200ms travel (fling test).
+    private double _twoWheelX, _twoWheelY;
+    private long _twoSegT;
+    private double _twoSegNet;
     private int _gearId = -1;
     private int _xId = -1;
     private Point _xP;
@@ -565,6 +570,19 @@ public partial class TouchPadWindow : Window
             }
             if (moved)
             {
+                // Slow/extended travel already scrolled live above: only
+                // a fast fling (120+ DIP in the trailing 200ms) also
+                // fires the mapped swipe. A stop-then-lift reads no
+                // travel (stale window expires), so it stays scroll.
+                double recent = Environment.TickCount64 - _twoSegT > 200 ? 0 : _twoSegNet;
+                if (recent < 120)
+                {
+                    Log.Write("2FINGER scroll (silent)");
+                    _lastWhat = "two-scroll";
+                    _lastTapTick = 0;
+                    _tapChain = 0;
+                    return true;
+                }
                 string act = "";
                 double ax = Math.Abs(_twoVX), ay = Math.Abs(_twoVY);
                 if (ax >= ay * 1.5) act = _twoVX > 0 ? "swipe_right" : "swipe_left";
@@ -954,6 +972,8 @@ public partial class TouchPadWindow : Window
                     _twoMaxNet = 0;
                     _twoVX = 0; _twoVY = 0;
                     _twoT0 = Environment.TickCount64;
+                    _twoWheelX = 0; _twoWheelY = 0;
+                    _twoSegT = _twoT0; _twoSegNet = 0;
                     // The join starts a fresh travel ledger: pre-join
                     // wiggle (and a stale vector from the last session)
                     // must not vote tap-vs-swipe after the join.
@@ -1021,11 +1041,36 @@ public partial class TouchPadWindow : Window
                 _twoVX = p.X - f.Start.X;
                 _twoVY = p.Y - f.Start.Y;
             }
+            // Two-contact move streams proportional wheel live (this IS
+            // the two-finger scroll): centroid deltas, same notch size
+            // as the scroll zone. Tap-vs-swipe still decides at lift.
+            if (_twoSeen && _fingers.Count >= 2)
+            {
+                long nowW = Environment.TickCount64;
+                if (nowW - _twoSegT > 200) { _twoSegNet = 0; _twoSegT = nowW; }
+                _twoSegNet += (Math.Abs(dx2) + Math.Abs(dy2)) / _fingers.Count;
+                _twoWheelX += dx2 / _fingers.Count;
+                _twoWheelY += dy2 / _fingers.Count;
+                int notch = _s.ScrollInvert ? -120 : 120;
+                while (Math.Abs(_twoWheelY) >= WheelDip)
+                {
+                    int s = Math.Sign(_twoWheelY);
+                    _twoWheelY -= s * WheelDip;
+                    Out.Wheel(s * notch);
+                }
+                while (Math.Abs(_twoWheelX) >= WheelDip)
+                {
+                    int s = Math.Sign(_twoWheelX);
+                    _twoWheelX -= s * WheelDip;
+                    Out.HWheel(s * notch);
+                }
+                _lastWhat = "two-scroll";
+            }
             if (e.TouchDevice.Id == _primaryId)
             {
-                // Two live contacts: the engine holds all output (no
-                // cursor, no drag, no wheel) - the lift decides tap vs
-                // swipe. Single-contact flows never enter here.
+                // Two live contacts: no cursor, no drag - wheel already
+                // streamed above, the lift decides tap vs fling-swipe.
+                // Single-contact flows never enter here.
                 if (_fingers.Count >= 2)
                 {
                     _lastWhat = "twofinger-hold";
