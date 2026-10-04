@@ -23,6 +23,19 @@ public static class InputSim
     private const uint MOUSEEVENTF_WHEEL = 0x0800;
     private const uint MOUSEEVENTF_HWHEEL = 0x1000;
     private const uint KEYEVENTF_KEYUP = 0x0002;
+    private const uint KEYEVENTF_EXTENDEDKEY = 0x0001;
+
+    /// <summary>Keyboard output is live (mouse stays on its own paths:
+    /// enabling it here cannot double-fire clicks).</summary>
+    public static bool KeyOutputEnabled = true;
+
+    /// <summary>Keys that need KEYEVENTF_EXTENDEDKEY (Win, arrows,
+    /// nav block, Apps, volume/media). Without it keybd_event drops
+    /// them silently - every Win-based shortcut died here.</summary>
+    private static bool IsExtendedKey(int vk) => vk is
+        0x21 or 0x22 or 0x23 or 0x24 or 0x25 or 0x26 or 0x27 or 0x28 or
+        0x2C or 0x2D or 0x2E or 0x5B or 0x5C or 0x5D or
+        0xAD or 0xAE or 0xAF or 0xB0 or 0xB1 or 0xB2 or 0xB3;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct POINT { public int X; public int Y; }
@@ -84,12 +97,14 @@ public static class InputSim
 
     private static void Key(ushort vk, bool up)
     {
-        if (!OutputEnabled)
+        if (!KeyOutputEnabled)
         {
             DebugLog.Write($"WOULD key 0x{vk:X} {(up ? "up" : "down")}");
             return;
         }
-        keybd_event((byte)vk, 0, up ? KEYEVENTF_KEYUP : 0, UIntPtr.Zero);
+        uint flags = (up ? KEYEVENTF_KEYUP : 0)
+            | (IsExtendedKey(vk) ? KEYEVENTF_EXTENDEDKEY : 0);
+        keybd_event((byte)vk, 0, flags, UIntPtr.Zero);
     }
 
     public static (int X, int Y) Cursor()
