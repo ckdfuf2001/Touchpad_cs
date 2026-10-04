@@ -734,6 +734,43 @@ public partial class TouchPadWindow : Window
         };
     }
 
+    /// <summary>Recorded-gesture match for lifts outside a session
+    /// (close pairs): fires the mapped action on a decisive match.
+    /// Singles and short trails fall through untouched.</summary>
+    private bool RecordedMatchFire(Finger f, int fx, int fy)
+    {
+        try
+        {
+            if (fx == int.MinValue) return false;
+            var rec = Core.GestureMatch.MatchTwo(_s.RecordedGestures, _twoTrail, _twoMaxN);
+            if (rec == null) return false;
+            var (g, score) = rec.Value;
+            if (score >= Core.GestureMatch.Threshold)
+            {
+                if (score < 0.60) Log.Write($"2FINGER recorded-closest '{g.Name}' ({score:0.00})");
+                return false;
+            }
+            if (DoMapAction(g.Action, fx, fy))
+            {
+                if (_twoSentY != 0) Out.Wheel(-_twoSentY);
+                if (_twoSentX != 0) Out.HWheel(-_twoSentX);
+                _twoSentX = 0; _twoSentY = 0;
+                Log.Write($"2FINGER recorded '{g.Name}' -> {g.Action} ({score:0.00})");
+                Fx().Flash(fx / _dpi, fy / _dpi);
+                _lastWhat = "two-recorded";
+            }
+            else
+            {
+                Log.Write($"2FINGER recorded '{g.Name}' unmapped (silent)");
+                _lastWhat = "two-recorded-none";
+            }
+            _lastTapTick = 0;
+            _tapChain = 0;
+            return true;
+        }
+        catch { return false; }
+    }
+
     /// <summary>Two-contact lift decision. True = consumed (caller skips
     /// its normal single-contact landing). Fires the mapped TwoFingerTap
     /// (quick + still, TapToClick-gated like taps) or a directional
@@ -1556,6 +1593,7 @@ public partial class TouchPadWindow : Window
                     else if (_twoFired) { _lastWhat = "two-fired"; }
                     else if (TwoFingerUp(f, fx, fy, ms)) { }
                     else if (_twoScrolled) { Log.Write("2FINGER scroll-end (silent)"); _lastWhat = "two-scroll-end"; }
+                    else if (RecordedMatchFire(f, fx, fy)) { }
                     else if (CloseTwoTap(f, fx, fy, ms)) { }
                     else if (f.Zone == "wheel")
                     {
@@ -1727,13 +1765,12 @@ public partial class TouchPadWindow : Window
                     if (_twoFired) { _lastWhat = "two-fired"; }
                     else if (TwoFingerUp(f, _downOrigX, _downOrigY, ms)) { }
                     else if (_twoScrolled) { Log.Write("2FINGER scroll-end (silent)"); _lastWhat = "two-scroll-end"; }
-                    else if (TwoFingerUp(f, _downOrigX, _downOrigY, ms)) { }
                     else
                     {
                         int fx2 = _downOrigX, fy2 = _downOrigY;
                         if (fx2 == int.MinValue)
                         { var (gx2, gy2) = Out.Logical(); fx2 = gx2; fy2 = gy2; }
-                        CloseTwoTap(f, fx2, fy2, ms);
+                        if (!RecordedMatchFire(f, fx2, fy2)) CloseTwoTap(f, fx2, fy2, ms);
                     }
                     _heldLeft = false;
                     _g = G.None;

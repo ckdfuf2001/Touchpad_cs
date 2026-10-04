@@ -355,7 +355,7 @@
                 <TextBlock Text="녹화 제스처 (두손가락 이상만)" FontWeight="Bold"/>
                 <TextBlock Text="녹화 후 패드에서 두손가락 동작을 그리면 저장됩니다. 빠르고 곧은 동작은 스와이프로 인식되니 천천히·구불구불 그리세요." Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,6"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                    <Button x:Name="RecBtn" Content="녹화 시작" Width="100"/>
+                    <Button x:Name="RecBtn" Content="+ 제스처 추가" Width="100"/>
                     <TextBlock x:Name="RecStateLbl" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="Gray"/>
                 </StackPanel>
                 <StackPanel x:Name="RecList" Margin="0,4,0,0"/>

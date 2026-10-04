@@ -1269,7 +1269,7 @@ public partial class SettingsWindow : Window
         if (Core.GestureRecorder.IsRecording)
         {
             Core.GestureRecorder.Cancel();
-            RecBtn.Content = "녹화 시작";
+            RecBtn.Content = "+ 제스처 추가";
             RecStateLbl.Text = "";
             return;
         }
@@ -1284,7 +1284,7 @@ public partial class SettingsWindow : Window
     {
         try
         {
-            RecBtn.Content = "녹화 시작";
+            RecBtn.Content = "+ 제스처 추가";
             if (g == null || g.Points.Count == 0)
             {
                 RecStateLbl.Text = "인식 실패: 두손가락으로 길게 그리세요";
