@@ -274,6 +274,9 @@ public partial class SettingsWindow : Window
         InitActionsTab();
 
         SaveBtn.Click += (_, _) => ApplySave();
+        SaveBtnFloat.Click += (_, _) => ApplySave();
+        SaveBtnArtist.Click += (_, _) => ApplySave();
+        SaveBtnVirtual.Click += (_, _) => ApplySave();
         _loading = false;
     }
 
