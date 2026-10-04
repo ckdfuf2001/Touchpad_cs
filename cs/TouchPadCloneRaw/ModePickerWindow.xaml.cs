@@ -16,15 +16,59 @@ namespace TouchPadCloneV2;
 public partial class ModePickerWindow : Window
 {
     private readonly System.Windows.Threading.DispatcherTimer _autoClose;
+    private AppSettings _ps = null!;
+    private Action<string> _onLayout = _ => { };
+    private Action<string> _onAux = _ => { };
+    private Action<string> _onAction = _ => { };
+    private Action _onSettings = () => { };
 
     public ModePickerWindow(AppSettings s, string current,
         Action<string> onLayout, Action<string> onAux, Action<string> onAction,
         Func<string, bool> auxOn, Action onSettings, string? selectedValue = null)
     {
         InitializeComponent();
-        // Docked flush under the top strip: reads as one expanded area.
-        Left = (SystemParameters.PrimaryScreenWidth - Width) / 2;
-        Top = 30;
+        _ps = s;
+        _onLayout = onLayout; _onAux = onAux; _onAction = onAction;
+        _onSettings = onSettings;
+        BuildContent(selectedValue);
+        DebugLog.Write($"PICKER open current={current}");
+        _autoClose = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(10),
+        };
+        _autoClose.Tick += (_, _) =>
+        {
+            try { Close(); }
+            catch (InvalidOperationException) { }
+        };
+        _autoClose.Start();
+        // Window-level touch sniffer: proves whether fingers reach us at all.
+        PreviewTouchDown += (_, e) =>
+        {
+            var p = e.GetTouchPoint(this).Position;
+            DebugLog.Write($"PICKER touch @{p.X:0},{p.Y:0} src={e.Source?.GetType().Name}");
+        };
+    }
+
+    /// <summary>Rebuilds the buttons live (strip swipe selection moves
+    /// while open): same content, fresh highlight.</summary>
+    public void Refresh(string? selectedValue)
+    {
+        try
+        {
+            List.Children.Clear();
+            BuildContent(selectedValue);
+        }
+        catch { }
+    }
+
+    private void BuildContent(string? selectedValue)
+    {
+        var s = _ps;
+        var onLayout = _onLayout;
+        var onAux = _onAux;
+        var onAction = _onAction;
+        var onSettings = _onSettings;
         foreach (var row in s.StripLayout)
         {
             // One config row = one visual row (never wraps: a 4-cell
@@ -39,10 +83,9 @@ public partial class ModePickerWindow : Window
             {
                 var cell = StripCell.Parse(raw);
                 if (cell.IsEmpty) continue;
-                bool on = IsOn(cell, current, auxOn);
                 var b = new Button
                 {
-                    Content = (on ? "● " : "○ ") + cell.Label,
+                    Content = cell.Label,
                     FontSize = 16,
                     Margin = new Thickness(2),
                     Padding = new Thickness(8),
@@ -101,40 +144,6 @@ public partial class ModePickerWindow : Window
         };
         settings.Click += (_, _) => { onSettings(); Close(); };
         List.Children.Add(settings);
-        DebugLog.Write($"PICKER open current={current}");
-        _autoClose = new System.Windows.Threading.DispatcherTimer
-        {
-            Interval = TimeSpan.FromSeconds(10),
-        };
-        _autoClose.Tick += (_, _) =>
-        {
-            try { Close(); }
-            catch (InvalidOperationException) { }
-        };
-        _autoClose.Start();
-        // Window-level touch sniffer: proves whether fingers reach us at all.
-        PreviewTouchDown += (_, e) =>
-        {
-            var p = e.GetTouchPoint(this).Position;
-            DebugLog.Write($"PICKER touch @{p.X:0},{p.Y:0} src={e.Source?.GetType().Name}");
-        };
-    }
-
-    /// <summary>Radio/on state: layout cells match current layout,
-    /// artist/virtual cells follow the aux toggles.</summary>
-    private static bool IsOn(StripCell cell, string current,
-        Func<string, bool> auxOn)
-    {
-        if (cell.Value.StartsWith("layout:", StringComparison.OrdinalIgnoreCase))
-        {
-            string name = cell.Value.Substring(7);
-            if (name.Contains("artist", StringComparison.OrdinalIgnoreCase))
-                return auxOn("artist");
-            if (name.Contains("virtual", StringComparison.OrdinalIgnoreCase))
-                return auxOn("virtual");
-            return string.Equals(name, current, StringComparison.OrdinalIgnoreCase);
-        }
-        return false;
     }
 
     /// <summary>Routes a cell through the shared menu router.</summary>

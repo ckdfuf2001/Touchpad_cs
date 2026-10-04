@@ -527,6 +527,15 @@ public partial class App : WApplication
                 _settings, ref _menuRow, ref _menuCol, dRow, dCol, out _))
                 return;
             UpdateStripText();
+            // An open popup follows the selection live.
+            try
+            {
+                if (_picker != null
+                    && Core.ActionRunner.StripMenu.GetCell(
+                        _settings, _menuRow, _menuCol, out var sel))
+                    _picker.Refresh(sel.Value);
+            }
+            catch { }
         }
         catch { }
     }
