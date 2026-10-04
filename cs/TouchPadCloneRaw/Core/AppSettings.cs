@@ -17,10 +17,15 @@ public sealed class GestureMap
     // moving drags. The reference "2nd tap and hold: Drag".
     public string SecondHold { get; set; } = "drag";
     public string TwoFingerTap { get; set; } = "right_click";
+    public string TwoFingerHold { get; set; } = "none";
     public string SwipeUp { get; set; } = "wheel_up";
     public string SwipeDown { get; set; } = "wheel_down";
     public string SwipeLeft { get; set; } = "browser_back";
     public string SwipeRight { get; set; } = "browser_forward";
+    public string SwipeUpLeft { get; set; } = "none";
+    public string SwipeUpRight { get; set; } = "none";
+    public string SwipeDownLeft { get; set; } = "none";
+    public string SwipeDownRight { get; set; } = "none";
 
     public GestureMap Clone() => new()
     {
@@ -30,10 +35,15 @@ public sealed class GestureMap
         LongPress = LongPress,
         SecondHold = SecondHold,
         TwoFingerTap = TwoFingerTap,
+        TwoFingerHold = TwoFingerHold,
         SwipeUp = SwipeUp,
         SwipeDown = SwipeDown,
         SwipeLeft = SwipeLeft,
         SwipeRight = SwipeRight,
+        SwipeUpLeft = SwipeUpLeft,
+        SwipeUpRight = SwipeUpRight,
+        SwipeDownLeft = SwipeDownLeft,
+        SwipeDownRight = SwipeDownRight,
     };
 
     public static readonly string[] Actions =

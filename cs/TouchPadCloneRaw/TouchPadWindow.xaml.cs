@@ -695,14 +695,35 @@ public partial class TouchPadWindow : Window
         return true;
     }
 
-    /// <summary>Current joint-travel dominant direction, or null when
-    /// weak/diagonal (scroll default).</summary>
-    private string? DominantSwipeAction()
+    /// <summary>Joint-travel direction id: cardinal at 1.5x dominance,
+    /// else diagonal by signs. "" when too weak to call (&lt;20 DIP).</summary>
+    private static string SwipeDir(double vx, double vy)
     {
-        double ax = Math.Abs(_twoVX), ay = Math.Abs(_twoVY);
-        if (ax >= ay * 1.5 && ax >= 20) return _twoVX > 0 ? "swipe_right" : "swipe_left";
-        if (ay > ax * 1.5 && ay >= 20) return _twoVY > 0 ? "swipe_down" : "swipe_up";
-        return null;
+        double ax = Math.Abs(vx), ay = Math.Abs(vy);
+        if (System.Math.Max(ax, ay) < 20) return "";
+        if (ax >= ay * 1.5) return vx > 0 ? "swipe_right" : "swipe_left";
+        if (ay > ax * 1.5) return vy > 0 ? "swipe_down" : "swipe_up";
+        string v = vy > 0 ? "down" : "up";
+        string h = vx > 0 ? "right" : "left";
+        return $"swipe_{v}_{h}";
+    }
+
+    /// <summary>Mapped action for any swipe id (cardinal + diagonal).</summary>
+    private string SwipeMapped(string act)
+    {
+        var m = ActiveMap();
+        return act switch
+        {
+            "swipe_up" => m.SwipeUp,
+            "swipe_down" => m.SwipeDown,
+            "swipe_left" => m.SwipeLeft,
+            "swipe_right" => m.SwipeRight,
+            "swipe_up_left" => m.SwipeUpLeft,
+            "swipe_up_right" => m.SwipeUpRight,
+            "swipe_down_left" => m.SwipeDownLeft,
+            "swipe_down_right" => m.SwipeDownRight,
+            _ => "none",
+        };
     }
 
     /// <summary>Two-contact lift decision. True = consumed (caller skips
@@ -720,13 +741,40 @@ public partial class TouchPadWindow : Window
             bool moved = _twoMaxNet > TapMoveDip || f.Moved;
             // Slow = the PAIR's age (ms is the single finger's press,
             // which includes pre-join holding and must not judge the tap).
-            if (_twoSpoiled || (!moved && (!_twoOk || Environment.TickCount64 - _twoT0 > _s.TapJudgeMs)))
+            if (_twoSpoiled)
             {
-                Log.Write("2FINGER idle (silent)");
+                Log.Write("2FINGER spoiled (silent)");
                 _lastWhat = "two-idle";
                 _lastTapTick = 0;
                 _tapChain = 0;
                 return true;
+            }
+            if (!moved)
+            {
+                // Quick + still falls through to the tap below; held
+                // still = two-finger hold (replaces idle silent when
+                // mapped, unmapped stays silent as before).
+                long pairAge = Environment.TickCount64 - _twoT0;
+                if (!(_twoOk && pairAge <= _s.TapJudgeMs))
+                {
+                    string hold = ActiveMap().TwoFingerHold;
+                    if (_s.TapToClick && hold != "none"
+                        && (f.Zone == "pad" || f.Zone == "left-click" || f.Zone == "right-click")
+                        && DoMapAction(hold, fx, fy))
+                    {
+                        Log.Write($"2FINGER hold -> {hold}");
+                        Fx().Flash(fx / _dpi, fy / _dpi);
+                        _lastWhat = "twofinger-hold";
+                    }
+                    else
+                    {
+                        Log.Write("2FINGER idle (silent)");
+                        _lastWhat = "two-idle";
+                    }
+                    _lastTapTick = 0;
+                    _tapChain = 0;
+                    return true;
+                }
             }
             if (moved)
             {
@@ -1198,19 +1246,8 @@ public partial class TouchPadWindow : Window
                 // directions never lock (pure scroll). Fires once.
                 if (!_twoLock && !_twoSwipeFired && _twoSeen && _twoMaxNet >= 60)
                 {
-                    double lax = Math.Abs(_twoVX), lay = Math.Abs(_twoVY);
-                    string lact = "";
-                    if (lax >= lay * 1.5) lact = _twoVX > 0 ? "swipe_right" : "swipe_left";
-                    else if (lay > lax * 1.5) lact = _twoVY > 0 ? "swipe_down" : "swipe_up";
-                    var lmap = ActiveMap();
-                    string lmapped = lact switch
-                    {
-                        "swipe_up" => lmap.SwipeUp,
-                        "swipe_down" => lmap.SwipeDown,
-                        "swipe_left" => lmap.SwipeLeft,
-                        "swipe_right" => lmap.SwipeRight,
-                        _ => "none",
-                    };
+                    string lact = SwipeDir(_twoVX, _twoVY);
+                    string lmapped = lact == "" ? "none" : SwipeMapped(lact);
                     if (lact != "" && lmapped != "none" && nowW - _twoMoveT0 <= 800)
                     {
                         _twoLock = true;
@@ -1242,32 +1279,17 @@ public partial class TouchPadWindow : Window
                 }
                 if (!_twoLock)
                 {
-                    // Mapping-driven output: an axis whose dominant
-                    // direction maps to a real (non-wheel) action does not
-                    // scroll - the lift fires the action alone. Wheel/none
-                    // mappings stream as before (reference parity).
-                    bool wantY = true, wantX = true;
-                    string? dirAct = DominantSwipeAction();
-                    if (dirAct != null)
-                    {
-                        var mm = ActiveMap();
-                        string dmapped = dirAct switch
-                        {
-                            "swipe_up" => mm.SwipeUp,
-                            "swipe_down" => mm.SwipeDown,
-                            "swipe_left" => mm.SwipeLeft,
-                            "swipe_right" => mm.SwipeRight,
-                            _ => "none",
-                        };
-                        if (dmapped != "none" && dmapped != "wheel_up" && dmapped != "wheel_down")
-                        {
-                            if (dirAct == "swipe_up" || dirAct == "swipe_down") wantY = false;
-                            else wantX = false;
-                        }
-                    }
-                    if (wantY)
+                    // Mapping-driven output: when the travel direction maps
+                    // to a real (non-wheel) action, the whole stroke is
+                    // action-bound - no scroll at all, the lock fires it.
+                    // Wheel/none mappings stream as before (reference parity).
+                    string dirAct = SwipeDir(_twoVX, _twoVY);
+                    string dmapped = dirAct == "" ? "none" : SwipeMapped(dirAct);
+                    bool stream = dmapped == "none" || dmapped == "wheel_up" || dmapped == "wheel_down";
+                    if (stream)
                     {
                         _twoWheelY += dy2 / _fingers.Count;
+                        _twoWheelX += dx2 / _fingers.Count;
                         int notch = _s.ScrollInvert ? -120 : 120;
                         while (Math.Abs(_twoWheelY) >= WheelDip)
                         {
@@ -1277,22 +1299,6 @@ public partial class TouchPadWindow : Window
                             _twoSentY += s * notch;
                             _twoScrolled = true;
                         }
-                    }
-                    else
-                    {
-                        // Suppressed travel still counts as travel (no
-                        // stray single after a stroke): bound like a notch.
-                        _twoSupY += dy2 / _fingers.Count;
-                        if (Math.Abs(_twoSupY) >= WheelDip)
-                        {
-                            _twoSupY -= Math.Sign(_twoSupY) * WheelDip;
-                            _twoScrolled = true;
-                        }
-                    }
-                    if (wantX)
-                    {
-                        _twoWheelX += dx2 / _fingers.Count;
-                        int notch = _s.ScrollInvert ? -120 : 120;
                         while (Math.Abs(_twoWheelX) >= WheelDip)
                         {
                             int s = Math.Sign(_twoWheelX);
@@ -1304,7 +1310,16 @@ public partial class TouchPadWindow : Window
                     }
                     else
                     {
+                        // Action-bound stroke: no scroll at all (suppressed
+                        // travel still counts as travel, bounded, so lifts
+                        // stay silent instead of leaking a single).
+                        _twoSupY += dy2 / _fingers.Count;
                         _twoSupX += dx2 / _fingers.Count;
+                        if (Math.Abs(_twoSupY) >= WheelDip)
+                        {
+                            _twoSupY -= Math.Sign(_twoSupY) * WheelDip;
+                            _twoScrolled = true;
+                        }
                         if (Math.Abs(_twoSupX) >= WheelDip)
                         {
                             _twoSupX -= Math.Sign(_twoSupX) * WheelDip;

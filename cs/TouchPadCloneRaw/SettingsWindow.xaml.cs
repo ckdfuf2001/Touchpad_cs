@@ -90,10 +90,15 @@ public partial class SettingsWindow : Window
         ("long_press", "길게 누르기", m => m.LongPress, (m, v) => m.LongPress = v),
         ("second_hold", "두번째 누른채", m => m.SecondHold, (m, v) => m.SecondHold = v),
         ("two_finger_tap", "두손가락 탭", m => m.TwoFingerTap, (m, v) => m.TwoFingerTap = v),
+        ("two_finger_hold", "두손가락 홀드", m => m.TwoFingerHold, (m, v) => m.TwoFingerHold = v),
         ("swipe_up", "두손가락 위로", m => m.SwipeUp, (m, v) => m.SwipeUp = v),
         ("swipe_down", "두손가락 아래로", m => m.SwipeDown, (m, v) => m.SwipeDown = v),
         ("swipe_left", "두손가락 왼쪽으로", m => m.SwipeLeft, (m, v) => m.SwipeLeft = v),
         ("swipe_right", "두손가락 오른쪽으로", m => m.SwipeRight, (m, v) => m.SwipeRight = v),
+        ("swipe_up_left", "대각선 위왼쪽", m => m.SwipeUpLeft, (m, v) => m.SwipeUpLeft = v),
+        ("swipe_up_right", "대각선 위오른쪽", m => m.SwipeUpRight, (m, v) => m.SwipeUpRight = v),
+        ("swipe_down_left", "대각선 아래왼쪽", m => m.SwipeDownLeft, (m, v) => m.SwipeDownLeft = v),
+        ("swipe_down_right", "대각선 아래오른쪽", m => m.SwipeDownRight, (m, v) => m.SwipeDownRight = v),
     ];
 
     public SettingsWindow(AppSettings s, List<string> layouts, Action onApply,
