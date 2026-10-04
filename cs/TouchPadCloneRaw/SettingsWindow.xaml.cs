@@ -945,7 +945,7 @@ public partial class SettingsWindow : Window
                         Width = Math.Max(2, b.Width * sc),
                         Height = Math.Max(2, b.Height * sc),
                         Fill = new SolidColorBrush(isHome
-                            ? System.Windows.Media.Color.FromArgb(0x22, 0x35, 0xC4, 0xFF)
+                            ? System.Windows.Media.Color.FromArgb(0x22, 0xAA, 0xAA, 0xAA)
                             : System.Windows.Media.Color.FromArgb(0xFF, 0x1A, 0x22, 0x2C)),
                         Stroke = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0x33, 0x5C, 0x6C)),
                         StrokeThickness = 1,
