@@ -588,40 +588,72 @@ public partial class ModeStripWindow : Window
         catch { }
     }
 
-    /// <summary>Wedge points for a W(x)H box, apex pointing INTO the
-    /// bar ([strip]-style brackets): grip ▶/▼, mode ◀/▲.</summary>
+    /// <summary>Sector frame: outward unit (ox,oy), center (cx,cy)
+    /// on the bar edge, radius fitting the box.</summary>
+    private static void SectorFrame(bool grip, bool vertical,
+        double w, double h,
+        out double ox, out double oy, out double cx, out double cy, out double r)
+    {
+        if (!vertical)
+        {
+            ox = grip ? -1 : 1; oy = 0;
+            cx = grip ? w : 0; cy = h / 2;
+            r = Math.Min(w, 0.7071 * h);
+        }
+        else
+        {
+            ox = 0; oy = grip ? -1 : 1;
+            cx = w / 2; cy = grip ? h : 0;
+            r = Math.Min(h, 0.7071 * w);
+        }
+        if (r < 4) r = 4;
+    }
+
+    /// <summary>Quarter-circle sector points for a W(x)H box: the
+    /// sector center sits ON the bar edge, the 90-degree arc bulges
+    /// outward (grip ▶/▼, mode ◀/▲). 10 samples approximate the arc.</summary>
     private static System.Windows.Media.PointCollection WedgePoints(
         bool grip, bool vertical, double w, double h)
     {
         var pts = new System.Windows.Media.PointCollection();
-        if (!vertical)
+        try
         {
-            if (grip) { pts.Add(new Point(0, 0)); pts.Add(new Point(0, h)); pts.Add(new Point(w, h / 2)); }
-            else { pts.Add(new Point(w, 0)); pts.Add(new Point(w, h)); pts.Add(new Point(0, h / 2)); }
+            SectorFrame(grip, vertical, w, h,
+                out double ox, out double oy,
+                out double cx, out double cy, out double r);
+            // Perpendicular (either sign gives the symmetric fan).
+            double ux = -oy, uy = ox;
+            pts.Add(new Point(cx, cy));
+            for (int i = 0; i <= 10; i++)
+            {
+                double t = (-45 + 90.0 * i / 10) * Math.PI / 180.0;
+                double dx = ox * Math.Cos(t) + ux * Math.Sin(t);
+                double dy = oy * Math.Cos(t) + uy * Math.Sin(t);
+                pts.Add(new Point(cx + dx * r, cy + dy * r));
+            }
         }
-        else
-        {
-            if (grip) { pts.Add(new Point(0, 0)); pts.Add(new Point(w, 0)); pts.Add(new Point(w / 2, h)); }
-            else { pts.Add(new Point(0, h)); pts.Add(new Point(w, h)); pts.Add(new Point(w / 2, 0)); }
-        }
+        catch { }
         return pts;
     }
 
-    private static double TriSign(System.Windows.Point p,
-        System.Windows.Point a, System.Windows.Point b) =>
-        (p.X - b.X) * (a.Y - b.Y) - (a.X - b.X) * (p.Y - b.Y);
-
-    /// <summary>True when a point lands on the wedge pixels (same
-    /// geometry as WedgePoints). Transparent corners belong to the bar.</summary>
+    /// <summary>True when a point lands on the sector (dist <= R and
+    /// within 45 degrees of the outward normal). Same frame as above;
+    /// transparent corners belong to the bar.</summary>
     private static bool TriHit(bool grip, bool vertical,
         double w, double h, System.Windows.Point p)
     {
-        var pts = WedgePoints(grip, vertical, w, h);
-        var a = pts[0]; var b = pts[1]; var c = pts[2];
-        double d1 = TriSign(p, a, b), d2 = TriSign(p, b, c), d3 = TriSign(p, c, a);
-        bool neg = d1 < 0 || d2 < 0 || d3 < 0;
-        bool pos = d1 > 0 || d2 > 0 || d3 > 0;
-        return !(neg && pos);
+        try
+        {
+            SectorFrame(grip, vertical, w, h,
+                out double ox, out double oy,
+                out double cx, out double cy, out double r);
+            double vx = p.X - cx, vy = p.Y - cy;
+            double dist = Math.Sqrt(vx * vx + vy * vy);
+            if (dist > r || dist < 0.5) return dist < 0.5;
+            double cos = (vx * ox + vy * oy) / dist;
+            return cos >= 0.7071;
+        }
+        catch { return true; }
     }
 
     /// <summary>Bar touch started on a chrome window's transparent area:
