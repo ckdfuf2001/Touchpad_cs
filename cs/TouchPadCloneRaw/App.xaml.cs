@@ -303,49 +303,18 @@ public partial class App : WApplication
     }
 
     /// <summary>Strip tap: pad off -> activate last mode; pad on -> mapped tap.</summary>
-    /// <summary>Strip tap: single tap opens the mode popup; a quick
-    /// re-tap while it is open executes the displayed selection and
-    /// closes the popup. (One tap used to do both at once, which mixed
-    /// browsing with firing.)</summary>
-    private long _stripTapTick;
-
+    /// <summary>Strip tap: pad closed -> open the pad (close appears);
+    /// pad open (center shows "menu") -> open the mode panel.
+    /// Never fires by itself; execution is picker-item taps only.</summary>
     private void HandleStripTap()
     {
         if (_pad == null || _strip == null) return;
-        long now = Environment.TickCount64;
-        bool dbl = _picker != null && now - _stripTapTick <= 400;
-        _stripTapTick = now;
-        if (dbl)
+        if (!_pad.IsVisible)
         {
-            try { _picker?.Close(); } catch (InvalidOperationException) { }
-            _picker = null;
-            FireSelected();
+            ShowPad();
             return;
         }
         ShowModePicker();
-    }
-
-    /// <summary>Fires the selected menu cell (shared by tap).</summary>
-    private void FireSelected()
-    {
-        try
-        {
-            if (!Core.ActionRunner.StripMenu.GetCell(
-                _settings, _menuRow, _menuCol, out var cell)
-                || cell.IsEmpty)
-                return;
-            Core.ActionRunner.StripMenu.Fire(cell, _settings,
-                name =>
-                {
-                    _settings.Layout = name;
-                    _settings.Save();
-                    Apply();
-                    AdoptMenuCell(name);
-                },
-                name => ToggleAux(name),
-                action => RunPickerAction(action));
-        }
-        catch { }
     }
 
     public void ShowPad()
@@ -533,12 +502,18 @@ public partial class App : WApplication
         catch { }
     }
 
-    /// <summary>Strip bar shows the selected cell (else the layout).</summary>
+    /// <summary>Strip bar text: pad open -> "menu" button, else the
+    /// selected cell (swipe navigation display), else the layout.</summary>
     private void UpdateStripText()
     {
         try
         {
             if (_strip == null) return;
+            if (_pad != null && _pad.IsVisible)
+            {
+                _strip.SetMenuMode();
+                return;
+            }
             if (Core.ActionRunner.StripMenu.GetCell(
                 _settings, _menuRow, _menuCol, out var cell)
                 && !cell.IsEmpty)

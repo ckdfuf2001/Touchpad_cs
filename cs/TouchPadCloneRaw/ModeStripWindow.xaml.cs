@@ -202,6 +202,13 @@ public partial class ModeStripWindow : Window
             ? $"◀  {_current}  ▶" : $"◀  {label.Trim()}  ▶";
     }
 
+    /// <summary>Pad-open state: center text becomes the menu button
+    /// (tap opens the mode panel). Doesn't touch _current.</summary>
+    public void SetMenuMode()
+    {
+        Label.Text = "menu";
+    }
+
     // NOTE: the bar never resizes itself on press anymore (that was
     // confusing). "Expansion" = the mode panel window below the bar.
 
