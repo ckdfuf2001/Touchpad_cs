@@ -64,6 +64,15 @@ public partial class TouchPadWindow : Window
     // Tap chain across presses: 1 after a tap, 2 after a double. A third
     // quick press enters TripleHold instead of a fresh Pending.
     private int _tapChain;
+    // Deferred single-tap: a quick lift arms (not fires) the tap for one
+    // judge window. A second press/double cancels into the chain, a far
+    // or late press flushes it immediately, a second CONTACT drops it
+    // (two-finger takes over), else it fires at the window end. This is
+    // what gives double/two-finger a chance to exist: firing on lift
+    // would already have clicked before they arrive.
+    private System.Windows.Threading.DispatcherTimer? _deferTimer;
+    private int _deferX, _deferY;
+    private string _deferAct = "";
     // Two-contact session (single-contact flows never see these set):
     // _twoSeen = a second contact landed during this press;
     // _twoOk = every lift so far quick + still (gates the tap);
@@ -500,8 +509,102 @@ public partial class TouchPadWindow : Window
     /// <summary>Fires a gesture-map mouse action. True if it clicked.
     /// Single pairs journal as one "click" (old ClickAt semantics).
     /// SwapButtons swaps left/right globally.</summary>
-    private bool DoMapAction(string action, int x, int y)
+    /// <summary>Drops a deferred single (it belongs to a chain now).</summary>
+    private void CancelDefer()
     {
+        try
+        {
+            if (_deferTimer != null)
+            {
+                Log.Write("TAP deferred cancelled (chained)");
+                _deferTimer.Stop();
+                _deferTimer = null;
+            }
+        }
+        catch { }
+    }
+
+    /// <summary>Fires a deferred single now (a far/late press proved
+    /// it stands alone). No-op when nothing is armed.</summary>
+    private void FireDefer()
+    {
+        try
+        {
+            if (_deferTimer == null) return;
+            _deferTimer.Stop();
+            _deferTimer = null;
+            string act = _deferAct;
+            int fx = _deferX, fy = _deferY;
+            _deferAct = "";
+            if (act == "") return;
+            if (DoMapAction(act, fx, fy))
+            {
+                Log.Write($"TAP deferred fired -> {act}");
+                Fx().Flash(fx / _dpi, fy / _dpi);
+                _lastWhat = "tap-click";
+            }
+            else
+            {
+                Log.Write("TAP deferred unmapped (silent)");
+                _lastWhat = "tap-none";
+            }
+        }
+        catch { }
+    }
+
+    /// <summary>Arms a quick lift: click fires at the judge-window end
+    /// unless a chain takes over first.</summary>
+    private void ArmDefer(string act, int fx, int fy, long now)
+    {
+        try
+        {
+            CancelDefer();
+            _deferAct = act;
+            _deferX = fx; _deferY = fy;
+            _lastTapTick = now;
+            _tapChain = 1;
+            _lastTapX = fx; _lastTapY = fy;
+            _deferTimer = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(_s.TapJudgeMs),
+            };
+            _deferTimer.Tick += (_, _) =>
+            {
+                try
+                {
+                    _deferTimer?.Stop();
+                    _deferTimer = null;
+                    string a = _deferAct;
+                    int x = _deferX, y = _deferY;
+                    _deferAct = "";
+                    if (a == "") return;
+                    // Stood down: a chain took over meanwhile (a chained
+                    // press re-armed the tick, or two fingers arrived).
+                    if (_tapChain != 1) return;
+                    if (DoMapAction(a, x, y))
+                    {
+                        Log.Write($"TAP fired at window end -> {a}");
+                        Fx().Flash(x / _dpi, y / _dpi);
+                        _lastWhat = "tap-click";
+                    }
+                }
+                catch { }
+            };
+            _deferTimer.Start();
+            Log.Write($"TAP deferred ({_s.TapJudgeMs}ms) -> {act}");
+            _lastWhat = "tap-deferred";
+        }
+        catch { }
+    }
+
+    /// <summary>Actions DoMapAction can actually fire (swap stays
+    /// inside the set).</summary>
+    private static bool Mappable(string a) => a is "left_click"
+        or "right_click" or "middle_click" or "double_click"
+        or "triple_click" or "wheel_up" or "wheel_down"
+        or "browser_back" or "browser_forward";
+
+    private bool DoMapAction(string action, int x, int y)    {
         if (_s.SwapButtons)
             action = action == "left_click" ? "right_click"
                 : action == "right_click" ? "left_click" : action;
@@ -836,6 +939,11 @@ public partial class TouchPadWindow : Window
                     && now - _lastTapTick <= _s.TapJudgeMs
                     && tdist <= SecondTapDip;
 
+                // A pending single belongs to this press when chained
+                // (drop it), else it stands alone (flush it now).
+                if (second) CancelDefer();
+                else FireDefer();
+
                 if (second && _tapChain >= 2)
                 {
                     // Third tap: quick lift fires TripleTap, moving drags.
@@ -946,6 +1054,9 @@ public partial class TouchPadWindow : Window
                     _twoSeen = true;
                     _twoOk = true;
                     _twoMaxNet = 0;
+                    // A pending single dies here: the press became a
+                    // two-contact gesture, it must not click behind it.
+                    CancelDefer();
                     Log.Write($"2FINGER begin d={dd:0}");
                 }
             }
@@ -1179,14 +1290,16 @@ public partial class TouchPadWindow : Window
                             {
                                 string act = f.Zone == "right-click"
                                     ? "right_click" : ActiveMap().Tap;
-                                if (!DoMapAction(act, fx, fy))
+                                // Arm, don't fire: the click goes out at the
+                                // judge-window end unless double/two-finger
+                                // takes over first. Unmapped stays silent
+                                // and chainless, as before.
+                                if (!Mappable(act))
                                 { _lastTapTick = 0; _tapChain = 0; _lastWhat = "tap-none"; break; }
-                                Fx().Flash(fx / _dpi, fy / _dpi);
-                                _lastTapTick = now;
-                                _tapChain = 1;
                                 _lastTapX = fx; _lastTapY = fy;
                                 _lastTapFX = f.Start.X; _lastTapFY = f.Start.Y;
-                                _lastWhat = "tap-click";
+                                Fx().Flash(fx / _dpi, fy / _dpi);
+                                ArmDefer(act, fx, fy, now);
                             }
                             else { _lastTapTick = 0; _tapChain = 0; _lastWhat = "long-idle"; }
                             break;
