@@ -80,13 +80,7 @@ public partial class App : WApplication
         _strip.ClosePad += () => HidePad();
         _strip.ModePressed += () => ShowModePicker();
         _strip.Pressed += () => _stripTouchAt = DateTime.Now;
-        _strip.LayoutSelected += name =>
-        {
-            _settings.Layout = name;
-            _settings.Save();
-            Apply();
-            AdoptMenuCell(name);
-        };
+        _strip.LayoutSelected += name => SelectLayout(name);
         _strip.KnownLayouts = Core.PresetParser.OrderedNames(_presets);
         _strip.SetLabel(_settings.Layout);
         AdoptMenuCell(_settings.Layout);
@@ -317,13 +311,7 @@ public partial class App : WApplication
                 || cell.IsEmpty)
                 return;
             Core.ActionRunner.StripMenu.Fire(cell, _settings,
-                name =>
-                {
-                    _settings.Layout = name;
-                    _settings.Save();
-                    Apply();
-                    AdoptMenuCell(name);
-                },
+                name => SelectLayout(name),
                 name => ToggleAux(name),
                 action => RunPickerAction(action));
         }
@@ -404,13 +392,7 @@ public partial class App : WApplication
         _picker = new ModePickerWindow(
             _settings,
             _settings.Layout,
-            name =>
-            {
-                _settings.Layout = name;
-                _settings.Save();
-                Apply();
-                AdoptMenuCell(name);
-            },
+            name => SelectLayout(name),
             name => ToggleAux(name),
             action => RunPickerAction(action),
             name => _auxOn.Contains(name),
@@ -528,6 +510,25 @@ public partial class App : WApplication
                 _strip.SetSelection(cell.Label);
             else
                 _strip.SetLabel(_settings.Layout);
+        }
+        catch { }
+    }
+
+    /// <summary>Selects a layout AND shows it: executing means
+    /// intending to see it, so a stored Visible=false never swallows
+    /// the pad on fire.</summary>
+    private void SelectLayout(string name)
+    {
+        try
+        {
+            string key = Core.AppSettings.PadFamilyKey(name);
+            if (!_settings.Pads.TryGetValue(key, out var p))
+            { p = new Core.PadConfig(); _settings.Pads[key] = p; }
+            p.Visible = true;
+            _settings.Layout = name;
+            _settings.Save();
+            Apply();
+            AdoptMenuCell(name);
         }
         catch { }
     }
