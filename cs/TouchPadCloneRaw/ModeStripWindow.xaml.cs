@@ -630,6 +630,10 @@ public partial class ModeStripWindow : Window
         };
         Core.NoActivate.Apply(w);
         Core.TabletTweaks.DisableSystemGestures(w);
+        // Press-and-hold (touch) must not steal slow/careful swipes:
+        // the system would take the touch for a right-click gesture
+        // and our stream dies with no UP (pad disables it too).
+        System.Windows.Input.Stylus.SetIsPressAndHoldEnabled(w, false);
         // No own keeper: the strip's keeper raises these along (separate
         // keepers leapfrog = flicker).
         if (grip) _gripPoly = poly; else _closePoly = poly;

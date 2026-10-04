@@ -4,7 +4,8 @@
         Title="TouchPadClone ModeStrip" WindowStyle="None" AllowsTransparency="True"
         Background="#5910131A" Topmost="True" ShowInTaskbar="False"
         ResizeMode="NoResize" Width="380" Height="86">
-    <Border x:Name="Surface" Background="#5910131A">
+    <Border x:Name="Surface" Background="#5910131A"
+            Stylus.IsPressAndHoldEnabled="False">
         <StackPanel Orientation="Vertical">
             <Grid Height="26">
                 <TextBlock x:Name="Label" Text="◀  mode  ▶" Foreground="#9AA6BD"
