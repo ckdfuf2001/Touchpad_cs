@@ -56,10 +56,24 @@ public partial class TouchPadWindow : Window
     private static int _liveTouches;
     // Gesture state machine (notebook-pad semantics): touch alone never
     // presses. Pending = untouched decision; Moving = cursor only;
-    // TapHold = second tap pressed (double or drag start).
-    private enum G { None, Pending, Moving, TapHold, Dragging }
+    // TapHold = second tap pressed (double or drag start);
+    // TripleHold = third tap pressed (triple).
+    private enum G { None, Pending, Moving, TapHold, TripleHold, Dragging }
     private G _g = G.None;
     private int _primaryId = -1;
+    // Tap chain across presses: 1 after a tap, 2 after a double. A third
+    // quick press enters TripleHold instead of a fresh Pending.
+    private int _tapChain;
+    // Two-contact session (single-contact flows never see these set):
+    // _twoSeen = a second contact landed during this press;
+    // _twoOk = every lift so far quick + still (gates the tap);
+    // _twoMaxNet/_twoVX/_twoVY = largest joint travel + its vector;
+    // _twoSpoiled = a third contact landed (silent, no gesture).
+    private bool _twoSeen;
+    private bool _twoOk = true;
+    private double _twoMaxNet;
+    private double _twoVX, _twoVY;
+    private bool _twoSpoiled;
     private int _gearId = -1;
     private int _xId = -1;
     private Point _xP;
@@ -502,8 +516,112 @@ public partial class TouchPadWindow : Window
             case "double_click":
                 Out.ClickAt(x, y, "left");
                 Out.ClickAt(x, y, "left"); return true;
+            case "triple_click":
+                Out.ClickAt(x, y, "left");
+                Out.ClickAt(x, y, "left");
+                Out.ClickAt(x, y, "left"); return true;
+            case "wheel_up":
+            case "wheel_down":
+            {
+                int dir = action == "wheel_up" ? 1 : -1;
+                if (_s.ScrollInvert) dir = -dir;
+                for (int i = 0; i < 3; i++) Out.Wheel(dir * 120);
+                return true;
+            }
+            case "browser_back":
+                InputSim.TapKey(0xA6); return true;
+            case "browser_forward":
+                InputSim.TapKey(0xA7); return true;
             default: return false;
         }
+    }
+
+    /// <summary>Two-contact lift decision. True = consumed (caller skips
+    /// its normal single-contact landing). Fires the mapped TwoFingerTap
+    /// (quick + still, TapToClick-gated like taps) or a directional
+    /// swipe (moved). Anything else (spoiled/slow) lands silent.
+    /// Single-contact sessions never reach here (_twoSeen false).</summary>
+    private bool TwoFingerUp(Finger f, int fx, int fy, double ms)
+    {
+        if (!_twoSeen) return false;
+        try
+        {
+            if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
+            if (fx == int.MinValue) return false;
+            bool moved = _twoMaxNet > TapMoveDip || f.Moved;
+            if (_twoSpoiled || (!moved && (!_twoOk || ms > _s.TapJudgeMs)))
+            {
+                Log.Write("2FINGER idle (silent)");
+                _lastWhat = "two-idle";
+                _lastTapTick = 0;
+                _tapChain = 0;
+                return true;
+            }
+            if (moved)
+            {
+                string act = "";
+                double ax = Math.Abs(_twoVX), ay = Math.Abs(_twoVY);
+                if (ax >= ay * 1.5) act = _twoVX > 0 ? "swipe_right" : "swipe_left";
+                else if (ay > ax * 1.5) act = _twoVY > 0 ? "swipe_down" : "swipe_up";
+                var map = ActiveMap();
+                string mapped = act switch
+                {
+                    "swipe_up" => map.SwipeUp,
+                    "swipe_down" => map.SwipeDown,
+                    "swipe_left" => map.SwipeLeft,
+                    "swipe_right" => map.SwipeRight,
+                    _ => "none",
+                };
+                if (mapped == "none" || !DoMapAction(mapped, fx, fy))
+                {
+                    Log.Write($"2FINGER swipe {act} unmapped (silent)");
+                    _lastWhat = "two-swipe-none";
+                }
+                else
+                {
+                    Log.Write($"2FINGER swipe {act} -> {mapped}");
+                    Fx().Flash(fx / _dpi, fy / _dpi);
+                    _lastWhat = "two-swipe";
+                }
+                _lastTapTick = 0;
+                _tapChain = 0;
+                return true;
+            }
+            if (!_s.TapToClick)
+            {
+                Log.Write("2FINGER tap off (silent)");
+                _lastWhat = "two-idle";
+                _lastTapTick = 0;
+                _tapChain = 0;
+                return true;
+            }
+            // Same zones as single taps (wheel/resizer stay silent).
+            if (f.Zone != "pad" && f.Zone != "left-click" && f.Zone != "right-click")
+            {
+                Log.Write($"2FINGER tap zone={f.Zone} (silent)");
+                _lastWhat = "two-idle";
+                _lastTapTick = 0;
+                _tapChain = 0;
+                return true;
+            }
+            string tact = f.Zone == "right-click"
+                ? "right_click" : ActiveMap().TwoFingerTap;
+            if (DoMapAction(tact, fx, fy))
+            {
+                Log.Write($"2FINGER tap -> {tact}");
+                Fx().Flash(fx / _dpi, fy / _dpi);
+                _lastWhat = "twofinger-tap";
+            }
+            else
+            {
+                Log.Write("2FINGER tap unmapped (silent)");
+                _lastWhat = "two-tap-none";
+            }
+            _lastTapTick = 0;
+            _tapChain = 0;
+            return true;
+        }
+        catch { return true; }
     }
 
     // ---------------- zones (tile space sits below the title bar,
@@ -697,6 +815,12 @@ public partial class TouchPadWindow : Window
             _fingers[e.TouchDevice.Id] = f;
             if (_fingers.Count == 1)
             {
+                // Fresh press: single-contact state machine starts clean
+                // (tap chain across presses lives in _tapChain instead).
+                _twoSeen = false;
+                _twoOk = true;
+                _twoMaxNet = 0;
+                _twoSpoiled = false;
                 // Stale hold from a lost UP first (safety net).
                 if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
                 _primaryId = e.TouchDevice.Id;
@@ -706,12 +830,23 @@ public partial class TouchPadWindow : Window
                 long now = Environment.TickCount64;
                 double tdist = Math.Abs(p.X - _lastTapFX) + Math.Abs(p.Y - _lastTapFY);
                 // Unified judge: a re-touch inside the action-judge time
-                // after a tap chains (double). One time constant for all.
+                // after a tap chains. Chain 2 (after a double) arms the
+                // third tap; anything else chains a double.
                 bool second = _lastTapTick != 0
                     && now - _lastTapTick <= _s.TapJudgeMs
                     && tdist <= SecondTapDip;
 
-                if (second)
+                if (second && _tapChain >= 2)
+                {
+                    // Third tap: quick lift fires TripleTap, moving drags.
+                    _downOrigX = _lastTapX; _downOrigY = _lastTapY;
+                    Out.SetAnchor(_downOrigX, _downOrigY);
+                    _g = G.TripleHold;
+                    Fx().Flash(_downOrigX / _dpi, _downOrigY / _dpi);
+                    Status($"triplehold @({_downOrigX},{_downOrigY})");
+                    _lastWhat = "triplehold";
+                }
+                else if (second)
                 {
                     // Second tap: don't press yet. Quick lift completes
                     // the double-click, moving starts a drag. (Pressing
@@ -726,6 +861,8 @@ public partial class TouchPadWindow : Window
                 }
                 else
                 {
+                    // Fresh press: chain restarts (single tap ahead).
+                    _tapChain = 0;
                     // Anchor = live cursor, not the polled cache: the cache
                     // freezes (poll-block + pad-skip + self-reinforcing
                     // release writes), teleporting every tap to a stale
@@ -773,16 +910,49 @@ public partial class TouchPadWindow : Window
                             if (_g != G.Pending) return;
                             if (!_fingers.TryGetValue(_holdId, out var hf)) return;
                             if (hf.Moved) return;
+                            // A two-contact session owns its ending (tap or
+                            // swipe below): the single-press hold must not
+                            // fire into it.
+                            if (_twoSeen) return;
                             DoMapAction(ActiveMap().LongPress, _downOrigX, _downOrigY);
                             Status($"hold right @({_downOrigX},{_downOrigY})");
                             _lastWhat = "hold-right";
                             _g = G.None;
                             _lastTapTick = 0;
+                            _tapChain = 0;
                         }
                         catch { }
                     };
                     _holdTimer.Start();
                 }
+            }
+            // Second live contact: two-contact session starts. A partner
+            // landing within 40 DIP of the first is a split-blob ghost,
+            // not a finger (measured whipsaw) - ignored, stays single.
+            // Third contact spoils the gesture (silent, no output).
+            if (_fingers.Count == 2)
+            {
+                Finger? other = null;
+                foreach (var kv in _fingers)
+                    if (kv.Key != e.TouchDevice.Id) { other = kv.Value; break; }
+                double dd = other == null ? 999 :
+                    Math.Abs(p.X - other.Start.X) + Math.Abs(p.Y - other.Start.Y);
+                if (dd < 40)
+                {
+                    Log.Write($"2FINGER ghost-near d={dd:0} (stays single)");
+                }
+                else
+                {
+                    _twoSeen = true;
+                    _twoOk = true;
+                    _twoMaxNet = 0;
+                    Log.Write($"2FINGER begin d={dd:0}");
+                }
+            }
+            else if (_fingers.Count >= 3 && _twoSeen)
+            {
+                _twoSpoiled = true;
+                Log.Write("2FINGER third contact (spoiled, silent)");
             }
             int rawN = _fingers.Count, mgN = MergedCount();
             Status($"touch {e.TouchDevice.Id} {zone} n={(rawN == mgN ? rawN.ToString() : mgN + "[raw" + rawN + "]")}");
@@ -830,8 +1000,25 @@ public partial class TouchPadWindow : Window
             f.Last = p;
             double net = Math.Abs(p.X - f.Start.X) + Math.Abs(p.Y - f.Start.Y);
             if (net > TapMoveDip) f.Moved = true;
+            // Joint travel for two-contact sessions (any finger): the
+            // biggest net + its vector classifies the swipe at lift.
+            if (_twoSeen && net > _twoMaxNet)
+            {
+                _twoMaxNet = net;
+                _twoVX = p.X - f.Start.X;
+                _twoVY = p.Y - f.Start.Y;
+            }
             if (e.TouchDevice.Id == _primaryId)
             {
+                // Two live contacts: the engine holds all output (no
+                // cursor, no drag, no wheel) - the lift decides tap vs
+                // swipe. Single-contact flows never enter here.
+                if (_fingers.Count >= 2)
+                {
+                    _lastWhat = "twofinger-hold";
+                    e.Handled = true;
+                    return;
+                }
                 if (f.Zone == "wheel")
                 {
                     // Scroll zone: sliding = wheel notches, never a press.
@@ -864,7 +1051,7 @@ public partial class TouchPadWindow : Window
                     f.Start = p;
                     _g = G.Moving;
                 }
-                if (f.Moved && _g == G.TapHold)
+                if (f.Moved && (_g == G.TapHold || _g == G.TripleHold))
                 {
                     // Drag starts now: "drag" presses and holds (no extra
                     // click), "drag_hold" clicks first, then holds.
@@ -956,6 +1143,9 @@ public partial class TouchPadWindow : Window
                 if (_fingers.Count > 0)
                 {
                     if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
+                    // Partner lift during a two-contact session: a slow or
+                    // moved lift spoils only the tap (a swipe can complete).
+                    if (_twoSeen && (f.Moved || ms > _s.TapJudgeMs)) _twoOk = false;
                     _g = G.None;
                     _primaryId = -1;
                     _lastTapTick = 0;
@@ -977,6 +1167,7 @@ public partial class TouchPadWindow : Window
                         // Scroll only: the cursor never moved, keep it so.
                         _lastWhat = "wheel-end";
                     }
+                    else if (TwoFingerUp(f, fx, fy, ms)) { }
                     else switch (_g)
                     {
                         case G.Pending:                       // tap
@@ -989,18 +1180,20 @@ public partial class TouchPadWindow : Window
                                 string act = f.Zone == "right-click"
                                     ? "right_click" : ActiveMap().Tap;
                                 if (!DoMapAction(act, fx, fy))
-                                { _lastTapTick = 0; _lastWhat = "tap-none"; break; }
+                                { _lastTapTick = 0; _tapChain = 0; _lastWhat = "tap-none"; break; }
                                 Fx().Flash(fx / _dpi, fy / _dpi);
                                 _lastTapTick = now;
+                                _tapChain = 1;
                                 _lastTapX = fx; _lastTapY = fy;
                                 _lastTapFX = f.Start.X; _lastTapFY = f.Start.Y;
                                 _lastWhat = "tap-click";
                             }
-                            else { _lastTapTick = 0; _lastWhat = "long-idle"; }
+                            else { _lastTapTick = 0; _tapChain = 0; _lastWhat = "long-idle"; }
                             break;
                         case G.Moving:                        // cursor only
                             Out.PlaceAt(fx, fy);
                             _lastTapTick = 0;
+                            _tapChain = 0;
                             _lastWhat = "move-end";
                             break;
                         case G.TapHold:                       // 2nd tap lift
@@ -1013,19 +1206,39 @@ public partial class TouchPadWindow : Window
                             else if (dact == "double_click") dact = "left_click";
                             DoMapAction(dact, fx, fy);
                             Fx().Flash(fx / _dpi, fy / _dpi);
-                            _lastTapTick = 0;
+                            _lastTapTick = now;
+                            _tapChain = 2;
+                            _lastTapX = fx; _lastTapY = fy;
+                            _lastTapFX = f.Start.X; _lastTapFY = f.Start.Y;
                             _lastWhat = "second-tap";
+                            break;
+                        case G.TripleHold:                    // 3rd tap lift
+                            // Same pairing rule as the double: the first two
+                            // pairs already went out, one more completes
+                            // the triple. A fresh "triple_click" still
+                            // fires three pairs via DoMapAction.
+                            string tact = ActiveMap().TripleTap;
+                            if (f.Zone == "right-click" && tact != "none")
+                                tact = "right_click";
+                            else if (tact == "triple_click") tact = "left_click";
+                            DoMapAction(tact, fx, fy);
+                            Fx().Flash(fx / _dpi, fy / _dpi);
+                            _lastTapTick = 0;
+                            _tapChain = 0;
+                            _lastWhat = "third-tap";
                             break;
                         case G.Dragging:                      // drag-drop
                             Out.UpAt(fx, fy, "left");
                             Fx().Flash(fx / _dpi, fy / _dpi);
                             _lastTapTick = 0;
+                            _tapChain = 0;
                             _lastWhat = "drag-drop";
                             // Real drops land through our topmost window.
                             _throughUntil = Environment.TickCount64 + 300;
                             break;
                         default:
                             _lastTapTick = 0;
+                            _tapChain = 0;
                             break;
                     }
                     _heldLeft = false;
@@ -1078,6 +1291,25 @@ public partial class TouchPadWindow : Window
                     };
                     holdT.Start();
                 }
+                }
+            }
+            else if (_twoSeen)
+            {
+                // Partner lift (not the primary): a slow or moved lift
+                // spoils only the tap (a swipe can still complete).
+                if (f.Moved || ms > _s.TapJudgeMs) _twoOk = false;
+                if (_fingers.Count == 0)
+                {
+                    // Last lift wasn't the primary (it cancelled when the
+                    // partner was still down): complete the two-contact
+                    // session here instead of going silent.
+                    int fx2 = _downOrigX, fy2 = _downOrigY;
+                    if (fx2 == int.MinValue)
+                    { var (gx2, gy2) = Out.Logical(); fx2 = gx2; fy2 = gy2; }
+                    TwoFingerUp(f, fx2, fy2, ms);
+                    _heldLeft = false;
+                    _g = G.None;
+                    _primaryId = -1;
                 }
             }
             if (_fingers.Count == 0)
