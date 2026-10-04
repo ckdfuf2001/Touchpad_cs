@@ -1178,6 +1178,7 @@ public partial class TouchPadWindow : Window
         if (FromX(e.OriginalSource)) return;
         var pp = e.GetTouchPoint(Surface).Position;
         if (OnGear(pp) || OnX(pp)) return;
+        Log.Write($"CHROME down id={e.TouchDevice.Id} @{pp.X:0},{pp.Y:0}");
         _chromeTouch = true;
         _chromeTouchId = e.TouchDevice.Id;
         var rp = e.GetTouchPoint(Surface).Position;
@@ -1192,6 +1193,7 @@ public partial class TouchPadWindow : Window
         // Same direct follow as the mouse: touch reports carry their own
         // position, no window coupling to go stale.
         var rp = e.GetTouchPoint(Surface).Position;
+        Log.Write($"CHROME move @{rp.X:0},{rp.Y:0}");
         double tx = rp.X + Left - _chromeGrabX;
         double ty = rp.Y + Top - _chromeGrabY;
         if (Math.Abs(tx - Left) < 0.5 && Math.Abs(ty - Top) < 0.5) return;
@@ -1207,6 +1209,7 @@ public partial class TouchPadWindow : Window
     private void OnChromeTouchUp(object sender, TouchEventArgs e)
     {
         if (!_chromeTouch || e.TouchDevice.Id != _chromeTouchId) return;
+        Log.Write("CHROME up");
         _chromeTouch = false;
         _chromeTouchId = -1;
         TitleBar.ReleaseTouchCapture(e.TouchDevice);
