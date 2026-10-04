@@ -16,10 +16,10 @@
                                VerticalAlignment="Center" Margin="10,0,0,0"/>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
                                 VerticalAlignment="Center" Margin="0,0,8,0">
-                        <TextBlock x:Name="XLabel" Text="X" Foreground="#E8ECF4" FontSize="13"
-                                   FontWeight="Bold" Margin="0,0,10,0" Cursor="Hand" ToolTip="닫기"/>
-                        <TextBlock x:Name="GearLabel" Text="⚙" Foreground="#9AA6BD" FontSize="13"
+                        <TextBlock x:Name="GearLabel" Text="설정" Foreground="#9AA6BD" FontSize="13"
                                    Cursor="Hand" ToolTip="설정"/>
+                        <TextBlock x:Name="XLabel" Text="X" Foreground="#E8ECF4" FontSize="13"
+                                   FontWeight="Bold" Margin="10,0,0,0" Cursor="Hand" ToolTip="닫기"/>
                     </StackPanel>
                 </Grid>
             </Border>
