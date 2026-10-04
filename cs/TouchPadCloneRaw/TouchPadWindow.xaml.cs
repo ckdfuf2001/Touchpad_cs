@@ -69,11 +69,15 @@ public partial class TouchPadWindow : Window
     // _twoOk = every lift so far quick + still (gates the tap);
     // _twoMaxNet/_twoVX/_twoVY = largest joint travel + its vector;
     // _twoSpoiled = a third contact landed (silent, no gesture).
+    // _twoT0 = session start (the join): tap-slowness is judged on the
+    // PAIR's age, not each finger's total press (a finger held long
+    // before the partner lands is still a live two-finger session).
     private bool _twoSeen;
     private bool _twoOk = true;
     private double _twoMaxNet;
     private double _twoVX, _twoVY;
     private bool _twoSpoiled;
+    private long _twoT0;
     private int _gearId = -1;
     private int _xId = -1;
     private Point _xP;
@@ -549,7 +553,9 @@ public partial class TouchPadWindow : Window
             if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
             if (fx == int.MinValue) return false;
             bool moved = _twoMaxNet > TapMoveDip || f.Moved;
-            if (_twoSpoiled || (!moved && (!_twoOk || ms > _s.TapJudgeMs)))
+            // Slow = the PAIR's age (ms is the single finger's press,
+            // which includes pre-join holding and must not judge the tap).
+            if (_twoSpoiled || (!moved && (!_twoOk || Environment.TickCount64 - _twoT0 > _s.TapJudgeMs)))
             {
                 Log.Write("2FINGER idle (silent)");
                 _lastWhat = "two-idle";
@@ -946,6 +952,13 @@ public partial class TouchPadWindow : Window
                     _twoSeen = true;
                     _twoOk = true;
                     _twoMaxNet = 0;
+                    _twoVX = 0; _twoVY = 0;
+                    _twoT0 = Environment.TickCount64;
+                    // The join starts a fresh travel ledger: pre-join
+                    // wiggle (and a stale vector from the last session)
+                    // must not vote tap-vs-swipe after the join.
+                    f.Start = f.Last; f.Moved = false;
+                    if (other != null) { other.Start = other.Last; other.Moved = false; }
                     Log.Write($"2FINGER begin d={dd:0}");
                 }
             }
@@ -1145,7 +1158,9 @@ public partial class TouchPadWindow : Window
                     if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
                     // Partner lift during a two-contact session: a slow or
                     // moved lift spoils only the tap (a swipe can complete).
-                    if (_twoSeen && (f.Moved || ms > _s.TapJudgeMs)) _twoOk = false;
+                    // Slow = the PAIR's age (since the join), not this
+                    // finger's total press.
+                    if (_twoSeen && (f.Moved || Environment.TickCount64 - _twoT0 > _s.TapJudgeMs)) _twoOk = false;
                     _g = G.None;
                     _primaryId = -1;
                     _lastTapTick = 0;
@@ -1300,7 +1315,8 @@ public partial class TouchPadWindow : Window
             {
                 // Partner lift (not the primary): a slow or moved lift
                 // spoils only the tap (a swipe can still complete).
-                if (f.Moved || ms > _s.TapJudgeMs) _twoOk = false;
+                // Slow = the PAIR's age (since the join).
+                if (f.Moved || Environment.TickCount64 - _twoT0 > _s.TapJudgeMs) _twoOk = false;
                 if (_fingers.Count == 0)
                 {
                     // Last lift wasn't the primary (it cancelled when the
