@@ -472,7 +472,7 @@ public partial class ModeStripWindow : Window
             catch { }
             string align = (_s.StripSide ?? "left").ToLowerInvariant();
             int px = _s.StripPx;
-            const double Chrome = 20;   // wedge width alongside the bar
+            const double Chrome = 24;   // corner fans beside the bar
             if (edge == "bottom" || edge == "top")
             {
                 Top = oy + (edge == "bottom" ? ph - Height : 0);
@@ -495,11 +495,13 @@ public partial class ModeStripWindow : Window
                 else if (align == "right") Top = oy + ph - Height - px;
                 else if (align == "center") Top = oy + (ph - Height) / 2 + px;
                 else Top = oy + px;
-                Top = Math.Max(oy + Chrome, Math.Min(oy + ph - Height - Chrome, Top));
-                if (Top + Height + Chrome > oy + ph)
-                    Height = Math.Max(12, oy + ph - Chrome - Top);
-                if (Top < oy + Chrome)
-                    Top = oy + Chrome;
+                Top = Math.Max(oy, Math.Min(oy + ph - Height, Top));
+                // Corner fans sit beside the TOP corners: keep the
+                // horizontal buffer on both sides instead.
+                if (Left < ox + Chrome) Left = ox + Chrome;
+                if (Left + Width + Chrome > ox + pw)
+                    Width = Math.Max(40, ox + pw - Chrome - Left);
+                if (Left < ox + Chrome) Left = ox + Chrome;
             }
             Visibility = _s.StripVisible ? Visibility.Visible : Visibility.Hidden;
             ApplyStripStyle();
@@ -588,47 +590,36 @@ public partial class ModeStripWindow : Window
         catch { }
     }
 
-    /// <summary>Sector frame: outward unit (ox,oy), center (cx,cy)
-    /// on the bar edge, radius fitting the box.</summary>
-    private static void SectorFrame(bool grip, bool vertical,
-        double w, double h,
-        out double ox, out double oy, out double cx, out double cy, out double r)
+    /// <summary>Sector frame: the center IS the bar corner (grip =
+    /// top-left, mode = top-right), radius 24, spanning the outer
+    /// quadrant (down-left / down-right).</summary>
+    private static void SectorFrame(bool grip,
+        out double cx, out double cy, out double r,
+        out double sx, out double sy)
     {
-        if (!vertical)
-        {
-            ox = grip ? -1 : 1; oy = 0;
-            cx = grip ? w : 0; cy = h / 2;
-            r = Math.Min(w, 0.7071 * h);
-        }
-        else
-        {
-            ox = 0; oy = grip ? -1 : 1;
-            cx = w / 2; cy = grip ? h : 0;
-            r = Math.Min(h, 0.7071 * w);
-        }
-        if (r < 4) r = 4;
+        // Quadrant sign bounds (axis-aligned 90 degrees).
+        sx = grip ? -1 : 1; sy = 1;
+        cx = grip ? 24 : 0; cy = 0;
+        r = 24;
     }
 
-    /// <summary>Quarter-circle sector points for a W(x)H box: the
-    /// sector center sits ON the bar edge, the 90-degree arc bulges
-    /// outward (grip ▶/▼, mode ◀/▲). 10 samples approximate the arc.</summary>
+    /// <summary>Quarter-circle fan points: center on the bar corner,
+    /// 90-degree arc outward. 10 samples approximate the arc.</summary>
     private static System.Windows.Media.PointCollection WedgePoints(
         bool grip, bool vertical, double w, double h)
     {
         var pts = new System.Windows.Media.PointCollection();
         try
         {
-            SectorFrame(grip, vertical, w, h,
-                out double ox, out double oy,
-                out double cx, out double cy, out double r);
-            // Perpendicular (either sign gives the symmetric fan).
-            double ux = -oy, uy = ox;
+            SectorFrame(grip, out double cx, out double cy,
+                out double r, out double sx, out double sy);
             pts.Add(new Point(cx, cy));
             for (int i = 0; i <= 10; i++)
             {
-                double t = (-45 + 90.0 * i / 10) * Math.PI / 180.0;
-                double dx = ox * Math.Cos(t) + ux * Math.Sin(t);
-                double dy = oy * Math.Cos(t) + uy * Math.Sin(t);
+                // Straight-down sweeping sideways (screen Y down).
+                double t = (90.0 * i / 10) * Math.PI / 180.0;
+                double dx = sx * Math.Sin(t);
+                double dy = Math.Cos(t);
                 pts.Add(new Point(cx + dx * r, cy + dy * r));
             }
         }
@@ -636,22 +627,18 @@ public partial class ModeStripWindow : Window
         return pts;
     }
 
-    /// <summary>True when a point lands on the sector (dist <= R and
-    /// within 45 degrees of the outward normal). Same frame as above;
-    /// transparent corners belong to the bar.</summary>
+    /// <summary>True when a point lands on the fan (same frame:
+    /// inside radius, x on the outer side, y below the corner).</summary>
     private static bool TriHit(bool grip, bool vertical,
         double w, double h, System.Windows.Point p)
     {
         try
         {
-            SectorFrame(grip, vertical, w, h,
-                out double ox, out double oy,
-                out double cx, out double cy, out double r);
+            SectorFrame(grip, out double cx, out double cy,
+                out double r, out double sx, out double _);
             double vx = p.X - cx, vy = p.Y - cy;
-            double dist = Math.Sqrt(vx * vx + vy * vy);
-            if (dist > r || dist < 0.5) return dist < 0.5;
-            double cos = (vx * ox + vy * oy) / dist;
-            return cos >= 0.7071;
+            if (vx * vx + vy * vy > r * r) return false;
+            return sx < 0 ? vx <= 0 && vy >= 0 : vx >= 0 && vy >= 0;
         }
         catch { return true; }
     }
@@ -774,41 +761,17 @@ public partial class ModeStripWindow : Window
             EnsureChrome();
             if (_gripWin == null || _modeWin == null) return;
             bool show = Visibility == Visibility.Visible;
-            // Wedges flush against the bar, bar-height tall (wide bar)
-            // or bar-width wide (tall bar): [grip][bar][mode].
-            bool vertical = ((_s.StripEdge ?? "top").ToLowerInvariant() == "left")
-                || ((_s.StripEdge ?? "top").ToLowerInvariant() == "right");
+            // Fixed 24px fans on the bar's top corners (centers ARE the
+            // corners): grip upper-left of the left end, mode upper-right
+            // of the right end. Poly follows the 24 box.
+            _gripWin.Width = 24; _gripWin.Height = 24;
+            _modeWin.Width = 24; _modeWin.Height = 24;
             if (_gripPoly != null)
-                _gripPoly.Points = WedgePoints(true, vertical,
-                    _gripWin.Width, _gripWin.Height);
+                _gripPoly.Points = WedgePoints(true, false, 24, 24);
             if (_modePoly != null)
-                _modePoly.Points = WedgePoints(false, vertical,
-                    _modeWin.Width, _modeWin.Height);
-            double gx, gy, mx, my;
-            if (vertical)
-            {
-                _gripWin.Width = Width; _gripWin.Height = 20;
-                _modeWin.Width = Width; _modeWin.Height = 20;
-                if (_gripPoly != null)
-                    _gripPoly.Points = WedgePoints(true, true, Width, 20);
-                if (_modePoly != null)
-                    _modePoly.Points = WedgePoints(false, true, Width, 20);
-                gx = Left; gy = Top - 20;
-                mx = Left; my = Top + Height;
-            }
-            else
-            {
-                _gripWin.Width = 20; _gripWin.Height = Height;
-                _modeWin.Width = 20; _modeWin.Height = Height;
-                if (_gripPoly != null)
-                    _gripPoly.Points = WedgePoints(true, false, 20, Height);
-                if (_modePoly != null)
-                    _modePoly.Points = WedgePoints(false, false, 20, Height);
-                gx = Left - 20; gy = Top;
-                mx = Left + Width; my = Top;
-            }
-            _gripWin.Left = gx; _gripWin.Top = gy;
-            _modeWin.Left = mx; _modeWin.Top = my;
+                _modePoly.Points = WedgePoints(false, false, 24, 24);
+            _gripWin.Left = Left - 24; _gripWin.Top = Top;
+            _modeWin.Left = Left + Width; _modeWin.Top = Top;
             var gv = show ? Visibility.Visible : Visibility.Hidden;
             _gripWin.Visibility = gv;
             _modeWin.Visibility = gv;
