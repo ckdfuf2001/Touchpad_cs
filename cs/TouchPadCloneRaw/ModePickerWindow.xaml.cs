@@ -93,7 +93,7 @@ public partial class ModePickerWindow : Window
                     Margin = new Thickness(2),
                     Padding = new Thickness(8),
                     MinHeight = 40,
-                    Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0x80, 0x80, 0x80)),
+                    Foreground = ColorPalettes.CellTextBrush(cell.TextColor, s.StripTextColor),
                 };
                 // Explicit cell size wins; otherwise fit to text.
                 if (cell.CellW > 0) { b.Width = cell.CellW; b.MinWidth = 0; }
@@ -113,14 +113,6 @@ public partial class ModePickerWindow : Window
                     else
                         b.Background = new SolidColorBrush(
                             (Color)ColorConverter.ConvertFromString(cell.Color));
-                }
-                catch { }
-                try
-                {
-                    if (!string.IsNullOrWhiteSpace(cell.TextColor)
-                        && !ColorPalettes.IsNone(cell.TextColor))
-                        b.Foreground = new SolidColorBrush(
-                            (Color)ColorConverter.ConvertFromString(cell.TextColor));
                 }
                 catch { }
                 if (!string.IsNullOrWhiteSpace(cell.Image))

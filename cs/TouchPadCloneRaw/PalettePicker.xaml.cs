@@ -67,6 +67,20 @@ public static class ColorPalettes
         if (allowFollow && s == "") return Follow;
         return s;
     }
+
+    /// <summary>Cell text brush: cell color wins, empty/none falls back
+    /// to the strip setting, then gray.</summary>
+    public static Brush CellTextBrush(string? cell, string? strip)
+    {
+        foreach (var v in new[] { cell, strip })
+        {
+            string s = (v ?? "").Trim();
+            if (s == "" || IsNone(s)) continue;
+            try { return new SolidColorBrush((Color)ColorConverter.ConvertFromString(s)); }
+            catch { }
+        }
+        return new SolidColorBrush(Color.FromArgb(0xFF, 0x80, 0x80, 0x80));
+    }
 }
 
 public partial class PalettePicker : UserControl

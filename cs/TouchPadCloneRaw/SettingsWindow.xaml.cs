@@ -500,7 +500,7 @@ public partial class SettingsWindow : Window
                 {
                     int c = ci;
                     var cell = StripCell.Parse(row.Cells[c]);
-                    var b = new Button { Content = cell.IsEmpty ? "빈칸" : cell.Label, MinWidth = 64, Margin = new Thickness(0, 0, 4, 0), Padding = new Thickness(6, 2, 6, 2) };
+                    var b = new Button { Content = cell.IsEmpty ? "빈칸" : cell.Label, MinWidth = 64, Margin = new Thickness(0, 0, 4, 0), Padding = new Thickness(6, 2, 6, 2), Foreground = ColorPalettes.CellTextBrush(cell.TextColor, _s.StripTextColor) };
                     try
                     {
                         if (string.IsNullOrWhiteSpace(cell.Color) || ColorPalettes.IsNone(cell.Color)) b.Background = Brushes.Transparent;
