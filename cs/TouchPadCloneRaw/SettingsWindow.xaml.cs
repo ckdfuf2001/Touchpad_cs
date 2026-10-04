@@ -18,6 +18,17 @@ public partial class SettingsWindow : Window
     private readonly Dictionary<string, WComboBox> _gestures = new();
     private readonly Action<string, bool>? _showAux;
 
+    /// <summary>True while the constructor sets initial control values:
+    /// those fire change events that must not Apply (opening settings
+    /// used to pop the pad open via ApplyPad).</summary>
+    private bool _loading = true;
+
+    private void FireApply()
+    {
+        if (_loading) return;
+        try { _onApply(); } catch { }
+    }
+
     // Own-titlebar drag state (pad chrome pattern).
     private bool _chromeTouch, _chromeMouse;
     private int _chromeTouchId = -1;
@@ -162,7 +173,7 @@ public partial class SettingsWindow : Window
                 if (dev == PrimaryDevice()) dev = "";
                 _s.StripMonitor = dev;
                 _s.Save();
-                _onApply();
+                FireApply();
             }
         };
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += OnSysDisplayChanged;
@@ -177,7 +188,7 @@ public partial class SettingsWindow : Window
         {
             _s.StripEdge = EdgeValue(StripEdgeBox.SelectedItem as string);
             _s.Save();
-            _onApply();
+            FireApply();
         };
         StripSideBox.ItemsSource = StripSides;
         StripSideBox.SelectedItem = SideLabel(s.StripSide);
@@ -185,7 +196,7 @@ public partial class SettingsWindow : Window
         {
             _s.StripSide = SideValue(StripSideBox.SelectedItem as string);
             _s.Save();
-            _onApply();
+            FireApply();
         };
         StripPxBox.Text = s.StripPx.ToString();
         StripWBox.Text = s.StripWidth.ToString();
@@ -235,6 +246,7 @@ public partial class SettingsWindow : Window
         InitActionsTab();
 
         SaveBtn.Click += (_, _) => ApplySave();
+        _loading = false;
     }
 
     private void BuildGestureGrid(Grid grid, GestureMap map, string prefix)
@@ -267,7 +279,7 @@ public partial class SettingsWindow : Window
         _s.TapJudgeMs = (int)TapJudgeMs.Value;
         _s.StripOpacity = StripOpacityS.Value;
         UpdateValLabels();
-        _onApply();
+        FireApply();
     }
 
     private void UpdateValLabels()
@@ -302,7 +314,7 @@ public partial class SettingsWindow : Window
         }
         foreach (var r in _s.StripLayout) { while (r.Cells.Count < 4) r.Cells.Add(""); }
         _s.Save();
-        _onApply();
+        FireApply();
     }
 
     /// <summary>Strip monitor dropdown: rebuilt live so plugged /
@@ -352,7 +364,7 @@ public partial class SettingsWindow : Window
                 _s.Save();
             }
             RefreshMonitorList();
-            _onApply();
+            FireApply();
         }
         catch { }
     }
@@ -382,7 +394,7 @@ public partial class SettingsWindow : Window
         if (TryParseStripNumbers())
         {
             _s.Save();
-            _onApply();
+            FireApply();
         }
     }
 
@@ -417,7 +429,7 @@ public partial class SettingsWindow : Window
             catch { box.Selected = get() ?? ""; return; }
         }
         _s.Save();
-        _onApply();
+        FireApply();
     }
 
     private static readonly string[] KindItems = ["기능", "cmd", "프로그램", "단축키"];
@@ -646,7 +658,7 @@ public partial class SettingsWindow : Window
         p.TapToClick = IndexToTri(PadTap.SelectedIndex);
         _s.Save();
         LoadPadTab();
-        _onApply();
+        FireApply();
     }
 
     private void PreviewPad()
@@ -660,7 +672,7 @@ public partial class SettingsWindow : Window
         }
         _s.Layout = name;
         _s.Save();
-        _onApply();
+        FireApply();
     }
 
     // ---------------- artist / virtual tabs --------------------------
@@ -674,12 +686,12 @@ public partial class SettingsWindow : Window
         ArtPos.SelectionChanged += (_, _) =>
         {
             _s.Artist.Position = ArtPos.SelectedItem as string ?? "bottom";
-            _s.Save(); RefreshAuxLists(); _onApply();
+            _s.Save(); RefreshAuxLists(); FireApply();
         };
         VirtPos.SelectionChanged += (_, _) =>
         {
             _s.Virtual.Position = VirtPos.SelectedItem as string ?? "hidden";
-            _s.Save(); RefreshAuxLists(); _onApply();
+            _s.Save(); RefreshAuxLists(); FireApply();
         };
         ArtAdd.Click += (_, _) => AddAuxBtn(_s.Artist.Buttons, ArtLabel, ArtAction);
         ArtDel.Click += (_, _) => DelAuxBtn(_s.Artist.Buttons, ArtBtns);
@@ -701,13 +713,13 @@ public partial class SettingsWindow : Window
         if (label.Text.Length == 0) return;
         list.Add(new PadButton { Label = label.Text, Action = action.Text });
         label.Text = ""; action.Text = "";
-        _s.Save(); RefreshAuxLists(); _onApply();
+        _s.Save(); RefreshAuxLists(); FireApply();
     }
 
     private void DelAuxBtn(List<PadButton> list, ListBox box)
     {
         if (box.SelectedIndex >= 0) list.RemoveAt(box.SelectedIndex);
-        _s.Save(); RefreshAuxLists(); _onApply();
+        _s.Save(); RefreshAuxLists(); FireApply();
     }
 
     // ---------------- actions tab ------------------------------------
@@ -738,7 +750,7 @@ public partial class SettingsWindow : Window
             Path = ActPath.Text,
             Args = ActArgs.Text,
         };
-        _s.Save(); RefreshActions(); _onApply();
+        _s.Save(); RefreshActions(); FireApply();
     }
 
     private void DelAction()
@@ -746,7 +758,7 @@ public partial class SettingsWindow : Window
         if (ActList.SelectedIndex < 0) return;
         string key = (ActList.SelectedItem as string ?? "").Split(' ')[0];
         _s.Actions.Remove(key);
-        _s.Save(); RefreshActions(); _onApply();
+        _s.Save(); RefreshActions(); FireApply();
     }
 
     private static string Sel(WComboBox cb) => cb.SelectedItem as string ?? "none";
