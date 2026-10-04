@@ -1345,8 +1345,20 @@ public partial class SettingsWindow : Window
         catch { }
     }
 
-    /// <summary>Unified gesture list: built-in slots (saved via 적용·저장
-    /// below) plus recorded gestures (live) in one place.</summary>
+    /// <summary>Unified gesture list: every row is the same 4-column
+    /// grid (label/name | view | function | delete) so function dropdowns
+    /// and buttons line up in one column. Built-ins save via 적용·저장,
+    /// recorded rows save live.</summary>
+    private static Grid GestureRow()
+    {
+        var head = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(90) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(200) });
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(52) });
+        return head;
+    }
+
     private void RebuildFloatGestures()
     {
         try
@@ -1354,23 +1366,24 @@ public partial class SettingsWindow : Window
             FloatGestureList.Children.Clear();
             foreach (var (key, label, get, _) in Slots)
             {
-                var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
-                row.Children.Add(new TextBlock
+                var head = GestureRow();
+                head.Children.Add(new TextBlock
                 {
-                    Text = label, Width = 150, VerticalAlignment = VerticalAlignment.Center,
+                    Text = label, VerticalAlignment = VerticalAlignment.Center,
                 });
                 var cb = new WComboBox
                 {
                     ItemsSource = GestureMap.Actions,
                     SelectedItem = get(_s.Gestures),
-                    Width = 200,
+                    Margin = new Thickness(4, 0, 0, 0),
                 };
+                Grid.SetColumn(cb, 2);
                 _gestures["float:" + key] = cb;
-                row.Children.Add(cb);
-                FloatGestureList.Children.Add(row);
+                head.Children.Add(cb);
+                FloatGestureList.Children.Add(head);
             }
             // Default two-finger strokes (up = maximize, down = minimize):
-            // fixed rows with mapping + clear-to-none.
+            // same grid, delete clears the mapping to none.
             foreach (var (key, label, get, set) in new[] {
                 ("swipe_up", "두손가락 위로",
                     (Func<GestureMap, string>)(m => m.SwipeUp),
@@ -1380,20 +1393,21 @@ public partial class SettingsWindow : Window
                     (Action<GestureMap, string>)((m, v) => m.SwipeDown = v)),
             })
             {
-                var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
-                row.Children.Add(new TextBlock
+                var head = GestureRow();
+                head.Children.Add(new TextBlock
                 {
-                    Text = label, Width = 150, VerticalAlignment = VerticalAlignment.Center,
+                    Text = label, VerticalAlignment = VerticalAlignment.Center,
                 });
                 var cb = new WComboBox
                 {
                     ItemsSource = GestureMap.Actions,
                     SelectedItem = get(_s.Gestures),
-                    Width = 200,
-                    Margin = new Thickness(0, 0, 0, 0),
+                    Margin = new Thickness(4, 0, 0, 0),
                 };
+                Grid.SetColumn(cb, 2);
                 _gestures["float:" + key] = cb;
-                var clr = new Button { Content = "✕", Width = 30, Margin = new Thickness(4, 0, 0, 0), ToolTip = "매핑 해제 (none)" };
+                var clr = new Button { Content = "삭제", Margin = new Thickness(4, 0, 0, 0), ToolTip = "매핑 해제 (none)" };
+                Grid.SetColumn(clr, 3);
                 clr.Click += (_, _) =>
                 {
                     cb.SelectedItem = "none";
@@ -1401,19 +1415,15 @@ public partial class SettingsWindow : Window
                     _s.Save();
                     FireApply();
                 };
-                row.Children.Add(cb);
-                row.Children.Add(clr);
-                FloatGestureList.Children.Add(row);
+                head.Children.Add(cb);
+                head.Children.Add(clr);
+                FloatGestureList.Children.Add(head);
             }
             foreach (var g in _s.RecordedGestures.ToList())
             {
                 var box = new StackPanel { Orientation = Orientation.Vertical, Margin = new Thickness(0, 0, 0, 8) };
-                // One line, 4 columns: name | view(fingers) | function | delete.
-                var head = new Grid { Margin = new Thickness(0, 0, 0, 4) };
-                head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-                head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                // Same 4-column grid: name | view(fingers) | function | delete.
+                var head = GestureRow();
                 var name = new TextBox
                 {
                     Text = g.Name,
@@ -1429,14 +1439,12 @@ public partial class SettingsWindow : Window
                 {
                     Content = $"보기({g.Fingers}핑거)",
                     Margin = new Thickness(4, 0, 0, 0),
-                    Padding = new Thickness(8, 1, 8, 1),
                 };
                 Grid.SetColumn(peek, 1);
                 var act = new WComboBox
                 {
                     ItemsSource = GestureMap.Actions,
                     SelectedItem = g.Action,
-                    Width = 170,
                     Margin = new Thickness(4, 0, 0, 0),
                 };
                 Grid.SetColumn(act, 2);
@@ -1446,7 +1454,7 @@ public partial class SettingsWindow : Window
                     _s.Save();
                     FireApply();
                 };
-                var del = new Button { Content = "삭제", Width = 52, Margin = new Thickness(4, 0, 0, 0) };
+                var del = new Button { Content = "삭제", Margin = new Thickness(4, 0, 0, 0) };
                 Grid.SetColumn(del, 3);
                 del.Click += (_, _) =>
                 {
