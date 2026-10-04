@@ -147,12 +147,14 @@ public partial class TouchPadWindow : Window
     }
     private long _throughUntil;
 
-    /// <summary>Mouse click-through while touches are live (plus a short
-    /// tail so drops land on the target, not on us). Touch intake uses
-    /// capture after DOWN, so it survives transparency; only a brand-new
-    /// DOWN needs opacity (first contact finds us opaque).</summary>
+    /// <summary>Mouse click-through ONLY while dragging (plus a short
+    /// tail so drops land on the target, not on us). Never transparent
+    /// during live touches: touch routing uses the same hit-test, so a
+    /// transparent window drops the 2nd DOWN to the window below and n
+    /// never reaches 2 (measured). Real-mouse pass-through while opaque
+    /// is covered by ForwardMouse below.</summary>
     private bool MouseThroughActive =>
-        _fingers.Count > 0 || Environment.TickCount64 < _throughUntil;
+        _g == G.Dragging || Environment.TickCount64 < _throughUntil;
 
     // Chrome (title) touch/mouse drag state.
     private bool _chromeTouch;
