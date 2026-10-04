@@ -214,6 +214,8 @@ public partial class SettingsWindow : Window
         StripOpacityS.ValueChanged += (_, _) => Live();
         WirePicker(StripColorPicker, ColorPalettes.Zones, false,
             () => _s.StripColor, v => _s.StripColor = v ?? "#10131A");
+        WirePicker(StripTextPicker, ColorPalettes.Effects, false,
+            () => _s.StripTextColor, v => _s.StripTextColor = v ?? "#FF9AA6BD");
         StripPxBox.LostFocus += (_, _) => CommitStripNumbers();
         StripWBox.LostFocus += (_, _) => CommitStripNumbers();
         StripHBox.LostFocus += (_, _) => CommitStripNumbers();
@@ -247,7 +249,6 @@ public partial class SettingsWindow : Window
         TapJudgeMs.ValueChanged += (_, _) => Live();
         UpdateValLabels();
         WirePicker(EffectPicker, ColorPalettes.Effects, false, () => _s.EffectColor, v => _s.EffectColor = v ?? ColorPalettes.Effects[0]);
-        WirePicker(TextPicker, ColorPalettes.Effects, false, () => _s.PadTextColor, v => _s.PadTextColor = v ?? "#FFE8ECF4");
         WirePicker(ZoneLPicker, ColorPalettes.Zones, false, () => _s.ZoneLeft, v => _s.ZoneLeft = v ?? "없음");
         WirePicker(ZoneRPicker, ColorPalettes.Zones, false, () => _s.ZoneRight, v => _s.ZoneRight = v ?? "없음");
         WirePicker(ZoneWPicker, ColorPalettes.Zones, false, () => _s.ZoneWheel, v => _s.ZoneWheel = v ?? "없음");

@@ -657,6 +657,13 @@ public partial class ModeStripWindow : Window
             }
             Surface.Background = brush;
             try { Background = System.Windows.Media.Brushes.Transparent; } catch { }
+            try
+            {
+                Label.Foreground = new System.Windows.Media.SolidColorBrush(
+                    (System.Windows.Media.Color)System.Windows.Media.ColorConverter
+                        .ConvertFromString((_s.StripTextColor ?? "#FF9AA6BD").Trim()));
+            }
+            catch { }
             if (_gripPoly != null) _gripPoly.Fill = brush;
             if (_modePoly != null) _modePoly.Fill = brush;
         }

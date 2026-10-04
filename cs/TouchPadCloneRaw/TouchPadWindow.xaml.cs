@@ -327,33 +327,9 @@ public partial class TouchPadWindow : Window
             if (_chromeTouch || _chromeMouse || _resizeMode != null) return;
             ChromeLabel.Text =
                 $"rawpad {_s.Speed:0.0}x @({Left:0},{Top:0}) {ActualWidth:0}x{ActualHeight:0} dpi={_dpi:0.00}";
-            ApplyPadTextColor();
         }
         catch { }
     }
-
-    /// <summary>Pad default text color onto chrome + tiles (render
-    /// only; debug labels keep theirs). Runs on every Apply.</summary>
-    private void ApplyPadTextColor()
-    {
-        try
-        {
-            Brush b;
-            try
-            {
-                b = new SolidColorBrush((Color)ColorConverter
-                    .ConvertFromString((_s.PadTextColor ?? "").Trim()));
-            }
-            catch { b = Brushes.WhiteSmoke; }
-            ChromeLabel.Foreground = b;
-            GearLabel.Foreground = b;
-            XLabel.Foreground = b;
-            _textBrush = b;
-        }
-        catch { }
-    }
-
-    private Brush _textBrush = Brushes.WhiteSmoke;
 
     // ---------------- cs app compatibility (replaces PadWindow) ----------
 
@@ -467,7 +443,7 @@ public partial class TouchPadWindow : Window
                 var tb = new TextBlock
                 {
                     Text = label,
-                    Foreground = _textBrush,
+                    Foreground = Brushes.WhiteSmoke,
                     FontSize = 9,
                 };
                 Canvas.SetLeft(tb, tx + 3);
@@ -582,7 +558,6 @@ public partial class TouchPadWindow : Window
     {
         try
         {
-            ApplyPadTextColor();
             Zones.Children.Clear();
             var (w, h) = TileArea();
             void rect(double x, double y, double rw, double rh,
@@ -603,7 +578,7 @@ public partial class TouchPadWindow : Window
                 var t = new TextBlock
                 {
                     Text = label,
-                    Foreground = _textBrush,
+                    Foreground = Brushes.WhiteSmoke,
                     FontSize = 10,
                 };
                 Canvas.SetLeft(t, x + 4);
