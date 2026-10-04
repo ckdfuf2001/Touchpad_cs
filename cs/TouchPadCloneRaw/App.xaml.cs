@@ -23,8 +23,11 @@ public partial class App : WApplication
 
     private Core.PadConfig Cfg(string name)
     {
+        // Family keys (artist/virtual), so per-pad settings apply to
+        // every layout of the family, not just exact-name matches.
+        string key = Core.AppSettings.PadFamilyKey(name);
         foreach (var kv in _settings.Pads)
-            if (kv.Key.Equals(name, StringComparison.OrdinalIgnoreCase))
+            if (kv.Key.Equals(key, StringComparison.OrdinalIgnoreCase))
                 return kv.Value;
         return new Core.PadConfig();
     }
@@ -298,7 +301,7 @@ public partial class App : WApplication
         }
         _settingsWin = new SettingsWindow(_settings,
             Core.PresetParser.OrderedNames(_presets), () => Apply(),
-            (name, on) => ShowAux(name, on), () => ShowPad());
+            (name, on) => ShowAux(name, on), () => ShowPad(), _presets);
         _settingsWin.Closed += (_, _) => _settingsWin = null;
         _settingsWin.Show();
     }

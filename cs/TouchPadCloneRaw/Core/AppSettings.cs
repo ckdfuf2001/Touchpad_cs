@@ -157,6 +157,12 @@ public sealed class PadConfig
     public bool? ScrollInvert { get; set; }       // null = follow global
     public bool? SwapButtons { get; set; }        // null = follow global
     public bool? TapToClick { get; set; }       // null = follow global
+    /// <summary>Custom rect (DIP, home-monitor origin) for AreaMode
+    /// "custom". All zero = unset (falls back to the default anchor).</summary>
+    public double RectX { get; set; }
+    public double RectY { get; set; }
+    public double RectW { get; set; }
+    public double RectH { get; set; }
     /// <summary>Per-pad gesture override (null = follow the family map).
     /// This is how one mode (pad) gets different gestures from another.</summary>
     public GestureMap? Gestures { get; set; }
@@ -417,8 +423,16 @@ public sealed class AppSettings
     /// and aux pad buttons.</summary>
     public Dictionary<string, ActionDef> Actions { get; set; } = new();
 
-    public PadConfig Pad(string name) =>
-        Pads.TryGetValue(name, out var p) ? p : new PadConfig();
+    public PadConfig Pad(string name)
+    {
+        // Family keys (artist/virtual), so per-pad settings apply to
+        // every layout of the family, not just exact-name matches.
+        string key = PadFamilyKey(name);
+        foreach (var kv in Pads)
+            if (kv.Key.Equals(key, StringComparison.OrdinalIgnoreCase))
+                return kv.Value;
+        return new PadConfig();
+    }
 
     /// <summary>Layout name -&gt; Pads key (artist/virtual families).</summary>
     public static string PadFamilyKey(string layoutName)

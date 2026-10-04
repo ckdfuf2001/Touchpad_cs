@@ -15,6 +15,7 @@ public partial class SettingsWindow : Window
 {
     private readonly AppSettings _s;
     private readonly Action _onApply;
+    private Dictionary<string, Layout> _presets = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, WComboBox> _gestures = new();
     private readonly Action<string, bool>? _showAux;
     private readonly Action? _showPad;
@@ -102,12 +103,14 @@ public partial class SettingsWindow : Window
     ];
 
     public SettingsWindow(AppSettings s, List<string> layouts, Action onApply,
-        Action<string, bool>? showAux = null, Action? showPad = null)
+        Action<string, bool>? showAux = null, Action? showPad = null,
+        Dictionary<string, Layout>? presets = null)
     {
         _s = s;
         _onApply = onApply;
         _showAux = showAux;
         _showPad = showPad;
+        _presets = presets ?? new Dictionary<string, Layout>(StringComparer.OrdinalIgnoreCase);
         InitializeComponent();
         // Own title bar: touch-reachable close + drag to move (mouse/touch).
         TitleCloseBtn.Click += (_, _) => Close();
@@ -277,6 +280,7 @@ public partial class SettingsWindow : Window
         InitAuxTabs();
         InitPadsTab();
         InitActionsTab();
+        InitLayoutTab();
 
         SaveBtn.Click += (_, _) => ApplySave();
         SaveBtnFloat.Click += (_, _) => ApplySave();
@@ -691,6 +695,347 @@ public partial class SettingsWindow : Window
         catch { }
     }
 
+    // ---------------- layout tab (preview + geometry) ----------------
+
+    private void InitLayoutTab()
+    {
+        foreach (var a in new[] { "default", "full", "half-left", "half-right", "custom" })
+            LayoutAreaBox.Items.Add(a);
+        RefreshPresetList();
+        FillLayoutSel();
+        LayoutSelBox.SelectionChanged += (_, _) => { LoadLayoutEditors(); DrawPreview(); };
+        PresetSelBox.SelectionChanged += (_, _) => { if (!_loading) SwitchPresetFile(); };
+        LayoutAreaBox.SelectionChanged += (_, _) =>
+        {
+            SyncRectBoxes();
+            if (!_loading) { SaveLayoutTab(); DrawPreview(); }
+        };
+        foreach (var b in new[] { LayoutXBox, LayoutYBox, LayoutWBox, LayoutHBox })
+            b.LostFocus += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
+        LayoutSaveBtn.Click += (_, _) => { SaveLayoutTab(); DrawPreview(); };
+        LayoutShowBtn.Click += (_, _) => ShowLayoutPad();
+        if (LayoutSelBox.Items.Contains(_s.Layout)) LayoutSelBox.SelectedItem = _s.Layout;
+        else if (LayoutSelBox.Items.Count > 0) LayoutSelBox.SelectedIndex = 0;
+        LoadLayoutEditors();
+        DrawPreview();
+    }
+
+    private string LayoutKey() => LayoutSelBox.SelectedItem as string ?? _s.Layout;
+
+    /// <summary>Pad home monitor in DIPs (mirrors App.HomeRect: the
+    /// configured strip monitor, primary fallback).</summary>
+    private (double l, double t, double w, double h) LayoutHome()
+    {
+        double d = 1.0;
+        try
+        {
+            var s = System.Windows.Media.VisualTreeHelper.GetDpi(this);
+            if (s.DpiScaleX >= 0.5 && s.DpiScaleX <= 4) d = s.DpiScaleX;
+        }
+        catch { }
+        try
+        {
+            var sc = Core.MonitorList.Resolve(_s.StripMonitor);
+            if (sc != null)
+            {
+                var b = sc.Bounds;
+                if (b.Width >= 100 && b.Height >= 100)
+                    return (b.Left / d, b.Top / d, b.Width / d, b.Height / d);
+            }
+        }
+        catch { }
+        return (SystemParameters.VirtualScreenLeft, SystemParameters.VirtualScreenTop,
+            SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight);
+    }
+
+    private static string TrimNum(double v) => v.ToString("0.##");
+
+    private void RefreshPresetList()
+    {
+        try
+        {
+            var files = new List<(string show, string path)>();
+            string bundled = System.IO.Path.Combine(
+                AppDomain.CurrentDomain.BaseDirectory, "presets");
+            if (System.IO.Directory.Exists(bundled))
+                foreach (var f in System.IO.Directory.GetFiles(bundled, "*.ini"))
+                    files.Add((System.IO.Path.GetFileName(f) + " (내장)", f));
+            string userDir = System.IO.Path.GetDirectoryName(AppSettings.Path) ?? "";
+            if (System.IO.Directory.Exists(userDir))
+                foreach (var f in System.IO.Directory.GetFiles(userDir, "*.ini"))
+                    if (!files.Exists(x => x.path.Equals(f, StringComparison.OrdinalIgnoreCase)))
+                        files.Add((System.IO.Path.GetFileName(f), f));
+            PresetSelBox.Items.Clear();
+            PresetSelBox.Items.Add("기본 내장");
+            foreach (var (show, _) in files) PresetSelBox.Items.Add(show);
+            PresetSelBox.Tag = files;
+            string cur = _s.PresetFile ?? "";
+            int sel = 0;
+            for (int i = 0; i < files.Count; i++)
+                if (files[i].path.Equals(cur, StringComparison.OrdinalIgnoreCase)) sel = i + 1;
+            PresetSelBox.SelectedIndex = sel;
+            PresetPathLbl.Text = sel == 0 ? "내장 Default.ini" : files[sel - 1].path;
+        }
+        catch { }
+    }
+
+    private string PresetPathFor(int sel)
+    {
+        if (sel <= 0) return "";
+        try
+        {
+            if (PresetSelBox.Tag is List<(string show, string path)> files
+                && sel - 1 < files.Count)
+                return files[sel - 1].path;
+        }
+        catch { }
+        return "";
+    }
+
+    private void SwitchPresetFile()
+    {
+        try
+        {
+            string path = PresetPathFor(PresetSelBox.SelectedIndex);
+            var parsed = string.IsNullOrEmpty(path) || !System.IO.File.Exists(path)
+                ? null : Core.PresetParser.ParseFile(path);
+            if (parsed == null || parsed.Count == 0)
+            {
+                LayoutInfoLbl.Text = "프리셋을 읽지 못했습니다.";
+                RefreshPresetList();
+                return;
+            }
+            _s.PresetFile = path;
+            _presets = parsed;
+            _s.Save();
+            FillLayoutSel();
+            if (!_presets.ContainsKey(_s.Layout)) _s.Layout = Core.PresetParser.OrderedNames(_presets)[0];
+            if (LayoutSelBox.Items.Contains(_s.Layout)) LayoutSelBox.SelectedItem = _s.Layout;
+            else if (LayoutSelBox.Items.Count > 0) LayoutSelBox.SelectedIndex = 0;
+            RefreshPresetList();
+            LoadLayoutEditors();
+            DrawPreview();
+            FireApply();
+        }
+        catch { }
+    }
+
+    private void FillLayoutSel()
+    {
+        try
+        {
+            LayoutSelBox.Items.Clear();
+            foreach (var n in Core.PresetParser.OrderedNames(_presets))
+                LayoutSelBox.Items.Add(n);
+        }
+        catch { }
+    }
+
+    private void LoadLayoutEditors()
+    {
+        try
+        {
+            string sec = LayoutKey();
+            string key = AppSettings.PadFamilyKey(sec);
+            _s.Pads.TryGetValue(key, out var p);
+            string mode = p?.AreaMode ?? "default";
+            if (!LayoutAreaBox.Items.Contains(mode)) mode = "default";
+            LayoutAreaBox.SelectedItem = mode;
+            LayoutXBox.Text = TrimNum(p?.RectX ?? 0);
+            LayoutYBox.Text = TrimNum(p?.RectY ?? 0);
+            LayoutWBox.Text = TrimNum(p?.RectW ?? 0);
+            LayoutHBox.Text = TrimNum(p?.RectH ?? 0);
+            SyncRectBoxes();
+        }
+        catch { }
+    }
+
+    private void SyncRectBoxes()
+    {
+        try
+        {
+            bool custom = (LayoutAreaBox.SelectedItem as string) == "custom";
+            LayoutXBox.IsEnabled = custom;
+            LayoutYBox.IsEnabled = custom;
+            LayoutWBox.IsEnabled = custom;
+            LayoutHBox.IsEnabled = custom;
+            if (custom && LayoutXBox.Text == "0" && LayoutYBox.Text == "0"
+                && LayoutWBox.Text == "0" && LayoutHBox.Text == "0")
+            {
+                // Prefill from the default anchor so the fields are valid.
+                var home = LayoutHome();
+                double w = _s.PadWidth > 0 ? _s.PadWidth : 340;
+                double h = _s.PadHeight > 0 ? _s.PadHeight : 260;
+                var (l, t, _, _) = Core.PadPlacer.Place("default", home, (w, h), (0, 0, 0, 0));
+                LayoutXBox.Text = TrimNum(l - home.l);
+                LayoutYBox.Text = TrimNum(t - home.t);
+                LayoutWBox.Text = TrimNum(w);
+                LayoutHBox.Text = TrimNum(h);
+            }
+        }
+        catch { }
+    }
+
+    private void SaveLayoutTab()
+    {
+        try
+        {
+            string sec = LayoutKey();
+            string key = AppSettings.PadFamilyKey(sec);
+            if (!_s.Pads.TryGetValue(key, out var p))
+            { p = new PadConfig(); _s.Pads[key] = p; }
+            p.AreaMode = LayoutAreaBox.SelectedItem as string ?? "default";
+            if (!double.TryParse(LayoutXBox.Text, out double x)
+                || !double.TryParse(LayoutYBox.Text, out double y)
+                || !double.TryParse(LayoutWBox.Text, out double w)
+                || !double.TryParse(LayoutHBox.Text, out double h))
+            {
+                LoadLayoutEditors();
+                return;
+            }
+            p.RectX = x; p.RectY = y; p.RectW = w; p.RectH = h;
+            _s.Save();
+            FireApply();
+        }
+        catch { }
+    }
+
+    private void ShowLayoutPad()
+    {
+        try
+        {
+            SaveLayoutTab();
+            _s.Layout = LayoutKey();
+            _s.Save();
+            if (_showPad != null) _showPad();
+            else FireApply();
+            DrawPreview();
+        }
+        catch { }
+    }
+
+    private void DrawPreview()
+    {
+        try
+        {
+            LayoutPreview.Children.Clear();
+            double cw = LayoutPreview.Width, ch = LayoutPreview.Height;
+            double vl = SystemParameters.VirtualScreenLeft, vt = SystemParameters.VirtualScreenTop;
+            double vw = SystemParameters.VirtualScreenWidth, vh = SystemParameters.VirtualScreenHeight;
+            if (vw < 100 || vh < 100 || cw < 50 || ch < 50) return;
+            double sc = Math.Min(cw / vw, ch / vh);
+            double ox = (cw - vw * sc) / 2 - vl * sc;
+            double oy = (ch - vh * sc) / 2 - vt * sc;
+            double X(double v) => ox + v * sc;
+            double Y(double v) => oy + v * sc;
+            // Monitors.
+            string homeDev = "";
+            try
+            {
+                var hr = LayoutHome();
+                foreach (var s in System.Windows.Forms.Screen.AllScreens)
+                {
+                    var b = s.Bounds;
+                    bool isHome = b.Left <= hr.l + 1 && hr.l <= b.Right
+                        && b.Top <= hr.t + 1 && hr.t <= b.Bottom;
+                    if (isHome) homeDev = s.DeviceName;
+                    var mr = new System.Windows.Shapes.Rectangle
+                    {
+                        Width = Math.Max(2, b.Width * sc),
+                        Height = Math.Max(2, b.Height * sc),
+                        Fill = new SolidColorBrush(isHome
+                            ? System.Windows.Media.Color.FromArgb(0x22, 0x35, 0xC4, 0xFF)
+                            : System.Windows.Media.Color.FromArgb(0xFF, 0x1A, 0x22, 0x2C)),
+                        Stroke = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0x33, 0x5C, 0x6C)),
+                        StrokeThickness = 1,
+                    };
+                    LayoutPreview.Children.Add(mr);
+                    System.Windows.Controls.Canvas.SetLeft(mr, X(b.Left));
+                    System.Windows.Controls.Canvas.SetTop(mr, Y(b.Top));
+                    var ml = new TextBlock
+                    {
+                        Text = s.DeviceName.Replace("\\\\.\\", "") + (s.Primary ? " (주)" : ""),
+                        FontSize = 9,
+                        Foreground = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0x9A, 0xA6, 0xBD)),
+                    };
+                    LayoutPreview.Children.Add(ml);
+                    System.Windows.Controls.Canvas.SetLeft(ml, X(b.Left) + 3);
+                    System.Windows.Controls.Canvas.SetTop(ml, Y(b.Top) + 2);
+                }
+            }
+            catch { }
+            // Pad rect (same math as the app: PadPlacer.Place).
+            var home = LayoutHome();
+            string sec = LayoutKey();
+            string key = AppSettings.PadFamilyKey(sec);
+            _s.Pads.TryGetValue(key, out var p);
+            string mode = p?.AreaMode ?? "default";
+            if (sec.StartsWith("fullscreen", StringComparison.OrdinalIgnoreCase))
+                mode = "full";
+            double pw = _s.PadWidth > 0 ? _s.PadWidth : 340;
+            double ph = _s.PadHeight > 0 ? _s.PadHeight : 260;
+            var r = Core.PadPlacer.Place(mode, home, (pw, ph),
+                (p?.RectX ?? 0, p?.RectY ?? 0, p?.RectW ?? 0, p?.RectH ?? 0));
+            var pr = new System.Windows.Shapes.Rectangle
+            {
+                Width = Math.Max(2, r.w * sc),
+                Height = Math.Max(2, r.h * sc),
+                Fill = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x55, 0x7F, 0xE0, 0xA8)),
+                Stroke = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0x7F, 0xE0, 0xA8)),
+                StrokeThickness = 1.5,
+            };
+            LayoutPreview.Children.Add(pr);
+            System.Windows.Controls.Canvas.SetLeft(pr, X(r.l));
+            System.Windows.Controls.Canvas.SetTop(pr, Y(r.t));
+            // Tiles (ini 0..100 relative -> pad rect).
+            int shown = 0;
+            if (_presets.TryGetValue(sec, out var lay) && lay != null)
+            {
+                foreach (var t in lay.Tiles)
+                {
+                    double tx = r.l + r.w * t.X / 100.0, ty = r.t + r.h * t.Y / 100.0;
+                    double tw = r.w * t.W / 100.0, th = r.h * t.H / 100.0;
+                    if (tw < 1 || th < 1) continue;
+                    string kind = (t.Kind ?? "").ToLowerInvariant();
+                    byte cr = 0xAA, cg = 0xAA, cb = 0xAA;
+                    if (kind.Contains("pad")) { cr = 0x35; cg = 0xC4; cb = 0xFF; }
+                    else if (kind.Contains("wheel")) { cr = 0xFF; cg = 0x7F; cb = 0x7F; }
+                    else if (kind.Contains("click") || kind.Contains("drag") || kind.Contains("btn"))
+                    { cr = 0x7F; cg = 0xE0; cb = 0xA8; }
+                    var tr = new System.Windows.Shapes.Rectangle
+                    {
+                        Width = Math.Max(1, tw * sc),
+                        Height = Math.Max(1, th * sc),
+                        Fill = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x66, cr, cg, cb)),
+                        Stroke = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xAA, cr, cg, cb)),
+                        StrokeThickness = 0.75,
+                    };
+                    LayoutPreview.Children.Add(tr);
+                    System.Windows.Controls.Canvas.SetLeft(tr, X(tx));
+                    System.Windows.Controls.Canvas.SetTop(tr, Y(ty));
+                    if (tw * sc > 44 && th * sc > 12 && !string.IsNullOrWhiteSpace(t.Name))
+                    {
+                        var tl = new TextBlock
+                        {
+                            Text = t.Name,
+                            FontSize = 9,
+                            Foreground = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0xE8, 0xEC, 0xF4)),
+                        };
+                        LayoutPreview.Children.Add(tl);
+                        System.Windows.Controls.Canvas.SetLeft(tl, X(tx) + 2);
+                        System.Windows.Controls.Canvas.SetTop(tl, Y(ty) + 1);
+                    }
+                    shown++;
+                }
+            }
+            double cov = home.w * home.h > 0 ? r.w * r.h / (home.w * home.h) * 100.0 : 0;
+            LayoutInfoLbl.Text = $"모니터: {homeDev} {home.w:0}x{home.h:0} | " +
+                $"패드: {r.l:0},{r.t:0} {r.w:0}x{r.h:0} (모니터의 {cov:0}%) | " +
+                $"모드 {mode} | 타일 {shown}개";
+        }
+        catch { }
+    }
+
     // ---------------- per-pad tab ------------------------------------
 
     private static readonly string[] PadNames =
@@ -700,7 +1045,7 @@ public partial class SettingsWindow : Window
     {
         foreach (var p in PadNames) PadSel.Items.Add(p);
         PadSel.SelectedIndex = 0;
-        foreach (var a in new[] { "default", "full", "half-left", "half-right" }) PadArea.Items.Add(a);
+        foreach (var a in new[] { "default", "full", "half-left", "half-right", "custom" }) PadArea.Items.Add(a);
         // Tri-state as an explicit combo (a 3-state checkbox cycles
         // null->false on first click, which silently wrote "off" instead
         // of "follow global" and killed taps).

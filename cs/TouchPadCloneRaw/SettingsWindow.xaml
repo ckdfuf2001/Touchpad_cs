@@ -189,6 +189,39 @@
             </StackPanel>
             </ScrollViewer>
         </TabItem>
+        <TabItem Header="레이아웃">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="14">
+                <TextBlock Text="레이아웃 미리보기 + 위치/영역 편집" FontWeight="Bold"/>
+                <TextBlock Text="프리셋 파일 (ini)"/>
+                <ComboBox x:Name="PresetSelBox" Margin="0,2,0,2"/>
+                <TextBlock x:Name="PresetPathLbl" Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                <TextBlock Text="레이아웃 (ini 섹션)"/>
+                <ComboBox x:Name="LayoutSelBox" Margin="0,2,0,6"/>
+                <Border BorderBrush="#335C6C7D" BorderThickness="1" CornerRadius="6" Background="#0A0F14" Margin="0,0,0,4" Padding="4">
+                    <Canvas x:Name="LayoutPreview" Width="460" Height="250" Background="#0A0F14"/>
+                </Border>
+                <TextBlock x:Name="LayoutInfoLbl" Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                <TextBlock Text="영역 모드"/>
+                <ComboBox x:Name="LayoutAreaBox" Margin="0,2,0,4"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <TextBlock Text="X" VerticalAlignment="Center"/>
+                    <TextBox x:Name="LayoutXBox" Width="64" Margin="4,0,8,0"/>
+                    <TextBlock Text="Y" VerticalAlignment="Center"/>
+                    <TextBox x:Name="LayoutYBox" Width="64" Margin="4,0,8,0"/>
+                    <TextBlock Text="W" VerticalAlignment="Center"/>
+                    <TextBox x:Name="LayoutWBox" Width="64" Margin="4,0,8,0"/>
+                    <TextBlock Text="H" VerticalAlignment="Center"/>
+                    <TextBox x:Name="LayoutHBox" Width="64" Margin="4,0,0,0"/>
+                </StackPanel>
+                <TextBlock Text="X/Y/W/H는 custom 모드에서만 사용 (모니터 원점 기준 DIP)" Foreground="Gray" FontSize="11" Margin="0,0,0,4"/>
+                <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                    <Button x:Name="LayoutSaveBtn" Content="적용·저장" Width="100"/>
+                    <Button x:Name="LayoutShowBtn" Content="패드 표시" Width="100" Margin="8,0,0,0"/>
+                </StackPanel>
+            </StackPanel>
+            </ScrollViewer>
+        </TabItem>
         <TabItem Header="FloatPad">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="14">

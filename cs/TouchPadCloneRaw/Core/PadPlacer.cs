@@ -17,6 +17,37 @@ public static class PadPlacer
             "half-right" => (vx + vw / 2, vy, vw / 2, vh),
             _ => (double.NaN, double.NaN, double.NaN, double.NaN),
         };
+
+    /// <summary>Single shared placement used by the app and the layout
+    /// preview alike: full/half fill the home monitor, custom clamps the
+    /// stored rect into it, default anchors a WxH window bottom-right.</summary>
+    public static (double l, double t, double w, double h) Place(
+        string mode,
+        (double l, double t, double w, double h) home,
+        (double w, double h) size,
+        (double x, double y, double w, double h) custom)
+    {
+        switch (mode)
+        {
+            case "full": return (home.l, home.t, home.w, home.h);
+            case "half-left": return (home.l, home.t, home.w / 2, home.h);
+            case "half-right":
+                return (home.l + home.w / 2, home.t, home.w / 2, home.h);
+            case "custom" when custom.w > 0 && custom.h > 0:
+            {
+                double w = System.Math.Min(custom.w, home.w);
+                double h = System.Math.Min(custom.h, home.h);
+                double l = System.Math.Max(home.l,
+                    System.Math.Min(home.l + home.w - w, home.l + custom.x));
+                double t = System.Math.Max(home.t,
+                    System.Math.Min(home.t + home.h - h, home.t + custom.y));
+                return (l, t, w, h);
+            }
+            default:
+                return (home.l + home.w - size.w - 40,
+                    home.t + home.h - size.h - 120, size.w, size.h);
+        }
+    }
 }
 
 /// <summary>Home monitor (DIP): the screen containing a window handle.
