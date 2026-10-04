@@ -17,6 +17,7 @@ public partial class SettingsWindow : Window
     private readonly Action _onApply;
     private readonly Dictionary<string, WComboBox> _gestures = new();
     private readonly Action<string, bool>? _showAux;
+    private readonly Action? _showPad;
 
     /// <summary>True while the constructor sets initial control values:
     /// those fire change events that must not Apply (opening settings
@@ -96,11 +97,12 @@ public partial class SettingsWindow : Window
     ];
 
     public SettingsWindow(AppSettings s, List<string> layouts, Action onApply,
-        Action<string, bool>? showAux = null)
+        Action<string, bool>? showAux = null, Action? showPad = null)
     {
         _s = s;
         _onApply = onApply;
         _showAux = showAux;
+        _showPad = showPad;
         InitializeComponent();
         // Own title bar: touch-reachable close + drag to move (mouse/touch).
         TitleCloseBtn.Click += (_, _) => Close();
@@ -679,7 +681,8 @@ public partial class SettingsWindow : Window
         }
         _s.Layout = name;
         _s.Save();
-        FireApply();
+        if (_showPad != null) _showPad();
+        else FireApply();
     }
 
     // ---------------- artist / virtual tabs --------------------------

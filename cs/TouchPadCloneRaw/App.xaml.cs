@@ -166,7 +166,7 @@ public partial class App : WApplication
         catch { return Core.PresetParser.ParseFile(bundled); }
     }
 
-    private void Apply()
+    private void Apply(bool showPad = false)
     {
         if (_pad == null || _strip == null) return;
         _presets = LoadPresets();
@@ -186,7 +186,7 @@ public partial class App : WApplication
         // Per-pad area mode + visibility + opacity (fullscreen forced
         // full + visible). Geometry only on layout change so sliders
         // never yank the window; ShowPad places fresh opens.
-        ApplyPad(false);
+        ApplyPad(false, showPad);
         _strip.ApplyStripLayout();
         _strip.SetLabel(_settings.Layout);
         _strip.KnownLayouts = Core.PresetParser.OrderedNames(_presets);
@@ -223,7 +223,7 @@ public partial class App : WApplication
             SystemParameters.VirtualScreenWidth, SystemParameters.VirtualScreenHeight);
     }
 
-    private void ApplyPad(bool fresh)
+    private void ApplyPad(bool fresh, bool showPad = false)
     {
         if (_pad == null) return;
         var cfg = Cfg(_settings.Layout);
@@ -246,9 +246,13 @@ public partial class App : WApplication
             _pad.Top = home.t + home.h - _pad.Height - 120;
             _placedMode = mode;
         }
+        // Showing is explicit (layout select, preview, ShowPad): a plain
+        // settings save must never pop a hidden pad open. Hiding still
+        // applies immediately.
         bool show = cfg.Visible;
         if (mode == "full") show = true;   // fullscreen always on
-        _pad.Visibility = show ? Visibility.Visible : Visibility.Hidden;
+        if (!show) _pad.Visibility = Visibility.Hidden;
+        else if (showPad) _pad.Visibility = Visibility.Visible;
         _pad.RefreshOpacity();
     }
 
@@ -296,8 +300,8 @@ public partial class App : WApplication
             return;
         }
         _settingsWin = new SettingsWindow(_settings,
-            Core.PresetParser.OrderedNames(_presets), Apply,
-            (name, on) => ShowAux(name, on));
+            Core.PresetParser.OrderedNames(_presets), () => Apply(),
+            (name, on) => ShowAux(name, on), () => ShowPad());
         _settingsWin.Closed += (_, _) => _settingsWin = null;
         _settingsWin.Show();
     }
@@ -591,7 +595,7 @@ public partial class App : WApplication
             p.Visible = true;
             _settings.Layout = name;
             _settings.Save();
-            Apply();
+            Apply(true);
             AdoptMenuCell(name);
         }
         catch { }
