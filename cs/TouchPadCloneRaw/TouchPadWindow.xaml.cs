@@ -218,10 +218,13 @@ public partial class TouchPadWindow : Window
             var end = e.GetTouchPoint(Surface).Position;
             double ms = (DateTime.Now - _xT0).TotalMilliseconds;
             if (ms < 400 && Math.Abs(end.X - _xP.X) + Math.Abs(end.Y - _xP.Y) <= 14)
+            {
+                Log.Write("X tap -> RequestHide");
                 RequestHide?.Invoke();
+            }
             e.Handled = true;
         };
-        XLabel.MouseLeftButtonUp += (_, e) => { RequestHide?.Invoke(); e.Handled = true; };
+        XLabel.MouseLeftButtonUp += (_, e) => { Log.Write("X click -> RequestHide"); RequestHide?.Invoke(); e.Handled = true; };
         ActualLabel.MouseLeftButtonUp += (_, _) => OpenLog();
         _actualTimer = new System.Windows.Threading.DispatcherTimer
         {
@@ -1139,6 +1142,24 @@ public partial class TouchPadWindow : Window
         catch { return false; }
     }
 
+    /// <summary>True when the event source is the X label or inside
+    /// it. Source-walk beats coordinates (no DPI/layout fragility).</summary>
+    private bool FromX(object? src)
+    {
+        try
+        {
+            var d = src as DependencyObject;
+            while (d != null)
+            {
+                if (ReferenceEquals(d, XLabel)) return true;
+                d = (d as FrameworkElement)?.Parent as DependencyObject
+                    ?? System.Windows.Media.VisualTreeHelper.GetParent(d);
+            }
+        }
+        catch { }
+        return false;
+    }
+
     /// <summary>True when the point (Surface coords) is on the X
     /// (chrome drag must not swallow it, like the gear).</summary>
     private bool OnX(Point p)
@@ -1154,6 +1175,7 @@ public partial class TouchPadWindow : Window
 
     private void OnChromeTouchDown(object sender, TouchEventArgs e)
     {
+        if (FromX(e.OriginalSource)) return;
         var pp = e.GetTouchPoint(Surface).Position;
         if (OnGear(pp) || OnX(pp)) return;
         _chromeTouch = true;
@@ -1194,6 +1216,7 @@ public partial class TouchPadWindow : Window
 
     private void OnChromeMouseDown(object sender, MouseButtonEventArgs e)
     {
+        if (FromX(e.OriginalSource)) return;
         if (OnGear(e.GetPosition(Surface))) return;
         if (OnX(e.GetPosition(Surface))) return;
         _chromeMouse = true;

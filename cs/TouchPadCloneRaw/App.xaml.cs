@@ -337,6 +337,7 @@ public partial class App : WApplication
 
     public void HidePad()
     {
+        Core.Log.Write("HidePad");
         _pad?.Hide();
         _pad?.EmergencyRestore();
         _strip?.SetPadActive(false);
