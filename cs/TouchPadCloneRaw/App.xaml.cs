@@ -108,11 +108,10 @@ public partial class App : WApplication
         };
 
         _tray = new TrayManager(
-            () => ShowPad(),
-            () => HidePad(),
+            () => _settings.StripVisible,
+            () => ToggleStrip(),
             OpenSettings,
-            () => { _pad?.EmergencyRestore(); _tray?.Dispose(); Shutdown(); },
-            () => _pad?.EmergencyRestore());
+            () => { _pad?.EmergencyRestore(); _tray?.Dispose(); Shutdown(); });
         DispatcherUnhandledException += (_, e) =>
         {
             try
@@ -350,6 +349,18 @@ public partial class App : WApplication
         catch { }
     }
 
+    /// <summary>Strip show/hide (tray + picker close button).</summary>
+    private void ToggleStrip()
+    {
+        try
+        {
+            _settings.StripVisible = !_settings.StripVisible;
+            _settings.Save();
+            Apply();
+        }
+        catch { }
+    }
+
     public void ShowPad()
     {
         if (_pad == null || _strip == null) return;
@@ -432,7 +443,17 @@ public partial class App : WApplication
             () => OpenSettings(),
             Core.ActionRunner.StripMenu.GetCell(
                 _settings, _menuRow, _menuCol, out var selCell)
-                ? selCell.Value : null);
+                ? selCell.Value : null,
+            () =>
+            {
+                if (_picker != null)
+                {
+                    try { _picker.Close(); } catch (InvalidOperationException) { }
+                    _picker = null;
+                }
+                if (_settings.StripVisible)
+                    ToggleStrip();
+            });
         _picker.Closed += (_, _) => _picker = null;
         // The mode panel always opens docked to the strip, wherever the
         // strip is: below/above it for top/bottom edges, beside it for

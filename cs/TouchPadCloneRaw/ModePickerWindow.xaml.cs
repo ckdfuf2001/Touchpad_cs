@@ -21,15 +21,18 @@ public partial class ModePickerWindow : Window
     private Action<string> _onAux = _ => { };
     private Action<string> _onAction = _ => { };
     private Action _onSettings = () => { };
+    private Action? _onStripClose;
 
     public ModePickerWindow(AppSettings s, string current,
         Action<string> onLayout, Action<string> onAux, Action<string> onAction,
-        Func<string, bool> auxOn, Action onSettings, string? selectedValue = null)
+        Func<string, bool> auxOn, Action onSettings, string? selectedValue = null,
+        Action? onStripClose = null)
     {
         InitializeComponent();
         _ps = s;
         _onLayout = onLayout; _onAux = onAux; _onAction = onAction;
         _onSettings = onSettings;
+        _onStripClose = onStripClose;
         BuildContent(selectedValue);
         DebugLog.Write($"PICKER open current={current}");
         _autoClose = new System.Windows.Threading.DispatcherTimer
@@ -124,13 +127,25 @@ public partial class ModePickerWindow : Window
             }
             if (any) List.Children.Add(panel);
         }
+        // Close + settings share one row. Close hides the STRIP.
+        var brow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
         var close = new Button
         {
             Content = "닫기 ✕", FontSize = 14,
             Margin = new Thickness(2), Padding = new Thickness(6),
         };
-        close.Click += (_, _) => Close();
-        List.Children.Add(close);
+        close.PreviewTouchDown += (_, e) =>
+        {
+            _onStripClose?.Invoke();
+            Close();
+            e.Handled = true;
+        };
+        close.Click += (_, _) => { _onStripClose?.Invoke(); Close(); };
+        brow.Children.Add(close);
         var settings = new Button
         {
             Content = "⚙ 설정 열기", FontSize = 14,
@@ -143,7 +158,8 @@ public partial class ModePickerWindow : Window
             e.Handled = true;
         };
         settings.Click += (_, _) => { onSettings(); Close(); };
-        List.Children.Add(settings);
+        brow.Children.Add(settings);
+        List.Children.Add(brow);
     }
 
     /// <summary>Routes a cell through the shared menu router.</summary>

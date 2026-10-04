@@ -9,8 +9,8 @@ public sealed class TrayManager : IDisposable
 {
     private readonly NotifyIcon _icon;
 
-    public TrayManager(Action show, Action hide, Action settings, Action quit,
-        Action restoreCursor)
+    public TrayManager(Func<bool> stripVisible, Action toggleStrip,
+        Action settings, Action quit)
     {
         _icon = new NotifyIcon
         {
@@ -19,12 +19,17 @@ public sealed class TrayManager : IDisposable
             Visible = true,
             ContextMenuStrip = new ContextMenuStrip(),
         };
-        _icon.ContextMenuStrip.Items.Add("패드 보이기", null, (_, _) => show());
-        _icon.ContextMenuStrip.Items.Add("패드 숨기기", null, (_, _) => hide());
+        var toggle = new ToolStripMenuItem();
+        _icon.ContextMenuStrip.Items.Add(toggle);
         _icon.ContextMenuStrip.Items.Add("설정…", null, (_, _) => settings());
-        _icon.ContextMenuStrip.Items.Add("커서 복구", null, (_, _) => restoreCursor());
         _icon.ContextMenuStrip.Items.Add("종료", null, (_, _) => quit());
-        _icon.DoubleClick += (_, _) => show();
+        _icon.ContextMenuStrip.Opening += (_, _) =>
+        {
+            try { toggle.Text = stripVisible() ? "스트립 숨기기" : "스트립 보이기"; }
+            catch { toggle.Text = "스트립 보이기/숨기기"; }
+        };
+        toggle.Click += (_, _) => toggleStrip();
+        _icon.DoubleClick += (_, _) => toggleStrip();
     }
 
     private static Icon BuildIcon()
