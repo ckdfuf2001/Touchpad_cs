@@ -294,8 +294,8 @@ public partial class SettingsWindow : Window
         try
         {
             SpeedVal.Text = $"{Speed.Value:0.0}x";
-            OpacityVal.Text = $"{OpacityS.Value * 100:0}%";
-            StripOpacityVal.Text = $"{StripOpacityS.Value * 100:0}%";
+            OpacityVal.Text = $"{(1 - OpacityS.Value) * 100:0}%";
+            StripOpacityVal.Text = $"{(1 - StripOpacityS.Value) * 100:0}%";
         }
         catch { }
     }
