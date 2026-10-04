@@ -220,7 +220,18 @@ public partial class SettingsWindow : Window
         StripWBox.LostFocus += (_, _) => CommitStripNumbers();
         StripHBox.LostFocus += (_, _) => CommitStripNumbers();
         CellKindBox.ItemsSource = KindItems;
-        CellFuncBox.ItemsSource = FuncItems.Select(f => f.show).ToList();
+        CellFuncGroupBox.ItemsSource = FuncGroups;
+        CellFuncGroupBox.SelectedItem = "전체";
+        RefilterFuncBox("전체");
+        CellFuncGroupBox.SelectionChanged += (_, _) =>
+        {
+            string g = CellFuncGroupBox.SelectedItem as string ?? "전체";
+            string keep = CellFuncBox.SelectedItem as string ?? "";
+            RefilterFuncBox(g);
+            var items = CellFuncBox.ItemsSource as System.Collections.IList;
+            if (items != null && items.Contains(keep)) CellFuncBox.SelectedItem = keep;
+            else if (items != null && items.Count > 0) CellFuncBox.SelectedItem = items[0];
+        };
         CellKindBox.SelectionChanged += (_, _) => { SyncCellValueInput(); CommitDetail(); };
         CellFuncBox.SelectionChanged += (_, _) => CommitDetail();
         CellLabelBox.LostFocus += (_, _) => CommitDetail();
@@ -452,22 +463,66 @@ public partial class SettingsWindow : Window
 
     private static readonly string[] KindItems = ["기능", "cmd", "프로그램", "단축키"];
 
-    private static readonly (string show, string val)[] FuncItems =
+    private static readonly string[] FuncGroups = ["전체", "레이아웃", "패드", "윈도우"];
+
+    private static readonly (string group, string show, string val)[] FuncItems =
     [
-        ("레이아웃: float", "layout:floatpad"),
-        ("레이아웃: Left", "layout:leftpad"),
-        ("레이아웃: Right", "layout:rightpad"),
-        ("레이아웃: Full Screen", "layout:fullscreen"),
-        ("레이아웃: ArtistPad", "layout:ArtistPad"),
-        ("레이아웃: Virtual Ctrl", "layout:virtualctrls"),
-        ("이전 레이아웃", "prev_layout"),
-        ("다음 레이아웃", "next_layout"),
-        ("모드 패널", "show_modes"),
-        ("설정 열기", "open_settings"),
-        ("전체화면 토글", "toggle_fullscreen"),
-        ("보조패드", "show_assist"),
-        ("패드 켜기/끄기", "toggle_pad"),
+        ("레이아웃", "레이아웃: float", "layout:floatpad"),
+        ("레이아웃", "레이아웃: Left", "layout:leftpad"),
+        ("레이아웃", "레이아웃: Right", "layout:rightpad"),
+        ("레이아웃", "레이아웃: Full Screen", "layout:fullscreen"),
+        ("레이아웃", "레이아웃: ArtistPad", "layout:ArtistPad"),
+        ("레이아웃", "레이아웃: Virtual Ctrl", "layout:virtualctrls"),
+        ("패드", "이전 레이아웃", "prev_layout"),
+        ("패드", "다음 레이아웃", "next_layout"),
+        ("패드", "모드 패널", "show_modes"),
+        ("패드", "설정 열기", "open_settings"),
+        ("패드", "전체화면 토글", "toggle_fullscreen"),
+        ("패드", "보조패드", "show_assist"),
+        ("패드", "패드 켜기/끄기", "toggle_pad"),
+        ("윈도우", "바탕화면 보기", "shortcut:Win+D"),
+        ("윈도우", "작업 보기", "shortcut:Win+Tab"),
+        ("윈도우", "창 닫기", "shortcut:Alt+F4"),
+        ("윈도우", "왼쪽 스냅", "shortcut:Win+Left"),
+        ("윈도우", "오른쪽 스냅", "shortcut:Win+Right"),
+        ("윈도우", "최대화", "shortcut:Win+Up"),
+        ("윈도우", "최소화/복원", "shortcut:Win+Down"),
+        ("윈도우", "이전 데스크톱", "shortcut:Win+Ctrl+Left"),
+        ("윈도우", "다음 데스크톱", "shortcut:Win+Ctrl+Right"),
+        ("윈도우", "새 데스크톱", "shortcut:Win+Ctrl+D"),
+        ("윈도우", "데스크톱 닫기", "shortcut:Win+Ctrl+F4"),
+        ("윈도우", "탐색기", "shortcut:Win+E"),
+        ("윈도우", "설정", "shortcut:Win+I"),
+        ("윈도우", "실행", "shortcut:Win+R"),
+        ("윈도우", "검색", "shortcut:Win+S"),
+        ("윈도우", "작업 관리자", "shortcut:Ctrl+Shift+Esc"),
+        ("윈도우", "알림", "shortcut:Win+N"),
+        ("윈도우", "빠른 설정", "shortcut:Win+A"),
+        ("윈도우", "캡처", "shortcut:Win+Shift+S"),
+        ("윈도우", "이모지", "shortcut:Win+Period"),
+        ("윈도우", "화면 잠금", "shortcut:Win+L"),
+        ("윈도우", "모두 최소화", "shortcut:Win+M"),
+        ("윈도우", "최소화 취소", "shortcut:Win+Shift+M"),
+        ("윈도우", "앱 전환", "shortcut:Alt+Tab"),
+        ("윈도우", "PrintScreen", "shortcut:PRTSCN"),
+        ("윈도우", "메뉴 키", "shortcut:APPS"),
+        ("윈도우", "음소거", "shortcut:VOLMUTE"),
+        ("윈도우", "볼륨 +", "shortcut:VOLUP"),
+        ("윈도우", "볼륨 -", "shortcut:VOLDOWN"),
+        ("윈도우", "재생/일시정지", "shortcut:PLAYPAUSE"),
+        ("윈도우", "다음 트랙", "shortcut:NEXT"),
+        ("윈도우", "이전 트랙", "shortcut:PREV"),
     ];
+
+    private static string FuncGroupOf(string v) =>
+        FuncItems.FirstOrDefault(f => f.val == v).group ?? "전체";
+
+    private void RefilterFuncBox(string group)
+    {
+        CellFuncBox.ItemsSource = FuncItems
+            .Where(f => group == "전체" || f.group == group)
+            .Select(f => f.show).ToList();
+    }
 
     private int _selRow = -1, _selCol = -1;
     private string _selImage = "";
@@ -479,7 +534,7 @@ public partial class SettingsWindow : Window
     private void SyncCellValueInput()
     {
         bool fn = (CellKindBox.SelectedItem as string ?? "기능") == "기능";
-        CellFuncBox.Visibility = fn ? Visibility.Visible : Visibility.Collapsed;
+        CellFuncPanel.Visibility = fn ? Visibility.Visible : Visibility.Collapsed;
         CellValueBox.Visibility = fn ? Visibility.Collapsed : Visibility.Visible;
     }
 
@@ -536,6 +591,10 @@ public partial class SettingsWindow : Window
             SyncCellValueInput();
             CellValueBox.Text = cell.Value;
             CellValueBox.ToolTip = (CellKindBox.SelectedItem as string) == "cmd" ? "명령줄 (백그라운드 실행)" : ((CellKindBox.SelectedItem as string) == "프로그램" ? "exe 경로" : "예: Ctrl+C");
+            // Show the cell's group (a window cell opens under 윈도우).
+            string grp = FuncGroupOf(cell.Value);
+            CellFuncGroupBox.SelectedItem = grp;
+            RefilterFuncBox(grp);
             CellFuncBox.SelectedItem = FuncLabel(cell.Value);
             RebuildStripRows();
         }

@@ -38,7 +38,7 @@ public partial class TouchPadWindow : Window
     private readonly AppSettings _s;
     private double _dpi = 1;
     private double _fakeX, _fakeY;
-    private bool _fakeInit;   // selftest anchor (unused by the engine)
+    private bool _fakeInit;
 
     private sealed class Finger
     {
@@ -543,6 +543,9 @@ public partial class TouchPadWindow : Window
         if (_s.SwapButtons)
             action = action == "left_click" ? "right_click"
                 : action == "right_click" ? "left_click" : action;
+        // Windows built-ins (pad gestures + aux buttons).
+        if (action.StartsWith("win_", StringComparison.Ordinal))
+            return Core.ActionRunner.RunWinAction(action);
         switch (action)
         {
             case "left_click":

@@ -27,6 +27,16 @@ public sealed class GestureMap
     "none", "left_click", "right_click", "middle_click", "double_click",
     "triple_click", "drag", "drag_hold", "wheel_up", "wheel_down",
     "browser_back", "browser_forward", "assist_pad", "toggle_fake",
+    // Windows built-ins (specs in ActionRunner.WinActions).
+    "win_show_desktop", "win_task_view", "win_close_window",
+    "win_snap_left", "win_snap_right", "win_maximize", "win_minimize",
+    "win_desk_prev", "win_desk_next", "win_desk_new", "win_desk_close",
+    "win_explorer", "win_settings", "win_run", "win_search",
+    "win_taskmgr", "win_notify", "win_quickset", "win_screenshot",
+    "win_emoji", "win_lock", "win_min_all", "win_unmin_all",
+    "win_alt_tab", "win_print", "win_menu",
+    "win_vol_mute", "win_vol_up", "win_vol_down",
+    "win_media_play", "win_media_next", "win_media_prev",
     ];
 }
 

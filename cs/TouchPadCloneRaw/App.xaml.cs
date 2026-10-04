@@ -37,14 +37,6 @@ public partial class App : WApplication
         base.OnStartup(e);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
-        if (Environment.GetEnvironmentVariable("TOUCHPAD_SELFTEST") == "1")
-        {
-            // Headless-ish selftest: real window + real handlers, no tray.
-            // Must stay on the UI (STA) thread: async void keeps context.
-            RunSelfTestAsync();
-            return;
-        }
-
         _settings = Core.AppSettings.Load();
         // Auto-start intent survives exe moves/updates: re-register the
         // running path when the flag is on but the key is missing.
@@ -141,19 +133,6 @@ public partial class App : WApplication
     }
 
     private EventHandler? _onDisplayChanged;
-
-    private async void RunSelfTestAsync()
-    {
-        await Task.Delay(500);
-        int rc;
-        try { rc = await SelfTest.Run(); }
-        catch (Exception ex)
-        {
-            Console.WriteLine("SELFTEST CRASH: " + ex);
-            rc = 2;
-        }
-        Environment.Exit(rc);
-    }
 
     private Dictionary<string, Core.Layout> LoadPresets()
     {

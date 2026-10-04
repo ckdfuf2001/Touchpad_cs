@@ -12,24 +12,23 @@ readable (`Pad.ini`, `Preset *.ini`) and we already parse all of them.
 ## Build / test / publish
 
 ```bat
-cd cs\TouchPadCloneV2
+cd cs\TouchPadCloneRaw
 dotnet build -c Release
 
-REM selftest (in-process; drives the touch handlers directly)
-set TOUCHPAD_DEBUG=1 & set TOUCHPAD_SELFTEST=1
-bin\Release\net10.0-windows\TouchPadCloneV2.exe      REM console output, exit code
+REM debug log only (raw log always, v2 detail with the sentinel)
+set TOUCHPAD_DEBUG=1
+bin\Release\net10.0-windows\TouchPadCloneRaw.exe
 
 dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist
-dist\TouchPadCloneV2.exe
+dist\TouchPadCloneRaw.exe
 ```
 
-**Testing policy (user's instruction): run the selftest ONCE. Up to 3 runs only if it
-fails.** The user does the real-device testing; the selftest only proves the handler
-logic, and it **cannot** see the input pipeline (it calls the handlers directly), so it
-has repeatedly passed while the device failed.
+**Testing policy (user's instruction): no selftest - it was deleted (user's order).
+The user does the real-device testing.** Verify with device logs
+(`%TEMP%\touchpad_raw.log`), never with synthetic handler tests.
 
-Remove `TOUCHPAD_SELFTEST` / `TOUCHPAD_DEBUG` before launching the real app, or it runs
-the suite instead.
+Remove `TOUCHPAD_DEBUG` before launching the real app, or it runs
+with debug logging on.
 
 ## Instruments — measure, don't infer
 

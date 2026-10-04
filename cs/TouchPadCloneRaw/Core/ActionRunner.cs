@@ -91,6 +91,54 @@ public static class ActionRunner
         catch { return false; }
     }
 
+    /// <summary>Windows built-in features: pad gesture id -> shortcut
+    /// spec (RunShortcut syntax). Strip window cells use the same specs
+    /// as "shortcut:spec" values (executed by the existing path).</summary>
+    public static readonly (string id, string label, string spec)[] WinActions =
+    [
+        ("win_show_desktop", "바탕화면 보기", "Win+D"),
+        ("win_task_view", "작업 보기", "Win+Tab"),
+        ("win_close_window", "창 닫기", "Alt+F4"),
+        ("win_snap_left", "왼쪽 스냅", "Win+Left"),
+        ("win_snap_right", "오른쪽 스냅", "Win+Right"),
+        ("win_maximize", "최대화", "Win+Up"),
+        ("win_minimize", "최소화/복원", "Win+Down"),
+        ("win_desk_prev", "이전 데스크톱", "Win+Ctrl+Left"),
+        ("win_desk_next", "다음 데스크톱", "Win+Ctrl+Right"),
+        ("win_desk_new", "새 데스크톱", "Win+Ctrl+D"),
+        ("win_desk_close", "데스크톱 닫기", "Win+Ctrl+F4"),
+        ("win_explorer", "탐색기", "Win+E"),
+        ("win_settings", "설정", "Win+I"),
+        ("win_run", "실행", "Win+R"),
+        ("win_search", "검색", "Win+S"),
+        ("win_taskmgr", "작업 관리자", "Ctrl+Shift+Esc"),
+        ("win_notify", "알림", "Win+N"),
+        ("win_quickset", "빠른 설정", "Win+A"),
+        ("win_screenshot", "캡처", "Win+Shift+S"),
+        ("win_emoji", "이모지", "Win+Period"),
+        ("win_lock", "화면 잠금", "Win+L"),
+        ("win_min_all", "모두 최소화", "Win+M"),
+        ("win_unmin_all", "최소화 취소", "Win+Shift+M"),
+        ("win_alt_tab", "앱 전환", "Alt+Tab"),
+        ("win_print", "PrintScreen", "PRTSCN"),
+        ("win_menu", "메뉴 키", "APPS"),
+        ("win_vol_mute", "음소거", "VOLMUTE"),
+        ("win_vol_up", "볼륨 +", "VOLUP"),
+        ("win_vol_down", "볼륨 -", "VOLDOWN"),
+        ("win_media_play", "재생/일시정지", "PLAYPAUSE"),
+        ("win_media_next", "다음 트랙", "NEXT"),
+        ("win_media_prev", "이전 트랙", "PREV"),
+    ];
+
+    /// <summary>Fires a Windows feature by pad gesture id. False when
+    /// the id is not a window action (caller falls through).</summary>
+    public static bool RunWinAction(string id)
+    {
+        foreach (var (i, _, spec) in WinActions)
+            if (i == id) return RunShortcut(spec);
+        return false;
+    }
+
     /// <summary>Strip menu (StripLayout cells) routing shared by the
     /// picker popup and the strip swipe navigation. UI wiring only.</summary>
     public static class StripMenu
@@ -237,6 +285,15 @@ public static class ActionRunner
             "UP" => 0x26,
             "RIGHT" => 0x27,
             "DOWN" => 0x28,
+            "PERIOD" or "." => 0xBE,
+            "VOLMUTE" or "MUTE" => 0xAD,
+            "VOLDOWN" or "VOL_DOWN" => 0xAE,
+            "VOLUP" or "VOL_UP" => 0xAF,
+            "NEXT" or "MEDIANEXT" => 0xB0,
+            "PREV" or "MEDIAPREV" => 0xB1,
+            "PLAYPAUSE" or "PLAY" => 0xB3,
+            "PRTSCN" or "PRINTSCREEN" or "SNAPSHOT" => 0x2C,
+            "APPS" or "MENU" => 0x5D,
             _ => 0,
         };
     }
