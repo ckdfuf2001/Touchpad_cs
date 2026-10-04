@@ -191,6 +191,21 @@ public partial class App : WApplication
         _strip.SetLabel(_settings.Layout);
         _strip.KnownLayouts = Core.PresetParser.OrderedNames(_presets);
         UpdateStripText();
+        // An open popup follows cell edits too (colors/sizes/labels),
+        // not just selection moves.
+        try
+        {
+            if (_picker != null)
+            {
+                string? selVal = null;
+                if (Core.ActionRunner.StripMenu.GetCell(
+                    _settings, _menuRow, _menuCol, out var selc)
+                    && !selc.IsEmpty)
+                    selVal = selc.Value;
+                _picker.Refresh(selVal);
+            }
+        }
+        catch { }
         _artistPad?.Refresh();
         _virtualPad?.Refresh();
         Core.TopmostKeeper.Raise(_strip);
