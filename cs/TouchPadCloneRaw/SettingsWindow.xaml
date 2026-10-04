@@ -79,6 +79,12 @@
                 </UniformGrid>
                 <TextBlock Text="스트립 설정" FontWeight="Bold" Foreground="#35C4FF" Margin="0,12,0,0"/>
                 <StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="배경색" VerticalAlignment="Center"/>
+                    <local:PalettePicker x:Name="StripColorPicker" Margin="4,0,0,0"/>
+                    <TextBlock x:Name="StripOpacityVal" FontWeight="Bold" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                </StackPanel>
+                <Slider x:Name="StripOpacityS" Minimum="0.1" Maximum="1" TickFrequency="0.05" Margin="0,2,0,0"/>
+                <StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
                     <TextBlock Text="모니터" VerticalAlignment="Center"/>
                     <ComboBox x:Name="StripMonBox" Width="150" Margin="4,0,0,0"/>
                 </StackPanel>
@@ -96,12 +102,6 @@
                     <TextBox x:Name="StripHBox" Width="60" Margin="4,0,0,0" VerticalContentAlignment="Center"/>
                     <TextBlock Text="가로 x 세로" FontSize="11" Foreground="Gray" VerticalAlignment="Center" Margin="4,0,0,0"/>
                 </StackPanel>
-                <StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
-                    <TextBlock Text="배경색" VerticalAlignment="Center"/>
-                    <local:PalettePicker x:Name="StripColorPicker" Margin="4,0,0,0"/>
-                    <TextBlock x:Name="StripOpacityVal" FontWeight="Bold" VerticalAlignment="Center" Margin="8,0,0,0"/>
-                </StackPanel>
-                <Slider x:Name="StripOpacityS" Minimum="0.1" Maximum="1" TickFrequency="0.05" Margin="0,2,0,0"/>
                 <TextBlock Text="레이아웃" FontWeight="Bold" Foreground="#35C4FF" Margin="0,12,0,0"/>
                 <StackPanel x:Name="StripRows" Margin="0,4,0,0"/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
