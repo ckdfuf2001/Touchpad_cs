@@ -1108,7 +1108,8 @@ public partial class TouchPadWindow : Window
             if (ShowEvents) ZoneLabel.Text = "zone: " + zone;
             _lastWhat = $"touchdown {zone}";
             var (cx, cy) = Out.Cursor();
-            Log.Write($"TOUCHDOWN id={e.TouchDevice.Id} @{p.X:0},{p.Y:0} zone={zone} n={_fingers.Count} cursor=({cx},{cy})");
+            var tb = e.GetTouchPoint(Surface).Bounds;
+            Log.Write($"TOUCHDOWN id={e.TouchDevice.Id} @{p.X:0},{p.Y:0} zone={zone} n={_fingers.Count} cursor=({cx},{cy}) blob={tb.Width:0.0}x{tb.Height:0.0}");
             e.Handled = true;
         }
         catch { }
