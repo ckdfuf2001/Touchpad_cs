@@ -472,7 +472,7 @@ public partial class ModeStripWindow : Window
             catch { }
             string align = (_s.StripSide ?? "left").ToLowerInvariant();
             int px = _s.StripPx;
-            const double Chrome = 28;   // grip/mode triangles ride outside
+            const double Chrome = 20;   // wedge width alongside the bar
             if (edge == "bottom" || edge == "top")
             {
                 Top = oy + (edge == "bottom" ? ph - Height : 0);
@@ -519,12 +519,12 @@ public partial class ModeStripWindow : Window
         {
             if (_gripWin == null)
             {
-                _gripWin = MakeChromeBtn(TriPoints(close: false), "...", "스트립 이동 (드래그)", true);
+                _gripWin = MakeChromeBtn("스트립 이동 (드래그)", true);
                 _gripWin.PreviewTouchDown += (_, e) =>
                 {
                     var lp = e.GetTouchPoint(_gripWin).Position;
                     // Transparent corners belong to the bar (swipe starts).
-                    if (!TriHit(false, lp)
+                    if (!ChromeHit(true, _gripWin, lp)
                         && BarTouchDown(GripScreen(lp, _gripWin), e.TouchDevice))
                     { e.Handled = true; return; }
                     try { _gripWin.CaptureTouch(e.TouchDevice); } catch { }
@@ -548,7 +548,7 @@ public partial class ModeStripWindow : Window
                 _gripWin.PreviewMouseLeftButtonDown += (_, e) =>
                 {
                     var lp = e.GetPosition(_gripWin);
-                    if (!TriHit(false, lp)
+                    if (!ChromeHit(true, _gripWin, lp)
                         && BarMouseDown(GripScreen(lp, _gripWin)))
                     { e.Handled = true; return; }
                     try { _gripWin.CaptureMouse(); } catch { }
@@ -565,11 +565,11 @@ public partial class ModeStripWindow : Window
             }
             if (_modeWin == null)
             {
-                _modeWin = MakeChromeBtn(TriPoints(close: true), "☰", "모드 변경", false);
+                _modeWin = MakeChromeBtn("모드 변경", false);
                 _modeWin.PreviewTouchDown += (_, e) =>
                 {
                     var lp = e.GetTouchPoint(_modeWin).Position;
-                    if (!TriHit(true, lp)
+                    if (!ChromeHit(false, _modeWin, lp)
                         && BarTouchDown(GripScreen(lp, _modeWin), e.TouchDevice))
                     { e.Handled = true; return; }
                     ModePressed?.Invoke(); e.Handled = true;
@@ -577,7 +577,7 @@ public partial class ModeStripWindow : Window
                 _modeWin.PreviewMouseLeftButtonDown += (_, e) =>
                 {
                     var lp = e.GetPosition(_modeWin);
-                    if (!TriHit(true, lp)
+                    if (!ChromeHit(false, _modeWin, lp)
                         && BarMouseDown(GripScreen(lp, _modeWin)))
                     { e.Handled = true; return; }
                     e.Handled = true;
@@ -588,17 +588,36 @@ public partial class ModeStripWindow : Window
         catch { }
     }
 
+    /// <summary>Wedge points for a W(x)H box, apex pointing INTO the
+    /// bar ([strip]-style brackets): grip ▶/▼, mode ◀/▲.</summary>
+    private static System.Windows.Media.PointCollection WedgePoints(
+        bool grip, bool vertical, double w, double h)
+    {
+        var pts = new System.Windows.Media.PointCollection();
+        if (!vertical)
+        {
+            if (grip) { pts.Add(new Point(0, 0)); pts.Add(new Point(0, h)); pts.Add(new Point(w, h / 2)); }
+            else { pts.Add(new Point(w, 0)); pts.Add(new Point(w, h)); pts.Add(new Point(0, h / 2)); }
+        }
+        else
+        {
+            if (grip) { pts.Add(new Point(0, 0)); pts.Add(new Point(w, 0)); pts.Add(new Point(w / 2, h)); }
+            else { pts.Add(new Point(0, h)); pts.Add(new Point(w, h)); pts.Add(new Point(w / 2, 0)); }
+        }
+        return pts;
+    }
+
     private static double TriSign(System.Windows.Point p,
         System.Windows.Point a, System.Windows.Point b) =>
         (p.X - b.X) * (a.Y - b.Y) - (a.X - b.X) * (p.Y - b.Y);
 
-    /// <summary>True when a 28x28-box point lands on the triangle
-    /// pixels. Touches on the transparent corners belong to the bar.</summary>
-    private static bool TriHit(bool close, System.Windows.Point p)
+    /// <summary>True when a point lands on the wedge pixels (same
+    /// geometry as WedgePoints). Transparent corners belong to the bar.</summary>
+    private static bool TriHit(bool grip, bool vertical,
+        double w, double h, System.Windows.Point p)
     {
-        System.Windows.Point a, b, c;
-        if (close) { a = new(4, 4); b = new(24, 4); c = new(24, 24); }
-        else { a = new(4, 4); b = new(24, 4); c = new(4, 24); }
+        var pts = WedgePoints(grip, vertical, w, h);
+        var a = pts[0]; var b = pts[1]; var c = pts[2];
         double d1 = TriSign(p, a, b), d2 = TriSign(p, b, c), d3 = TriSign(p, c, a);
         bool neg = d1 < 0 || d2 < 0 || d3 < 0;
         bool pos = d1 > 0 || d2 > 0 || d3 > 0;
@@ -643,59 +662,37 @@ public partial class ModeStripWindow : Window
         catch { return false; }
     }
 
-    /// <summary>Corner-grip triangle points (28x28 box): the window's
-    /// outer corner IS the strip corner (top-left based / top-right
-    /// based), diagonal edge like the pad resize triangles.</summary>
-    private static System.Windows.Media.PointCollection TriPoints(bool close)    {
-        var pts = new System.Windows.Media.PointCollection();
-        if (close)
+    /// <summary>Hit test against the window's current wedge geometry
+    /// (set by PositionChrome for the bar orientation).</summary>
+    private bool ChromeHit(bool grip, Window w, System.Windows.Point lp)
+    {
+        try
         {
-            // Right angle at top-right (= strip's top-right corner).
-            pts.Add(new Point(4, 4));
-            pts.Add(new Point(24, 4));
-            pts.Add(new Point(24, 24));
+            string edge = (_s.StripEdge ?? "top").ToLowerInvariant();
+            bool vertical = edge == "left" || edge == "right";
+            return TriHit(grip, vertical, w.Width, w.Height, lp);
         }
-        else
-        {
-            // Right angle at top-left (= strip's top-left corner).
-            pts.Add(new Point(4, 4));
-            pts.Add(new Point(24, 4));
-            pts.Add(new Point(4, 24));
-        }
-        return pts;
+        catch { return true; }
     }
 
-    private System.Windows.Shapes.Polygon? _gripPoly, _closePoly;
+    private System.Windows.Shapes.Polygon? _gripPoly, _modePoly;
 
-    private Window MakeChromeBtn(
-        System.Windows.Media.PointCollection tri, string glyph, string tip, bool grip)
+    private Window MakeChromeBtn(string tip, bool grip)
     {
         var poly = new System.Windows.Shapes.Polygon
         {
-            Points = tri,
             Fill = new System.Windows.Media.SolidColorBrush(
                 System.Windows.Media.Color.FromArgb(0xAA, 0x9A, 0xA6, 0xBD)),
             Stroke = System.Windows.Media.Brushes.Gray,
             StrokeThickness = 1,
         };
-        var label = new System.Windows.Controls.TextBlock
-        {
-            Text = glyph, FontSize = 13, FontWeight = System.Windows.FontWeights.Bold,
-            Foreground = System.Windows.Media.Brushes.White,
-            HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
-            VerticalAlignment = System.Windows.VerticalAlignment.Center,
-            IsHitTestVisible = false,
-        };
-        var grid = new System.Windows.Controls.Grid();
-        grid.Children.Add(poly);
-        grid.Children.Add(label);
         var w = new Window
         {
             WindowStyle = WindowStyle.None, AllowsTransparency = true,
             Background = System.Windows.Media.Brushes.Transparent,
             Topmost = true, ShowInTaskbar = false, ShowActivated = false,
-            ResizeMode = ResizeMode.NoResize, Width = 28, Height = 28,
-            Content = grid, ToolTip = tip, Cursor = System.Windows.Input.Cursors.Hand,
+            ResizeMode = ResizeMode.NoResize, Width = 20, Height = 20,
+            Content = poly, ToolTip = tip, Cursor = System.Windows.Input.Cursors.Hand,
         };
         Core.NoActivate.Apply(w);
         Core.TabletTweaks.DisableSystemGestures(w);
@@ -705,7 +702,7 @@ public partial class ModeStripWindow : Window
         System.Windows.Input.Stylus.SetIsPressAndHoldEnabled(w, false);
         // No own keeper: the strip's keeper raises these along (separate
         // keepers leapfrog = flicker).
-        if (grip) _gripPoly = poly; else _closePoly = poly;
+        if (grip) _gripPoly = poly; else _modePoly = poly;
         ApplyStripStyle();
         w.Show();
         return w;
@@ -733,7 +730,7 @@ public partial class ModeStripWindow : Window
             }
             Surface.Background = brush;
             if (_gripPoly != null) _gripPoly.Fill = brush;
-            if (_closePoly != null) _closePoly.Fill = brush;
+            if (_modePoly != null) _modePoly.Fill = brush;
         }
         catch { }
     }
@@ -745,25 +742,38 @@ public partial class ModeStripWindow : Window
             EnsureChrome();
             if (_gripWin == null || _modeWin == null) return;
             bool show = Visibility == Visibility.Visible;
-            // Triangles ride OUTSIDE the bar (never overlapping): grip
-            // before it, mode after it along the bar axis. The bar keeps
-            // the 28px buffer in ApplyStripLayout, so space exists.
+            // Wedges flush against the bar, bar-height tall (wide bar)
+            // or bar-width wide (tall bar): [grip][bar][mode].
             bool vertical = ((_s.StripEdge ?? "top").ToLowerInvariant() == "left")
                 || ((_s.StripEdge ?? "top").ToLowerInvariant() == "right");
+            if (_gripPoly != null)
+                _gripPoly.Points = WedgePoints(true, vertical,
+                    _gripWin.Width, _gripWin.Height);
+            if (_modePoly != null)
+                _modePoly.Points = WedgePoints(false, vertical,
+                    _modeWin.Width, _modeWin.Height);
             double gx, gy, mx, my;
             if (vertical)
             {
-                gx = Left + (Width - _gripWin.Width) / 2;
-                gy = Top - _gripWin.Height;
-                mx = Left + (Width - _modeWin.Width) / 2;
-                my = Top + Height;
+                _gripWin.Width = Width; _gripWin.Height = 20;
+                _modeWin.Width = Width; _modeWin.Height = 20;
+                if (_gripPoly != null)
+                    _gripPoly.Points = WedgePoints(true, true, Width, 20);
+                if (_modePoly != null)
+                    _modePoly.Points = WedgePoints(false, true, Width, 20);
+                gx = Left; gy = Top - 20;
+                mx = Left; my = Top + Height;
             }
             else
             {
-                gx = Left - _gripWin.Width;
-                gy = Top + (Height - _gripWin.Height) / 2;
-                mx = Left + Width;
-                my = Top + (Height - _modeWin.Height) / 2;
+                _gripWin.Width = 20; _gripWin.Height = Height;
+                _modeWin.Width = 20; _modeWin.Height = Height;
+                if (_gripPoly != null)
+                    _gripPoly.Points = WedgePoints(true, false, 20, Height);
+                if (_modePoly != null)
+                    _modePoly.Points = WedgePoints(false, false, 20, Height);
+                gx = Left - 20; gy = Top;
+                mx = Left + Width; my = Top;
             }
             _gripWin.Left = gx; _gripWin.Top = gy;
             _modeWin.Left = mx; _modeWin.Top = my;
