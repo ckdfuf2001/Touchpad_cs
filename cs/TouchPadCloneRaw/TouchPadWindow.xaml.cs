@@ -1369,8 +1369,8 @@ public partial class TouchPadWindow : Window
                         if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
                     }
                     else if (_twoFired) { _lastWhat = "two-fired"; }
-                    else if (_twoScrolled) { Log.Write("2FINGER scroll-end (silent)"); _lastWhat = "two-scroll-end"; }
                     else if (TwoFingerUp(f, fx, fy, ms)) { }
+                    else if (_twoScrolled) { Log.Write("2FINGER scroll-end (silent)"); _lastWhat = "two-scroll-end"; }
                     else if (CloseTwoTap(f, fx, fy, ms)) { }
                     else if (f.Zone == "wheel")
                     {
@@ -1535,9 +1535,12 @@ public partial class TouchPadWindow : Window
                 {
                     // Last lift wasn't the primary (it cancelled when the
                     // partner was still down): complete the two-contact
-                    // session here instead of going silent. A scrolled
-                    // session ends silent (no tap/swipe after a scroll).
+                    // session here instead of going silent. The session
+                    // decides first (tap/swipe/scroll); a non-session
+                    // scroll (close pair, never spread) ends silent so no
+                    // stray single follows a scroll.
                     if (_twoFired) { _lastWhat = "two-fired"; }
+                    else if (TwoFingerUp(f, _downOrigX, _downOrigY, ms)) { }
                     else if (_twoScrolled) { Log.Write("2FINGER scroll-end (silent)"); _lastWhat = "two-scroll-end"; }
                     else if (TwoFingerUp(f, _downOrigX, _downOrigY, ms)) { }
                     else
