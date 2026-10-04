@@ -58,16 +58,26 @@ public sealed class RecWindow : Window
             Margin = new Thickness(0, 8, 0, 0),
             HorizontalAlignment = HorizontalAlignment.Left,
         };
-        cancel.Click += (_, _) => Finish(null);
+        cancel.Click += (_, _) =>
+        {
+            // Before drawing: silent cancel. After: just close (the
+            // result is already shown and delivered).
+            _done = true;
+            try { Close(); } catch { }
+        };
+        _cancelBtn = cancel;
         root.Children.Add(cancel);
 
         Content = root;
     }
 
+    private Button _cancelBtn = null!;
+
     private void OnDown(object sender, TouchEventArgs e)
     {
         try
         {
+            if (_done) { e.Handled = true; return; }
             var p = e.GetTouchPoint(_canvas).Position;
             _live[e.TouchDevice.Id] = p;
             if (_live.Count > _maxN) _maxN = _live.Count;
@@ -93,6 +103,7 @@ public sealed class RecWindow : Window
     {
         try
         {
+            if (_done) { e.Handled = true; return; }
             if (!_live.ContainsKey(e.TouchDevice.Id)) return;
             var p = e.GetTouchPoint(_canvas).Position;
             _live[e.TouchDevice.Id] = p;
@@ -111,6 +122,7 @@ public sealed class RecWindow : Window
     {
         try
         {
+            if (_done) { e.Handled = true; return; }
             _live.Remove(e.TouchDevice.Id);
             if (_dots.TryGetValue(e.TouchDevice.Id, out var dot))
             {
@@ -118,7 +130,7 @@ public sealed class RecWindow : Window
                 _dots.Remove(e.TouchDevice.Id);
             }
             e.Handled = true;
-            if (_live.Count == 0) Finish(FinishTemplate());
+            if (_live.Count == 0) Complete();
         }
         catch { }
     }
@@ -153,11 +165,33 @@ public sealed class RecWindow : Window
         catch { return null; }
     }
 
-    private void Finish(RecordedGesture? g)
+    /// <summary>Session done: show the result IN this window (recorded
+    /// or the exact reason it failed) and wait for 닫기. No auto-close:
+    /// vanishing windows are why recordings felt invisible.</summary>
+    private void Complete()
     {
         if (_done) return;
         _done = true;
-        try { _onDone?.Invoke(g); } catch { }
-        try { Close(); } catch { }
+        try
+        {
+            double travel = GestureMatch.PathLength(_trail);
+            RecordedGesture? g = null;
+            string msg;
+            if (_maxN < 2)
+                msg = $"실패: 한손가락만 감지됨 (최대 {_maxN}접촉)";
+            else if (_trail.Count < 4 || travel < GestureMatch.MinTravelDip)
+                msg = $"실패: 너무 짧음 (이동 {travel:0}DIP, {_trail.Count}pts - 80DIP 이상 그리세요, 최대 {_maxN}접촉)";
+            else
+            {
+                g = FinishTemplate();
+                msg = g == null
+                    ? "실패: 템플릿 생성 오류"
+                    : $"저장됨: {_maxN}핑거, 이동 {travel:0}DIP, {g.Points.Count / 2}pts - 닫기를 누르세요";
+            }
+            _status.Text = msg;
+            _cancelBtn.Content = "닫기";
+            try { _onDone?.Invoke(g); } catch { }
+        }
+        catch { }
     }
 }
