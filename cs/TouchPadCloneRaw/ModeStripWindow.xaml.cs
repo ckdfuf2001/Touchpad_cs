@@ -472,7 +472,10 @@ public partial class ModeStripWindow : Window
             catch { }
             string align = (_s.StripSide ?? "left").ToLowerInvariant();
             int px = _s.StripPx;
-            const double Chrome = 24;   // corner fans beside the bar
+            // Fan radius = bar short side; the bar always keeps that
+            // buffer on both horizontal sides (fans sit at the top
+            // corners, never overlapping).
+            double Chrome = Math.Max(12, Math.Min(Width, Height));
             if (edge == "bottom" || edge == "top")
             {
                 Top = oy + (edge == "bottom" ? ph - Height : 0);
@@ -524,13 +527,10 @@ public partial class ModeStripWindow : Window
                 _gripWin = MakeChromeBtn("스트립 이동 (드래그)", true);
                 _gripWin.PreviewTouchDown += (_, e) =>
                 {
-                    var lp = e.GetTouchPoint(_gripWin).Position;
-                    // Transparent corners belong to the bar (swipe starts).
-                    if (!ChromeHit(true, _gripWin, lp)
-                        && BarTouchDown(GripScreen(lp, _gripWin), e.TouchDevice))
-                    { e.Handled = true; return; }
+                    // Whole square is the button (no transparent corners).
                     try { _gripWin.CaptureTouch(e.TouchDevice); } catch { }
-                    StartGripDrag(lp, e.TouchDevice, true);
+                    StartGripDrag(e.GetTouchPoint(_gripWin).Position,
+                        e.TouchDevice, true);
                     e.Handled = true;
                 };
                 _gripWin.PreviewTouchMove += (_, e) =>
@@ -549,12 +549,8 @@ public partial class ModeStripWindow : Window
                 // reach the window.
                 _gripWin.PreviewMouseLeftButtonDown += (_, e) =>
                 {
-                    var lp = e.GetPosition(_gripWin);
-                    if (!ChromeHit(true, _gripWin, lp)
-                        && BarMouseDown(GripScreen(lp, _gripWin)))
-                    { e.Handled = true; return; }
                     try { _gripWin.CaptureMouse(); } catch { }
-                    StartGripDrag(lp, null, false);
+                    StartGripDrag(e.GetPosition(_gripWin), null, false);
                     e.Handled = true;
                 };
                 _gripWin.PreviewMouseMove += (_, e) =>
@@ -570,18 +566,10 @@ public partial class ModeStripWindow : Window
                 _modeWin = MakeChromeBtn("모드 변경", false);
                 _modeWin.PreviewTouchDown += (_, e) =>
                 {
-                    var lp = e.GetTouchPoint(_modeWin).Position;
-                    if (!ChromeHit(false, _modeWin, lp)
-                        && BarTouchDown(GripScreen(lp, _modeWin), e.TouchDevice))
-                    { e.Handled = true; return; }
                     ModePressed?.Invoke(); e.Handled = true;
                 };
                 _modeWin.PreviewMouseLeftButtonDown += (_, e) =>
                 {
-                    var lp = e.GetPosition(_modeWin);
-                    if (!ChromeHit(false, _modeWin, lp)
-                        && BarMouseDown(GripScreen(lp, _modeWin)))
-                    { e.Handled = true; return; }
                     e.Handled = true;
                 };
                 _modeWin.PreviewMouseLeftButtonUp += (_, e) => { ModePressed?.Invoke(); e.Handled = true; };
@@ -590,108 +578,28 @@ public partial class ModeStripWindow : Window
         catch { }
     }
 
-    /// <summary>Sector frame: the center IS the bar corner (grip =
-    /// top-left, mode = top-right), radius 24, spanning the outer
-    /// quadrant (down-left / down-right).</summary>
-    private static void SectorFrame(bool grip,
-        out double cx, out double cy, out double r,
-        out double sx, out double sy)
-    {
-        // Quadrant sign bounds (axis-aligned 90 degrees).
-        sx = grip ? -1 : 1; sy = 1;
-        cx = grip ? 24 : 0; cy = 0;
-        r = 24;
-    }
-
-    /// <summary>Quarter-circle fan points: center on the bar corner,
-    /// 90-degree arc outward. 10 samples approximate the arc.</summary>
+    /// <summary>Quarter-circle fan points for an R(x)R box: the
+    /// center IS the bar corner (grip = its top-left, mode = its
+    /// top-right), 90-degree arc bulging down-outward. 10 samples
+    /// approximate the arc.</summary>
     private static System.Windows.Media.PointCollection WedgePoints(
-        bool grip, bool vertical, double w, double h)
+        bool grip, double r)
     {
         var pts = new System.Windows.Media.PointCollection();
         try
         {
-            SectorFrame(grip, out double cx, out double cy,
-                out double r, out double sx, out double sy);
+            double cx = grip ? r : 0, cy = 0;
+            double sx = grip ? -1 : 1;
             pts.Add(new Point(cx, cy));
             for (int i = 0; i <= 10; i++)
             {
                 // Straight-down sweeping sideways (screen Y down).
                 double t = (90.0 * i / 10) * Math.PI / 180.0;
-                double dx = sx * Math.Sin(t);
-                double dy = Math.Cos(t);
-                pts.Add(new Point(cx + dx * r, cy + dy * r));
+                pts.Add(new Point(cx + sx * Math.Sin(t) * r, cy + Math.Cos(t) * r));
             }
         }
         catch { }
         return pts;
-    }
-
-    /// <summary>True when a point lands on the fan (same frame:
-    /// inside radius, x on the outer side, y below the corner).</summary>
-    private static bool TriHit(bool grip, bool vertical,
-        double w, double h, System.Windows.Point p)
-    {
-        try
-        {
-            SectorFrame(grip, out double cx, out double cy,
-                out double r, out double sx, out double _);
-            double vx = p.X - cx, vy = p.Y - cy;
-            if (vx * vx + vy * vy > r * r) return false;
-            return sx < 0 ? vx <= 0 && vy >= 0 : vx >= 0 && vy >= 0;
-        }
-        catch { return true; }
-    }
-
-    /// <summary>Bar touch started on a chrome window's transparent area:
-    /// adopt it as a bar press (bar captures the stream). False when
-    /// the bar is busy (caller keeps its own behavior).</summary>
-    private bool BarTouchDown(System.Windows.Point screen,
-        System.Windows.Input.TouchDevice dev)
-    {
-        if (_touchId != -1) return false;
-        try
-        {
-            _touchId = dev.Id;
-            _start = _last = new System.Windows.Point(
-                screen.X - Left, screen.Y - Top);
-            _t0 = DateTime.Now;
-            _moved = false;
-            Pressed?.Invoke();
-            DebugLog.Write($"STRIPDOWN id={dev.Id} @{_start.X:0},{_start.Y:0} (via chrome)");
-            Surface.CaptureTouch(dev);
-            return true;
-        }
-        catch { return false; }
-    }
-
-    /// <summary>Same for the real mouse.</summary>
-    private bool BarMouseDown(System.Windows.Point screen)
-    {
-        try
-        {
-            if (_touchId != -1 || _mouseDown) return false;
-            _mouseDown = true;
-            _mStart = new System.Windows.Point(screen.X - Left, screen.Y - Top);
-            _mT0 = DateTime.Now;
-            Pressed?.Invoke();
-            Surface.CaptureMouse();
-            return true;
-        }
-        catch { return false; }
-    }
-
-    /// <summary>Hit test against the window's current wedge geometry
-    /// (set by PositionChrome for the bar orientation).</summary>
-    private bool ChromeHit(bool grip, Window w, System.Windows.Point lp)
-    {
-        try
-        {
-            string edge = (_s.StripEdge ?? "top").ToLowerInvariant();
-            bool vertical = edge == "left" || edge == "right";
-            return TriHit(grip, vertical, w.Width, w.Height, lp);
-        }
-        catch { return true; }
     }
 
     private System.Windows.Shapes.Polygon? _gripPoly, _modePoly;
@@ -761,16 +669,16 @@ public partial class ModeStripWindow : Window
             EnsureChrome();
             if (_gripWin == null || _modeWin == null) return;
             bool show = Visibility == Visibility.Visible;
-            // Fixed 24px fans on the bar's top corners (centers ARE the
-            // corners): grip upper-left of the left end, mode upper-right
-            // of the right end. Poly follows the 24 box.
-            _gripWin.Width = 24; _gripWin.Height = 24;
-            _modeWin.Width = 24; _modeWin.Height = 24;
+            // Fan radius = bar short side: R(x)R boxes on the top
+            // corners (centers ARE the corners).
+            double r = Math.Max(12, Math.Min(Width, Height));
+            _gripWin.Width = r; _gripWin.Height = r;
+            _modeWin.Width = r; _modeWin.Height = r;
             if (_gripPoly != null)
-                _gripPoly.Points = WedgePoints(true, false, 24, 24);
+                _gripPoly.Points = WedgePoints(true, r);
             if (_modePoly != null)
-                _modePoly.Points = WedgePoints(false, false, 24, 24);
-            _gripWin.Left = Left - 24; _gripWin.Top = Top;
+                _modePoly.Points = WedgePoints(false, r);
+            _gripWin.Left = Left - r; _gripWin.Top = Top;
             _modeWin.Left = Left + Width; _modeWin.Top = Top;
             var gv = show ? Visibility.Visible : Visibility.Hidden;
             _gripWin.Visibility = gv;
