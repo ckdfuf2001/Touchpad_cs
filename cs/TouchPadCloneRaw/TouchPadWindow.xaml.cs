@@ -1305,6 +1305,61 @@ public partial class TouchPadWindow : Window
     [DllImport("user32.dll")]
     private static extern IntPtr ChildWindowFromPointEx(IntPtr parent, POINT pt, uint flags);
 
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool BringWindowToTop(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetFocus(IntPtr hWnd);
+
+    private const uint GA_ROOT = 2;
+
+    /// <summary>Real-click parity for posted pass-through downs: posted
+    /// messages never activate, so bring the target's top window
+    /// forward and focus the exact control (clicks + keyboard work).
+    /// Skips our own windows. Fully guarded.</summary>
+    private static void ActivateTarget(IntPtr hwnd)
+    {
+        try
+        {
+            if (hwnd == IntPtr.Zero) return;
+            IntPtr root = GetAncestor(hwnd, GA_ROOT);
+            if (root == IntPtr.Zero) root = hwnd;
+            uint tid = 0;
+            GetWindowThreadProcessId(root, out tid);
+            uint ours = GetCurrentThreadId();
+            if (tid == 0 || tid == ours) return;
+            try { BringWindowToTop(root); } catch { }
+            bool attached = false;
+            try
+            {
+                attached = AttachThreadInput(ours, tid, true);
+                try { SetForegroundWindow(root); } catch { }
+                try { SetFocus(hwnd); } catch { }
+            }
+            finally
+            {
+                try { if (attached) AttachThreadInput(ours, tid, false); }
+                catch { }
+            }
+        }
+        catch { }
+    }
+
     private static long _lastDownMs;
     private static int _lastDownX, _lastDownY;
     private static IntPtr _lastDownHwnd;
@@ -1533,6 +1588,10 @@ public partial class TouchPadWindow : Window
             IntPtr target = BelowAt(sx, sy);
             if (target == IntPtr.Zero) return;
             target = DeepestChild(target, sx, sy);
+            // Real-click parity: posted downs don't activate, so bring
+            // the target forward + focus it (else clicks land dead and
+            // keys go nowhere).
+            ActivateTarget(target);
             // Manual double pairing: consecutive downs within the OS
             // time+box on the same window alternate single/double.
             // Windows rule: only the 2nd (even) down becomes DBLCLK,
