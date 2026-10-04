@@ -1056,11 +1056,12 @@ public partial class TouchPadWindow : Window
                 // after a tap chains. Chain 2 (after a double) arms the
                 // third tap; anything else chains a double. A quick
                 // re-press FAR from the last tap (no overlap, other
-                // finger) joins it as rolling two-finger instead.
+                // finger, measured rolls land 150-250 DIP apart) joins
+                // it as rolling two-finger instead.
                 bool inWin = _lastTapTick != 0
                     && now - _lastTapTick <= _s.TapJudgeMs;
                 bool near = inWin && tdist <= SecondTapDip;
-                bool asyncTwo = inWin && !near && tdist <= 250 && _tapChain == 1;
+                bool asyncTwo = inWin && !near && tdist <= 300 && _tapChain == 1;
 
                 if (near && _tapChain >= 2)
                 {
