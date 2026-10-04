@@ -87,6 +87,9 @@ public partial class TouchPadWindow : Window
     private long _twoMoveT0;
     private bool _twoLock;
     private double _twoLockNet;
+    // Swipe already fired mid-stroke (first-stroke): the lift stays
+    // silent, never fires again.
+    private bool _twoSwipeFired;
     // Actually emitted deltas this session: rewound when the lift fires
     // a swipe, so a swipe never leaves scroll behind.
     private int _twoSentX, _twoSentY;
@@ -620,6 +623,7 @@ public partial class TouchPadWindow : Window
         _twoSupX = 0; _twoSupY = 0;
         _twoMoveT0 = 0;
         _twoLock = false; _twoLockNet = 0;
+        _twoSwipeFired = false;
         f.Start = f.Last; f.Moved = false;
         if (other != null) { other.Start = other.Last; other.Moved = false; }
         Log.Write($"2FINGER begin d={dd:0} ({why})");
@@ -726,47 +730,11 @@ public partial class TouchPadWindow : Window
             }
             if (moved)
             {
-                // Locked stroke fires the mapped swipe alone (the couple
-                // of notches before the lock are negligible). Anything
-                // else already scrolled live and lands silent.
-                if (!_twoLock)
-                {
-                    Log.Write($"2FINGER scroll (silent travel={_twoMaxNet:0})");
-                    _lastWhat = "two-scroll";
-                    _lastTapTick = 0;
-                    _tapChain = 0;
-                    return true;
-                }
-                string act = "";
-                double ax = Math.Abs(_twoVX), ay = Math.Abs(_twoVY);
-                if (ax >= ay * 1.5) act = _twoVX > 0 ? "swipe_right" : "swipe_left";
-                else if (ay > ax * 1.5) act = _twoVY > 0 ? "swipe_down" : "swipe_up";
-                var map = ActiveMap();
-                string mapped = act switch
-                {
-                    "swipe_up" => map.SwipeUp,
-                    "swipe_down" => map.SwipeDown,
-                    "swipe_left" => map.SwipeLeft,
-                    "swipe_right" => map.SwipeRight,
-                    _ => "none",
-                };
-                if (mapped == "none" || !DoMapAction(mapped, fx, fy))
-                {
-                    Log.Write($"2FINGER swipe {act} unmapped (silent)");
-                    _lastWhat = "two-swipe-none";
-                }
-                else
-                {
-                    // Rewind the live scroll first: the page ends where it
-                    // started, so a swipe never leaves scroll behind.
-                    if (_twoSentY != 0) Out.Wheel(-_twoSentY);
-                    if (_twoSentX != 0) Out.HWheel(-_twoSentX);
-                    int rewound = _twoSentY + _twoSentX;
-                    _twoSentX = 0; _twoSentY = 0;
-                    Log.Write($"2FINGER swipe {act} -> {mapped} (rewound {rewound})");
-                    Fx().Flash(fx / _dpi, fy / _dpi);
-                    _lastWhat = "two-swipe";
-                }
+                // Strokes fire at lock time (first-stroke, kamektx rule),
+                // never here: after the live scroll the lift only ever
+                // lands silent. The tap path below is untouched.
+                Log.Write($"2FINGER scroll (silent travel={_twoMaxNet:0})");
+                _lastWhat = "two-scroll";
                 _lastTapTick = 0;
                 _tapChain = 0;
                 return true;
@@ -1225,15 +1193,46 @@ public partial class TouchPadWindow : Window
                 // younger than 800ms) stops the live wheel - the lift fires
                 // the swipe alone. Release when it drags on (long pan) or
                 // ages out, so scrolling never dies mid-pan.
-                if (!_twoLock && _twoSeen && _twoMaxNet >= 60)
+                // First-stroke (kamektx rule): a decisive stroke fires the
+                // mapped swipe HERE, mid-motion, never at lift. Unmapped
+                // directions never lock (pure scroll). Fires once.
+                if (!_twoLock && !_twoSwipeFired && _twoSeen && _twoMaxNet >= 60)
                 {
                     double lax = Math.Abs(_twoVX), lay = Math.Abs(_twoVY);
-                    if ((lax >= lay * 1.5 || lay > lax * 1.5) && nowW - _twoMoveT0 <= 800)
+                    string lact = "";
+                    if (lax >= lay * 1.5) lact = _twoVX > 0 ? "swipe_right" : "swipe_left";
+                    else if (lay > lax * 1.5) lact = _twoVY > 0 ? "swipe_down" : "swipe_up";
+                    var lmap = ActiveMap();
+                    string lmapped = lact switch
+                    {
+                        "swipe_up" => lmap.SwipeUp,
+                        "swipe_down" => lmap.SwipeDown,
+                        "swipe_left" => lmap.SwipeLeft,
+                        "swipe_right" => lmap.SwipeRight,
+                        _ => "none",
+                    };
+                    if (lact != "" && lmapped != "none" && nowW - _twoMoveT0 <= 800)
                     {
                         _twoLock = true;
                         _twoLockNet = _twoMaxNet;
-                        Log.Write("2FINGER swipe-lock");
-                        _lastWhat = "two-lock";
+                        var (lux, luy) = Out.Cursor();
+                        if (DoMapAction(lmapped, lux, luy))
+                        {
+                            if (_twoSentY != 0) Out.Wheel(-_twoSentY);
+                            if (_twoSentX != 0) Out.HWheel(-_twoSentX);
+                            int rw = _twoSentY + _twoSentX;
+                            _twoSentX = 0; _twoSentY = 0;
+                            _twoSwipeFired = true;
+                            Log.Write($"2FINGER swipe {lact} -> {lmapped} (first-stroke, rewound {rw})");
+                            Fx().Flash(lux / _dpi, luy / _dpi);
+                            _lastWhat = "two-swipe";
+                            _lastTapTick = 0;
+                            _tapChain = 0;
+                        }
+                        else
+                        {
+                            Log.Write($"2FINGER swipe {lact} unmapped (silent)");
+                        }
                     }
                 }
                 if (_twoLock && (nowW - _twoMoveT0 > 800 || _twoMaxNet - _twoLockNet > 150))
@@ -1317,8 +1316,8 @@ public partial class TouchPadWindow : Window
             }
             if (e.TouchDevice.Id == _primaryId)
             {
-                // Two live contacts: no cursor, no drag - wheel already
-                // streamed above, the lift decides tap vs fling-swipe.
+                // Two live contacts: no cursor, no drag - strokes fire
+                // mid-motion (first-stroke), taps decide at lift.
                 // Single-contact flows never enter here.
                 if (_fingers.Count >= 2)
                 {
