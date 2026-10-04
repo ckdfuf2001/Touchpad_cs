@@ -1369,19 +1369,38 @@ public partial class SettingsWindow : Window
             foreach (var g in _s.RecordedGestures.ToList())
             {
                 var box = new StackPanel { Orientation = Orientation.Vertical, Margin = new Thickness(0, 0, 0, 8) };
-                var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
-                var name = new TextBox { Text = g.Name, Width = 150 };
+                // Row 1 (2 columns): name left, view button right.
+                var head = new Grid { Margin = new Thickness(0, 0, 0, 4) };
+                head.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+                head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                var name = new TextBox
+                {
+                    Text = g.Name,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
                 name.LostFocus += (_, _) =>
                 {
                     g.Name = name.Text;
                     _s.Save();
                 };
+                var peek = new Button
+                {
+                    Content = "보기",
+                    Width = 64,
+                    Margin = new Thickness(8, 0, 0, 0),
+                };
+                Grid.SetColumn(peek, 1);
+                head.Children.Add(name);
+                head.Children.Add(peek);
+                box.Children.Add(head);
+                // Row 2: action mapping + delete.
+                var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
                 var act = new WComboBox
                 {
                     ItemsSource = GestureMap.Actions,
                     SelectedItem = g.Action,
                     Width = 200,
-                    Margin = new Thickness(4, 0, 0, 0),
                 };
                 act.SelectionChanged += (_, _) =>
                 {
@@ -1397,42 +1416,34 @@ public partial class SettingsWindow : Window
                     RebuildFloatGestures();
                     FireApply();
                 };
-                row.Children.Add(name);
                 row.Children.Add(act);
                 row.Children.Add(del);
+                row.Children.Add(new TextBlock
+                {
+                    Text = $"{g.Fingers}핑거",
+                    Margin = new Thickness(8, 0, 0, 0),
+                    VerticalAlignment = VerticalAlignment.Center,
+                    Foreground = new SolidColorBrush(Color.FromArgb(0xFF, 0x9A, 0xA6, 0xBD)),
+                    FontSize = 11,
+                });
                 box.Children.Add(row);
-                // Motion preview hidden behind an N-finger toggle: the
-                // title row stays compact, tap the badge to peek the shape.
+                // Motion preview, toggled by the view button.
                 var prev = new Canvas
                 {
                     Width = 300,
                     Height = 64,
-                    Margin = new Thickness(0, 4, 0, 0),
+                    Margin = new Thickness(0, 0, 0, 0),
                     Background = new SolidColorBrush(Color.FromArgb(0xFF, 0x0A, 0x0F, 0x14)),
                     Visibility = Visibility.Collapsed,
                 };
                 RenderMotion(prev, g);
-                var peek = new Button
-                {
-                    Content = $"▶ {g.Fingers}핑거",
-                    Margin = new Thickness(0, 4, 0, 0),
-                    Padding = new Thickness(8, 1, 8, 1),
-                    HorizontalAlignment = HorizontalAlignment.Left,
-                };
                 peek.Click += (_, _) =>
                 {
                     if (prev.Visibility == Visibility.Visible)
-                    {
                         prev.Visibility = Visibility.Collapsed;
-                        peek.Content = $"▶ {g.Fingers}핑거";
-                    }
                     else
-                    {
                         prev.Visibility = Visibility.Visible;
-                        peek.Content = $"▼ {g.Fingers}핑거";
-                    }
                 };
-                box.Children.Add(peek);
                 box.Children.Add(prev);
                 FloatGestureList.Children.Add(box);
             }
