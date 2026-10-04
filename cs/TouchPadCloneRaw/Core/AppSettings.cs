@@ -285,7 +285,9 @@ public sealed class AppSettings
     /// <summary>Pad colors (General tab). Stored here; pad render wiring
     /// follows (ZonePalette stays the live source until then).</summary>
     public string EffectColor { get; set; } = "#FF7FE0A8";
-    public string ZoneLeft { get; set; } = "#40206040";
+    /// <summary>Pad default text color (chrome + tile labels).
+    /// Debug labels keep their own colors.</summary>
+    public string PadTextColor { get; set; } = "#FFE8ECF4";    public string ZoneLeft { get; set; } = "#40206040";
     public string ZoneRight { get; set; } = "#40402060";
     public string ZoneWheel { get; set; } = "#40602020";
     public string ZonePad { get; set; } = "#30404040";

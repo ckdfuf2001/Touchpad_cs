@@ -28,10 +28,14 @@
             <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="14">
                 <TextBlock Text="Pad 색상" FontWeight="Bold" Foreground="#35C4FF" Margin="0,8,0,0"/>
-                <UniformGrid Columns="6" Margin="0,4,0,0">
+                <UniformGrid Columns="7" Margin="0,4,0,0">
                     <StackPanel Margin="0,0,4,0">
                         <TextBlock Text="이펙트" FontSize="11" Foreground="Gray"/>
                         <local:PalettePicker x:Name="EffectPicker"/>
+                    </StackPanel>
+                    <StackPanel Margin="0,0,4,0">
+                        <TextBlock Text="글자" FontSize="11" Foreground="Gray"/>
+                        <local:PalettePicker x:Name="TextPicker"/>
                     </StackPanel>
                     <StackPanel Margin="0,0,4,0">
                         <TextBlock Text="L" FontSize="11" Foreground="Gray"/>
