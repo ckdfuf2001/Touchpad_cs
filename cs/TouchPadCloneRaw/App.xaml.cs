@@ -253,8 +253,11 @@ public partial class App : WApplication
             _pad.Left = l; _pad.Top = t; _pad.Width = w; _pad.Height = h;
             _placedMode = mode;
         }
-        else if (mode == "default" && fresh)
+        else if (mode == "default" && (fresh || mode != _placedMode))
         {
+            // Default mode re-places on layout switch too (half/full
+            // geometry must not leak into float): sliders keep the
+            // window because their layout equals _placedMode.
             var home = HomeRect();
             _pad.SyncWindowSize();
             _pad.Left = home.l + home.w - _pad.Width - 40;
