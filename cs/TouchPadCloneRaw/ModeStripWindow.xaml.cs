@@ -70,7 +70,7 @@ public partial class ModeStripWindow : Window
     private int _touchId = -1;
     private WPoint _start, _last;
     private DateTime _t0;
-    private bool _moved, _mouseDown;
+    private bool _moved, _mouseDown, _decided;
     private WPoint _mStart;
     private DateTime _mT0;
     private DateTime _lastTapUp = DateTime.MinValue;
@@ -216,6 +216,7 @@ public partial class ModeStripWindow : Window
     private void ResetTouch()
     {
         _touchId = -1;
+        _decided = false;
     }
 
     private void OnTouchDown(object sender, TouchEventArgs e)
@@ -245,6 +246,7 @@ public partial class ModeStripWindow : Window
         _start = _last = sp;
         _t0 = DateTime.Now;
         _moved = false;
+        _decided = false;
         Pressed?.Invoke();
         DebugLog.Write($"STRIPDOWN id={e.TouchDevice.Id} @{_start.X:0},{_start.Y:0}");
         Surface.CaptureTouch(e.TouchDevice);
@@ -257,7 +259,35 @@ public partial class ModeStripWindow : Window
         _last = e.GetTouchPoint(this).Position;
         if (Math.Abs(_last.X - _start.X) + Math.Abs(_last.Y - _start.Y) > 12)
             _moved = true;
+        // Live recognition: fire as soon as travel passes the axis
+        // threshold (proportional to bar length), so short-axis
+        // swipes judge as fast as long-axis ones. UP stays fallback.
+        if (!_decided)
+        {
+            string a = ClassifySwipe(_last.X - _start.X, _last.Y - _start.Y);
+            if (a != "none")
+            {
+                DebugLog.Write($"STRIP live d=({_last.X - _start.X:0},{_last.Y - _start.Y:0}) -> {a}");
+                Gesture?.Invoke(a);
+                _decided = true;
+            }
+        }
         e.Handled = true;
+    }
+
+    /// <summary>Swipe classify shared by move (live) and up (fallback):
+    /// dominant axis (1.5x) past a bar-proportional threshold.
+    /// Under it (tap territory) returns none.</summary>
+    private string ClassifySwipe(double dx, double dy)
+    {
+        var m = _s.StripGestures ?? new StripGestureMap();
+        double ax = Math.Abs(dx), ay = Math.Abs(dy);
+        if (ax + ay <= 8) return "none";
+        double hx = Math.Min(48, Math.Max(16, Width * 0.06));
+        double vx = Math.Min(48, Math.Max(10, Height * 0.06));
+        if (ax >= ay * 1.5 && ax >= hx) return dx > 0 ? m.SwipeRight : m.SwipeLeft;
+        if (ay > ax * 1.5 && ay >= vx) return dy > 0 ? m.SwipeDown : m.SwipeUp;
+        return "none";
     }
 
     private void Decide(double dx, double dy, double ms)
@@ -286,6 +316,15 @@ public partial class ModeStripWindow : Window
     {
         if (e.TouchDevice.Id != _touchId) return;
         _touchId = -1;
+        // Already fired live during the move: just release.
+        if (_decided)
+        {
+            _decided = false;
+            Surface.ReleaseTouchCapture(e.TouchDevice);
+            Core.InputSim.ClearSuppression();
+            e.Handled = true;
+            return;
+        }
         // Classify by the UP position, not the last move: a fast flick often
         // delivers zero TouchMove events, and using stale _last turns every
         // quick swipe into a tap.
@@ -310,6 +349,7 @@ public partial class ModeStripWindow : Window
         if (Core.WpfHit.IsButton(e.OriginalSource)) return; // ✕ owns it
         if (e.StylusDevice != null || _touchId != -1) return;
         _mouseDown = true;
+        _decided = false;
         _mStart = e.GetPosition(this);
         _mT0 = DateTime.Now;
         Pressed?.Invoke();
@@ -320,6 +360,17 @@ public partial class ModeStripWindow : Window
     private void OnMouseMove(object sender, WMouseEventArgs e)
     {
         if (e.StylusDevice != null || !_mouseDown) return;
+        if (!_decided)
+        {
+            var mp = e.GetPosition(this);
+            string a = ClassifySwipe(mp.X - _mStart.X, mp.Y - _mStart.Y);
+            if (a != "none")
+            {
+                DebugLog.Write($"STRIP live m=({mp.X - _mStart.X:0},{mp.Y - _mStart.Y:0}) -> {a}");
+                Gesture?.Invoke(a);
+                _decided = true;
+            }
+        }
         e.Handled = true;
     }
 
@@ -327,6 +378,13 @@ public partial class ModeStripWindow : Window
     {
         if (e.StylusDevice != null || !_mouseDown) return;
         _mouseDown = false;
+        if (_decided)
+        {
+            _decided = false;
+            Surface.ReleaseMouseCapture();
+            e.Handled = true;
+            return;
+        }
         var p = e.GetPosition(this);
         double dx = p.X - _mStart.X, dy = p.Y - _mStart.Y;
         double ms = (DateTime.Now - _mT0).TotalMilliseconds;
