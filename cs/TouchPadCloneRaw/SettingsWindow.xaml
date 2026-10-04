@@ -61,7 +61,7 @@
                     <TextBlock Text="투명도 (80% ~ 0%)" VerticalAlignment="Center"/>
                     <TextBlock x:Name="OpacityVal" Grid.Column="1" FontWeight="Bold" VerticalAlignment="Center"/>
                 </Grid>
-                <Slider x:Name="OpacityS" Minimum="0.2" Maximum="1" TickFrequency="0.05"/>
+                <Slider x:Name="OpacityS" Minimum="0.2" Maximum="1" TickFrequency="0.2" TickPlacement="BottomRight" IsSnapToTickEnabled="True" SmallChange="0.2" LargeChange="0.2"/>
                 <TextBlock Text="동작" FontWeight="Bold" Foreground="#35C4FF" Margin="0,12,0,0"/>
                 <Grid Margin="0,6,0,0">
                     <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
@@ -91,10 +91,10 @@
                 </StackPanel>
                 <Grid Margin="0,6,0,0">
                     <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-                    <TextBlock Text="투명도 (90% ~ 0%)" VerticalAlignment="Center"/>
+                    <TextBlock Text="투명도 (100% ~ 0%)" VerticalAlignment="Center"/>
                     <TextBlock x:Name="StripOpacityVal" Grid.Column="1" FontWeight="Bold" VerticalAlignment="Center"/>
                 </Grid>
-                <Slider x:Name="StripOpacityS" Minimum="0.1" Maximum="1" TickFrequency="0.05" Margin="0,2,0,0"/>
+                <Slider x:Name="StripOpacityS" Minimum="0" Maximum="1" TickFrequency="0.25" TickPlacement="BottomRight" IsSnapToTickEnabled="True" SmallChange="0.25" LargeChange="0.25" Margin="0,2,0,0"/>
                 <StackPanel Orientation="Horizontal" Margin="0,6,0,0" VerticalAlignment="Center">
                     <TextBlock Text="모니터" VerticalAlignment="Center"/>
                     <ComboBox x:Name="StripMonBox" Width="150" Margin="4,0,0,0"/>
