@@ -90,6 +90,9 @@ public partial class TouchPadWindow : Window
     // Actually emitted deltas this session: rewound when the lift fires
     // a swipe, so a swipe never leaves scroll behind.
     private int _twoSentX, _twoSentY;
+    // Suppressed-travel ledgers (mapping-driven mute): bounded like
+    // notches, only marking travel so lifts stay silent, never emitted.
+    private double _twoSupX, _twoSupY;
     // _twoScrolled = a wheel notch went out this session: the lift
     // stays silent (no tap/swipe after a scroll), far pair or not.
     private bool _twoScrolled;
@@ -614,6 +617,7 @@ public partial class TouchPadWindow : Window
         _twoT0 = Environment.TickCount64;
         _twoWheelX = 0; _twoWheelY = 0;
         _twoSentX = 0; _twoSentY = 0;
+        _twoSupX = 0; _twoSupY = 0;
         _twoMoveT0 = 0;
         _twoLock = false; _twoLockNet = 0;
         f.Start = f.Last; f.Moved = false;
@@ -685,6 +689,16 @@ public partial class TouchPadWindow : Window
         _primaryId = -1;
         if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
         return true;
+    }
+
+    /// <summary>Current joint-travel dominant direction, or null when
+    /// weak/diagonal (scroll default).</summary>
+    private string? DominantSwipeAction()
+    {
+        double ax = Math.Abs(_twoVX), ay = Math.Abs(_twoVY);
+        if (ax >= ay * 1.5 && ax >= 20) return _twoVX > 0 ? "swipe_right" : "swipe_left";
+        if (ay > ax * 1.5 && ay >= 20) return _twoVY > 0 ? "swipe_down" : "swipe_up";
+        return null;
     }
 
     /// <summary>Two-contact lift decision. True = consumed (caller skips
@@ -1229,24 +1243,74 @@ public partial class TouchPadWindow : Window
                 }
                 if (!_twoLock)
                 {
-                    _twoWheelX += dx2 / _fingers.Count;
-                    _twoWheelY += dy2 / _fingers.Count;
-                    int notch = _s.ScrollInvert ? -120 : 120;
-                    while (Math.Abs(_twoWheelY) >= WheelDip)
+                    // Mapping-driven output: an axis whose dominant
+                    // direction maps to a real (non-wheel) action does not
+                    // scroll - the lift fires the action alone. Wheel/none
+                    // mappings stream as before (reference parity).
+                    bool wantY = true, wantX = true;
+                    string? dirAct = DominantSwipeAction();
+                    if (dirAct != null)
                     {
-                        int s = Math.Sign(_twoWheelY);
-                        _twoWheelY -= s * WheelDip;
-                        Out.Wheel(s * notch);
-                        _twoSentY += s * notch;
-                        _twoScrolled = true;
+                        var mm = ActiveMap();
+                        string dmapped = dirAct switch
+                        {
+                            "swipe_up" => mm.SwipeUp,
+                            "swipe_down" => mm.SwipeDown,
+                            "swipe_left" => mm.SwipeLeft,
+                            "swipe_right" => mm.SwipeRight,
+                            _ => "none",
+                        };
+                        if (dmapped != "none" && dmapped != "wheel_up" && dmapped != "wheel_down")
+                        {
+                            if (dirAct == "swipe_up" || dirAct == "swipe_down") wantY = false;
+                            else wantX = false;
+                        }
                     }
-                    while (Math.Abs(_twoWheelX) >= WheelDip)
+                    if (wantY)
                     {
-                        int s = Math.Sign(_twoWheelX);
-                        _twoWheelX -= s * WheelDip;
-                        Out.HWheel(s * notch);
-                        _twoSentX += s * notch;
-                        _twoScrolled = true;
+                        _twoWheelY += dy2 / _fingers.Count;
+                        int notch = _s.ScrollInvert ? -120 : 120;
+                        while (Math.Abs(_twoWheelY) >= WheelDip)
+                        {
+                            int s = Math.Sign(_twoWheelY);
+                            _twoWheelY -= s * WheelDip;
+                            Out.Wheel(s * notch);
+                            _twoSentY += s * notch;
+                            _twoScrolled = true;
+                        }
+                    }
+                    else
+                    {
+                        // Suppressed travel still counts as travel (no
+                        // stray single after a stroke): bound like a notch.
+                        _twoSupY += dy2 / _fingers.Count;
+                        if (Math.Abs(_twoSupY) >= WheelDip)
+                        {
+                            _twoSupY -= Math.Sign(_twoSupY) * WheelDip;
+                            _twoScrolled = true;
+                        }
+                    }
+                    if (wantX)
+                    {
+                        _twoWheelX += dx2 / _fingers.Count;
+                        int notch = _s.ScrollInvert ? -120 : 120;
+                        while (Math.Abs(_twoWheelX) >= WheelDip)
+                        {
+                            int s = Math.Sign(_twoWheelX);
+                            _twoWheelX -= s * WheelDip;
+                            Out.HWheel(s * notch);
+                            _twoSentX += s * notch;
+                            _twoScrolled = true;
+                        }
+                    }
+                    else
+                    {
+                        _twoSupX += dx2 / _fingers.Count;
+                        if (Math.Abs(_twoSupX) >= WheelDip)
+                        {
+                            _twoSupX -= Math.Sign(_twoSupX) * WheelDip;
+                            _twoScrolled = true;
+                        }
                     }
                     _lastWhat = "two-scroll";
                 }
