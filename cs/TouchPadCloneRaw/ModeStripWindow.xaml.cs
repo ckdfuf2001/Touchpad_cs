@@ -472,6 +472,7 @@ public partial class ModeStripWindow : Window
             catch { }
             string align = (_s.StripSide ?? "left").ToLowerInvariant();
             int px = _s.StripPx;
+            const double Chrome = 28;   // grip/mode triangles ride outside
             if (edge == "bottom" || edge == "top")
             {
                 Top = oy + (edge == "bottom" ? ph - Height : 0);
@@ -479,7 +480,13 @@ public partial class ModeStripWindow : Window
                 else if (align == "right") Left = ox + pw - Width - px;
                 else if (align == "center") Left = ox + (pw - Width) / 2 + px;
                 else Left = ox + px;
-                Left = Math.Max(ox, Math.Min(ox + pw - Width, Left));
+                // The bar always keeps the chrome buffer: shift, then
+                // shrink, so the triangles never overlap it.
+                Left = Math.Max(ox + Chrome, Math.Min(ox + pw - Width - Chrome, Left));
+                if (Left + Width + Chrome > ox + pw)
+                    Width = Math.Max(40, ox + pw - Chrome - Left);
+                if (Left < ox + Chrome)
+                    Left = ox + Chrome;
             }
             else
             {
@@ -488,7 +495,11 @@ public partial class ModeStripWindow : Window
                 else if (align == "right") Top = oy + ph - Height - px;
                 else if (align == "center") Top = oy + (ph - Height) / 2 + px;
                 else Top = oy + px;
-                Top = Math.Max(oy, Math.Min(oy + ph - Height, Top));
+                Top = Math.Max(oy + Chrome, Math.Min(oy + ph - Height - Chrome, Top));
+                if (Top + Height + Chrome > oy + ph)
+                    Height = Math.Max(12, oy + ph - Chrome - Top);
+                if (Top < oy + Chrome)
+                    Top = oy + Chrome;
             }
             Visibility = _s.StripVisible ? Visibility.Visible : Visibility.Hidden;
             ApplyStripStyle();
@@ -734,15 +745,27 @@ public partial class ModeStripWindow : Window
             EnsureChrome();
             if (_gripWin == null || _modeWin == null) return;
             bool show = Visibility == Visibility.Visible;
-            // Grip overlaps the top-left corner, mode the top-right
-            // corner (outer corners = strip corners). Narrow bars
-            // stack mode below grip. Both always ride with the strip.
-            _gripWin.Left = Left; _gripWin.Top = Top;
-            double mx = Left + Width - _modeWin.Width, my = Top;
-            if (Width < _gripWin.Width + _modeWin.Width + 4)
+            // Triangles ride OUTSIDE the bar (never overlapping): grip
+            // before it, mode after it along the bar axis. The bar keeps
+            // the 28px buffer in ApplyStripLayout, so space exists.
+            bool vertical = ((_s.StripEdge ?? "top").ToLowerInvariant() == "left")
+                || ((_s.StripEdge ?? "top").ToLowerInvariant() == "right");
+            double gx, gy, mx, my;
+            if (vertical)
             {
-                mx = Left; my = Top + _gripWin.Height;
+                gx = Left + (Width - _gripWin.Width) / 2;
+                gy = Top - _gripWin.Height;
+                mx = Left + (Width - _modeWin.Width) / 2;
+                my = Top + Height;
             }
+            else
+            {
+                gx = Left - _gripWin.Width;
+                gy = Top + (Height - _gripWin.Height) / 2;
+                mx = Left + Width;
+                my = Top + (Height - _modeWin.Height) / 2;
+            }
+            _gripWin.Left = gx; _gripWin.Top = gy;
             _modeWin.Left = mx; _modeWin.Top = my;
             var gv = show ? Visibility.Visible : Visibility.Hidden;
             _gripWin.Visibility = gv;
