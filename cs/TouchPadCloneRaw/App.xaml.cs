@@ -87,7 +87,7 @@ public partial class App : WApplication
         _strip.Gesture += HandleStripGesture;
         _strip.Tap += HandleStripTap;
         _strip.ClosePad += () => HidePad();
-        _strip.ModePressed += () => ShowModePicker();
+        _strip.ModePressed += () => FireSelected();
         _strip.Pressed += () => _stripTouchAt = DateTime.Now;
         _strip.LayoutSelected += name => SelectLayout(name);
         _strip.KnownLayouts = Core.PresetParser.OrderedNames(_presets);
@@ -318,6 +318,14 @@ public partial class App : WApplication
     /// Mode changes go through the Mode (☰) button popup; swipes only
     /// move the selection. Pad open/close: the in-strip X button.</summary>
     private void HandleStripTap()
+    {
+        if (_pad == null || _strip == null) return;
+        ShowModePicker();
+    }
+
+    /// <summary>Fires the displayed (selected) cell: layout, aux,
+    /// custom, gesture, cmd... (mode triangle).</summary>
+    private void FireSelected()
     {
         if (_pad == null || _strip == null) return;
         try
