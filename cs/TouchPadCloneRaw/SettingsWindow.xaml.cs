@@ -502,8 +502,7 @@ public partial class SettingsWindow : Window
                     var b = new Button { Content = cell.IsEmpty ? "빈칸" : cell.Label, MinWidth = 64, Margin = new Thickness(0, 0, 4, 0), Padding = new Thickness(6, 2, 6, 2) };
                     try
                     {
-                        if (cell.Color == "") { }
-                        else if (ColorPalettes.IsNone(cell.Color)) b.Background = Brushes.Transparent;
+                        if (string.IsNullOrWhiteSpace(cell.Color) || ColorPalettes.IsNone(cell.Color)) b.Background = Brushes.Transparent;
                         else b.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(cell.Color));
                     }
                     catch { }

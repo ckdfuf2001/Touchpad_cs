@@ -108,7 +108,7 @@ public partial class ModePickerWindow : Window
                 }
                 try
                 {
-                    if (ColorPalettes.IsNone(cell.Color) || string.IsNullOrWhiteSpace(cell.Color))
+                    if (string.IsNullOrWhiteSpace(cell.Color) || ColorPalettes.IsNone(cell.Color))
                         b.Background = Brushes.Transparent;
                     else
                         b.Background = new SolidColorBrush(
