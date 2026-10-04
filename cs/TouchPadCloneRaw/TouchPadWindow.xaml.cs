@@ -92,6 +92,11 @@ public partial class TouchPadWindow : Window
     private bool _wasTwo;
     private long _twoJoinT;
     private long _twoOverlap;
+    // _twoFired = tap already went out at the first lift (partner lift
+    // stays silent). _twoDD = pair separation at join (same-blob
+    // flicker reads ~0 and must never tap).
+    private bool _twoFired;
+    private double _twoDD;
     private int _gearId = -1;
     private int _xId = -1;
     private Point _xP;
@@ -575,6 +580,7 @@ public partial class TouchPadWindow : Window
         if (_twoSeen) return;
         _twoSeen = true;
         _twoOk = true;
+        _twoDD = dd;
         _twoMaxNet = 0;
         _twoVX = 0; _twoVY = 0;
         _twoT0 = Environment.TickCount64;
@@ -593,7 +599,7 @@ public partial class TouchPadWindow : Window
         if (!_wasTwo || _twoSeen || _twoScrolled) return false;
         if (!_s.TapToClick) return false;
         if (f.Zone != "pad" && f.Zone != "left-click" && f.Zone != "right-click") return false;
-        if (!_twoOk || _twoOverlap < 100 || ms > _s.TapJudgeMs || f.Moved) return false;
+        if (!_twoOk || _twoOverlap < 40 || _twoDD < 18 || ms > _s.TapJudgeMs || f.Moved) return false;
         string tact = f.Zone == "right-click" ? "right_click" : ActiveMap().TwoFingerTap;
         if (DoMapAction(tact, fx, fy))
         {
@@ -608,6 +614,46 @@ public partial class TouchPadWindow : Window
         }
         _lastTapTick = 0;
         _tapChain = 0;
+        return true;
+    }
+
+    /// <summary>Fires the two-finger tap at the FIRST lift (never waits
+    /// for the partner): both contacts quick + calm, pair young, no
+    /// travel yet. True = fired (partner lift goes silent).</summary>
+    private bool PairTapFire(Finger f, int fx, int fy, double ms)
+    {
+        if (_twoFired || _twoScrolled) return false;
+        if (!_wasTwo) return false;
+        if (!_s.TapToClick) return false;
+        if (f.Zone != "pad" && f.Zone != "left-click" && f.Zone != "right-click") return false;
+        if (fx == int.MinValue) return false;
+        if (_twoDD < 18) return false;
+        if (f.Moved || ms > _s.TapJudgeMs) return false;
+        if (Environment.TickCount64 - _twoJoinT > _s.TapJudgeMs) return false;
+        if (_twoMaxNet > TapMoveDip) return false;
+        foreach (var kv in _fingers)
+        {
+            if (kv.Value.Moved) return false;
+            if ((DateTime.Now - kv.Value.T0).TotalMilliseconds > _s.TapJudgeMs) return false;
+        }
+        string tact = f.Zone == "right-click" ? "right_click" : ActiveMap().TwoFingerTap;
+        if (DoMapAction(tact, fx, fy))
+        {
+            Log.Write($"2FINGER tap-first -> {tact}");
+            Fx().Flash(fx / _dpi, fy / _dpi);
+            _lastWhat = "twofinger-tap";
+        }
+        else
+        {
+            Log.Write("2FINGER tap-first unmapped (silent)");
+            _lastWhat = "two-tap-none";
+        }
+        _twoFired = true;
+        _lastTapTick = 0;
+        _tapChain = 0;
+        _g = G.None;
+        _primaryId = -1;
+        if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
         return true;
     }
 
@@ -915,6 +961,8 @@ public partial class TouchPadWindow : Window
                 _wasTwo = false;
                 _twoOverlap = 0;
                 _twoJoinT = 0;
+                _twoFired = false;
+                _twoDD = 0;
                 // Stale hold from a lost UP first (safety net).
                 if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
                 _primaryId = e.TouchDevice.Id;
@@ -1041,6 +1089,7 @@ public partial class TouchPadWindow : Window
                     Math.Abs(p.X - other.Start.X) + Math.Abs(p.Y - other.Start.Y);
                 if (dd < 40)
                 {
+                    _twoDD = dd;
                     Log.Write($"2FINGER ghost-near d={dd:0} (scrolls, no tap ledger)");
                 }
                 else
@@ -1283,6 +1332,13 @@ public partial class TouchPadWindow : Window
                 if (_fingers.Count > 0)
                 {
                     if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
+                    // First lift decides now (never waits for the partner):
+                    // a quick calm pair taps immediately.
+                    int pfx, pfy;
+                    if (!f.Moved && _downOrigX != int.MinValue)
+                    { pfx = _downOrigX; pfy = _downOrigY; }
+                    else (pfx, pfy) = EventAt(f, end);
+                    PairTapFire(f, pfx, pfy, ms);
                     // Partner lift during a two-contact session: a slow or
                     // moved lift spoils only the tap (a swipe can complete).
                     // Slow = the PAIR's age (since the join), not this
@@ -1305,6 +1361,7 @@ public partial class TouchPadWindow : Window
                     {
                         if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
                     }
+                    else if (_twoFired) { _lastWhat = "two-fired"; }
                     else if (_twoScrolled) { Log.Write("2FINGER scroll-end (silent)"); _lastWhat = "two-scroll-end"; }
                     else if (TwoFingerUp(f, fx, fy, ms)) { }
                     else if (CloseTwoTap(f, fx, fy, ms)) { }
@@ -1449,13 +1506,23 @@ public partial class TouchPadWindow : Window
                 // Slow = the PAIR's age (since the join).
                 if (_twoSeen && (f.Moved || Environment.TickCount64 - _twoT0 > _s.TapJudgeMs)) _twoOk = false;
                 if (_wasTwo && f.Moved) _twoOk = false;
+                if (_fingers.Count > 0)
+                {
+                    // Partner lifts first: decide now, same as primary.
+                    int qfx, qfy;
+                    if (!f.Moved && _downOrigX != int.MinValue)
+                    { qfx = _downOrigX; qfy = _downOrigY; }
+                    else (qfx, qfy) = EventAt(f, end);
+                    PairTapFire(f, qfx, qfy, ms);
+                }
                 if (_fingers.Count == 0)
                 {
                     // Last lift wasn't the primary (it cancelled when the
                     // partner was still down): complete the two-contact
                     // session here instead of going silent. A scrolled
                     // session ends silent (no tap/swipe after a scroll).
-                    if (_twoScrolled) { Log.Write("2FINGER scroll-end (silent)"); _lastWhat = "two-scroll-end"; }
+                    if (_twoFired) { _lastWhat = "two-fired"; }
+                    else if (_twoScrolled) { Log.Write("2FINGER scroll-end (silent)"); _lastWhat = "two-scroll-end"; }
                     else if (TwoFingerUp(f, _downOrigX, _downOrigY, ms)) { }
                     else
                     {
@@ -1479,6 +1546,7 @@ public partial class TouchPadWindow : Window
                 Log.Write($"SESSION raw fake=({_fakeX:0},{_fakeY:0})");
                 _lastWhat = "session-end";
                 _twoScrolled = false;
+                _twoFired = false;
             }
             _liveTouches--;
             Surface.ReleaseTouchCapture(e.TouchDevice);
