@@ -170,9 +170,11 @@ public static class ActionRunner
         private const int SW_MINIMIZE = 6, SW_MAXIMIZE = 3, SW_RESTORE = 9;
         private const uint WM_CLOSE = 0x10;
 
-        /// <summary>Topmost user window: visible, not cloaked, not a
-        /// click-through overlay, never ours, never the shell
-        /// (taskbar/desktop would swallow minimize). Zero when none.</summary>
+        /// <summary>Topmost user window: a normal app window - visible,
+        /// not cloaked, not a click-through overlay, not topmost-flagged
+        /// (pad overlays like ours live there and would swallow every
+        /// op), never ours, never the shell. Zero when none (empty
+        /// desktop: nothing to minimize, same as Win+Down natively).</summary>
         public static IntPtr TopUserWindow()
         {
             IntPtr found = IntPtr.Zero;
@@ -189,7 +191,9 @@ public static class ActionRunner
                     try
                     {
                         if (DwmGetWindowAttribute(h, 14, out int cl, 4) == 0 && cl != 0) return true;
-                        if (((long)GetWindowLongPtr(h, -20) & 0x20L) != 0) return true;
+                        long ex = (long)GetWindowLongPtr(h, -20);
+                        if ((ex & 0x20L) != 0) return true;
+                        if ((ex & 0x8L) != 0) return true;
                         if (GetClassName(h, sb, sb.Capacity) > 0)
                         {
                             string cls = sb.ToString();
