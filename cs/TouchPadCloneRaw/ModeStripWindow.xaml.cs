@@ -435,9 +435,13 @@ public partial class ModeStripWindow : Window
                 _gripWin = MakeChromeBtn(TriPoints(close: false), "...", "스트립 이동 (드래그)", true);
                 _gripWin.PreviewTouchDown += (_, e) =>
                 {
+                    var lp = e.GetTouchPoint(_gripWin).Position;
+                    // Transparent corners belong to the bar (swipe starts).
+                    if (!TriHit(false, lp)
+                        && BarTouchDown(GripScreen(lp, _gripWin), e.TouchDevice))
+                    { e.Handled = true; return; }
                     try { _gripWin.CaptureTouch(e.TouchDevice); } catch { }
-                    StartGripDrag(e.GetTouchPoint(_gripWin).Position,
-                        e.TouchDevice, true);
+                    StartGripDrag(lp, e.TouchDevice, true);
                     e.Handled = true;
                 };
                 _gripWin.PreviewTouchMove += (_, e) =>
@@ -456,8 +460,12 @@ public partial class ModeStripWindow : Window
                 // reach the window.
                 _gripWin.PreviewMouseLeftButtonDown += (_, e) =>
                 {
+                    var lp = e.GetPosition(_gripWin);
+                    if (!TriHit(false, lp)
+                        && BarMouseDown(GripScreen(lp, _gripWin)))
+                    { e.Handled = true; return; }
                     try { _gripWin.CaptureMouse(); } catch { }
-                    StartGripDrag(e.GetPosition(_gripWin), null, false);
+                    StartGripDrag(lp, null, false);
                     e.Handled = true;
                 };
                 _gripWin.PreviewMouseMove += (_, e) =>
@@ -471,18 +479,87 @@ public partial class ModeStripWindow : Window
             if (_modeWin == null)
             {
                 _modeWin = MakeChromeBtn(TriPoints(close: true), "☰", "모드 변경", false);
-                _modeWin.PreviewTouchDown += (_, e) => { ModePressed?.Invoke(); e.Handled = true; };
+                _modeWin.PreviewTouchDown += (_, e) =>
+                {
+                    var lp = e.GetTouchPoint(_modeWin).Position;
+                    if (!TriHit(true, lp)
+                        && BarTouchDown(GripScreen(lp, _modeWin), e.TouchDevice))
+                    { e.Handled = true; return; }
+                    ModePressed?.Invoke(); e.Handled = true;
+                };
+                _modeWin.PreviewMouseLeftButtonDown += (_, e) =>
+                {
+                    var lp = e.GetPosition(_modeWin);
+                    if (!TriHit(true, lp)
+                        && BarMouseDown(GripScreen(lp, _modeWin)))
+                    { e.Handled = true; return; }
+                    e.Handled = true;
+                };
                 _modeWin.PreviewMouseLeftButtonUp += (_, e) => { ModePressed?.Invoke(); e.Handled = true; };
             }
         }
         catch { }
     }
 
+    private static double TriSign(System.Windows.Point p,
+        System.Windows.Point a, System.Windows.Point b) =>
+        (p.X - b.X) * (a.Y - b.Y) - (a.X - b.X) * (p.Y - b.Y);
+
+    /// <summary>True when a 28x28-box point lands on the triangle
+    /// pixels. Touches on the transparent corners belong to the bar.</summary>
+    private static bool TriHit(bool close, System.Windows.Point p)
+    {
+        System.Windows.Point a, b, c;
+        if (close) { a = new(4, 4); b = new(24, 4); c = new(24, 24); }
+        else { a = new(4, 4); b = new(24, 4); c = new(4, 24); }
+        double d1 = TriSign(p, a, b), d2 = TriSign(p, b, c), d3 = TriSign(p, c, a);
+        bool neg = d1 < 0 || d2 < 0 || d3 < 0;
+        bool pos = d1 > 0 || d2 > 0 || d3 > 0;
+        return !(neg && pos);
+    }
+
+    /// <summary>Bar touch started on a chrome window's transparent area:
+    /// adopt it as a bar press (bar captures the stream). False when
+    /// the bar is busy (caller keeps its own behavior).</summary>
+    private bool BarTouchDown(System.Windows.Point screen,
+        System.Windows.Input.TouchDevice dev)
+    {
+        if (_touchId != -1) return false;
+        try
+        {
+            _touchId = dev.Id;
+            _start = _last = new System.Windows.Point(
+                screen.X - Left, screen.Y - Top);
+            _t0 = DateTime.Now;
+            _moved = false;
+            Pressed?.Invoke();
+            DebugLog.Write($"STRIPDOWN id={dev.Id} @{_start.X:0},{_start.Y:0} (via chrome)");
+            Surface.CaptureTouch(dev);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Same for the real mouse.</summary>
+    private bool BarMouseDown(System.Windows.Point screen)
+    {
+        try
+        {
+            if (_touchId != -1 || _mouseDown) return false;
+            _mouseDown = true;
+            _mStart = new System.Windows.Point(screen.X - Left, screen.Y - Top);
+            _mT0 = DateTime.Now;
+            Pressed?.Invoke();
+            Surface.CaptureMouse();
+            return true;
+        }
+        catch { return false; }
+    }
+
     /// <summary>Corner-grip triangle points (28x28 box): the window's
     /// outer corner IS the strip corner (top-left based / top-right
     /// based), diagonal edge like the pad resize triangles.</summary>
-    private static System.Windows.Media.PointCollection TriPoints(bool close)
-    {
+    private static System.Windows.Media.PointCollection TriPoints(bool close)    {
         var pts = new System.Windows.Media.PointCollection();
         if (close)
         {
