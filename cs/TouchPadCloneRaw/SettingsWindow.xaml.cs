@@ -709,24 +709,22 @@ public partial class SettingsWindow : Window
         PresetSelBox.SelectionChanged += (_, _) => { if (!_loading) SwitchPresetFile(); };
         LayoutAreaBox.SelectionChanged += (_, _) =>
         {
-            if (!_loading && !_layoutSync) { SaveLayoutTab(); DrawPreview(); SyncValueBoxes(); }
+            if (!_loading && !_layoutSync) { SaveLayoutTab(); UpdateZoneDisplay(); DrawPreview(); SyncValueBoxes(); }
         };
-        foreach (var b in new[] { LayoutXBox, LayoutYBox, LayoutWBox, LayoutHBox })
+        foreach (var b in new[] { LayoutXBox, LayoutYBox, LayoutX2Box, LayoutY2Box })
             b.LostFocus += (_, _) =>
             {
                 if (_loading) return;
                 SaveLayoutTab();
+                UpdateZoneDisplay();
                 DrawPreview();
             };
-        LayoutSaveBtn.Click += (_, _) => { SaveLayoutTab(); DrawPreview(); };
+        LayoutSaveBtn.Click += (_, _) => { SaveLayoutTab(); UpdateZoneDisplay(); DrawPreview(); };
         LayoutShowBtn.Click += (_, _) => ShowLayoutPad();
         CustomPickBtn.Click += (_, _) => ArmPick("custom");
-        PadZonePickBtn.Click += (_, _) => ArmPick("pad");
         LayoutPreview.MouseMove += LayoutPreview_MouseMove;
         LayoutPreview.MouseLeftButtonDown += LayoutPreview_MouseDown;
         LayoutPreview.SizeChanged += (_, _) => { try { DrawPreview(); } catch { } };
-        PadZoneDef.Checked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
-        PadZoneDef.Unchecked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
         BuildZoneRows();
         // Display change: redraw the preview on the new topology (the
         // strip repositions the same way). Unhook on close (SystemEvents
@@ -882,8 +880,8 @@ public partial class SettingsWindow : Window
             var (home, r, m0, k0, s0) = PreviewGeom();
             LayoutXBox.Text = TrimNum(r.l);
             LayoutYBox.Text = TrimNum(r.t);
-            LayoutWBox.Text = TrimNum(r.w);
-            LayoutHBox.Text = TrimNum(r.h);
+            LayoutX2Box.Text = TrimNum(r.l + r.w);
+            LayoutY2Box.Text = TrimNum(r.t + r.h);
             SyncValueBoxes();
         }
         catch { }
@@ -910,7 +908,7 @@ public partial class SettingsWindow : Window
         try
         {
             bool custom = (LayoutAreaBox.SelectedItem as string) == "custom";
-            foreach (var b in new[] { LayoutXBox, LayoutYBox, LayoutWBox, LayoutHBox })
+        foreach (var b in new[] { LayoutXBox, LayoutYBox, LayoutX2Box, LayoutY2Box })
                 b.IsEnabled = custom;
             CustomPickBtn.IsEnabled = custom;
         }
@@ -978,7 +976,8 @@ public partial class SettingsWindow : Window
                     return System.Windows.Media.Color.FromArgb(0xFF, 0xAA, 0xAA, 0xAA);
                 }
             }
-            void Box(double x1, double y1, double x2, double y2, System.Windows.Media.Color c)
+            void Box(double x1, double y1, double x2, double y2,
+                System.Windows.Media.Color c, string label)
             {
                 var rr = new System.Windows.Shapes.Rectangle
                 {
@@ -991,33 +990,43 @@ public partial class SettingsWindow : Window
                 LayoutPreview.Children.Add(rr);
                 Canvas.SetLeft(rr, _pvOx + x1 * _pvSc);
                 Canvas.SetTop(rr, _pvOy + y1 * _pvSc);
+                if (!string.IsNullOrEmpty(label)
+                    && (x2 - x1) * _pvSc > 44 && (y2 - y1) * _pvSc > 12)
+                {
+                    var lt = new TextBlock
+                    {
+                        Text = label,
+                        FontSize = 9,
+                        Foreground = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0xE8, 0xEC, 0xF4)),
+                    };
+                    LayoutPreview.Children.Add(lt);
+                    Canvas.SetLeft(lt, _pvOx + x1 * _pvSc + 2);
+                    Canvas.SetTop(lt, _pvOy + y1 * _pvSc + 1);
+                }
             }
             _s.Pads.TryGetValue(key, out var p);
-            if (p != null)
+            if (p != null && p.ZoneRects != null)
             {
-                if (p.ZonePadCustom && p.ZonePadW > 0 && p.ZonePadH > 0)
+                foreach (var kv in p.ZoneRects)
                 {
-                    var c = ZC(_s.EffZonePad(sec));
-                    Box(r.l + p.ZonePadX, r.t + p.ZonePadY,
-                        r.l + p.ZonePadX + p.ZonePadW, r.t + p.ZonePadY + p.ZonePadH,
-                        System.Windows.Media.Color.FromArgb(0xFF, c.R, c.G, c.B));
-                }
-                if (p.ZoneRects != null)
-                {
-                    foreach (var kv in p.ZoneRects)
+                    var a = kv.Value;
+                    if (a == null || a.Length < 4 || a[2] <= 0 || a[3] <= 0) continue;
+                    System.Windows.Media.Color c = kv.Key switch
                     {
-                        var a = kv.Value;
-                        if (a == null || a.Length < 4 || a[2] <= 0 || a[3] <= 0) continue;
-                        System.Windows.Media.Color c = kv.Key switch
+                        "left-click" => ZC(_s.EffZoneLeft(sec)),
+                        "right-click" => ZC(_s.EffZoneRight(sec)),
+                        "wheel" => ZC(_s.EffZoneWheel(sec)),
+                        _ => ZC(_s.EffZonePad(sec)),
+                    };
+                    Box(r.l + a[0], r.t + a[1], r.l + a[0] + a[2], r.t + a[1] + a[3],
+                        System.Windows.Media.Color.FromArgb(0xFF, c.R, c.G, c.B),
+                        kv.Key switch
                         {
-                            "left-click" => ZC(_s.EffZoneLeft(sec)),
-                            "right-click" => ZC(_s.EffZoneRight(sec)),
-                            "wheel" => ZC(_s.EffZoneWheel(sec)),
-                            _ => ZC(_s.EffZonePad(sec)),
-                        };
-                        Box(r.l + a[0], r.t + a[1], r.l + a[0] + a[2], r.t + a[1] + a[3],
-                            System.Windows.Media.Color.FromArgb(0xFF, c.R, c.G, c.B));
-                    }
+                            "left-click" => "Left",
+                            "right-click" => "Right",
+                            "wheel" => "wheel",
+                            _ => kv.Key,
+                        });
                 }
             }
         }
@@ -1035,32 +1044,16 @@ public partial class SettingsWindow : Window
             p.AreaMode = LayoutAreaBox.SelectedItem as string ?? "default";
             if (!double.TryParse(LayoutXBox.Text, out double x)
                 || !double.TryParse(LayoutYBox.Text, out double y)
-                || !double.TryParse(LayoutWBox.Text, out double w)
-                || !double.TryParse(LayoutHBox.Text, out double h))
+                || !double.TryParse(LayoutX2Box.Text, out double x2)
+                || !double.TryParse(LayoutY2Box.Text, out double y2)
+                || x2 <= x || y2 <= y)
             {
                 LoadLayoutEditors();
                 return;
             }
-            p.RectX = x; p.RectY = y; p.RectW = w; p.RectH = h;
-            // Pad zone override (screen DIP boxes -> window DIP).
-            var (zh, zr, zm, zk, zs) = PreviewGeom();
-            if (PadZoneDef.IsChecked != true)
-            {
-                if (!double.TryParse(ZoneXBox.Text, out double zx1)
-                    || !double.TryParse(ZoneYBox.Text, out double zy1)
-                    || !double.TryParse(ZoneX2Box.Text, out double zx2)
-                    || !double.TryParse(ZoneY2Box.Text, out double zy2)
-                    || zx2 <= zx1 || zy2 <= zy1)
-                {
-                    UpdateZoneDisplay();
-                    return;
-                }
-                p.ZonePadCustom = true;
-                p.ZonePadX = zx1 - zr.l; p.ZonePadY = zy1 - zr.t;
-                p.ZonePadW = zx2 - zx1; p.ZonePadH = zy2 - zy1;
-            }
-            else p.ZonePadCustom = false;
+            p.RectX = x; p.RectY = y; p.RectW = x2 - x; p.RectH = y2 - y;
             // Per-zone overrides (screen DIP boxes -> window DIP).
+            var (zh, zr, zm, zk, zs) = PreviewGeom();
             foreach (var (zkey, zrow) in _zoneRows)
             {
                 if (zrow.Def.IsChecked != true)
@@ -1155,7 +1148,7 @@ public partial class SettingsWindow : Window
         catch { }
     }
 
-    /// <summary>Pin target: "custom" (window rect), "pad" or a zone key
+    /// <summary>Pin target: "custom" (window rect) or a zone key
     /// (left-click/right-click/wheel). Null = disarmed. One area per
     /// arming: start dot, end dot + rect, then the target boxes are
     /// filled and it disarms.</summary>
@@ -1211,32 +1204,44 @@ public partial class SettingsWindow : Window
             {
                 LayoutXBox.Text = TrimNum(a.x1);
                 LayoutYBox.Text = TrimNum(a.y1);
-                LayoutWBox.Text = TrimNum(a.x2 - a.x1);
-                LayoutHBox.Text = TrimNum(a.y2 - a.y1);
+                LayoutX2Box.Text = TrimNum(a.x2);
+                LayoutY2Box.Text = TrimNum(a.y2);
                 LayoutAreaBox.SelectedItem = "custom";
                 LayoutHoverLbl.Text =
                     $"고정됨: [{TrimNum(a.x1)},{TrimNum(a.y1)}] ~ [{TrimNum(a.x2)},{TrimNum(a.y2)}] → custom 입력됨";
             }
-            else if (t == "pad")
+            else
             {
-                ZoneXBox.Text = TrimNum(a.x1);
-                ZoneYBox.Text = TrimNum(a.y1);
-                ZoneX2Box.Text = TrimNum(a.x2);
-                ZoneY2Box.Text = TrimNum(a.y2);
-                PadZoneDef.IsChecked = false;
-                LayoutHoverLbl.Text =
-                    $"고정됨: [{TrimNum(a.x1)},{TrimNum(a.y1)}] ~ [{TrimNum(a.x2)},{TrimNum(a.y2)}] → pad 입력됨";
+                // Zone pick outside the frame: grow the window (custom)
+                // to contain it, so the zone never sticks out.
+                var (eh, er, em, ek, es) = PreviewGeom();
+                bool grown = a.x1 < er.l - 0.5 || a.y1 < er.t - 0.5
+                    || a.x2 > er.l + er.w + 0.5 || a.y2 > er.t + er.h + 0.5;
+                if (grown)
+                {
+                    LayoutXBox.Text = TrimNum(Math.Min(er.l, a.x1));
+                    LayoutYBox.Text = TrimNum(Math.Min(er.t, a.y1));
+                    LayoutX2Box.Text = TrimNum(Math.Max(er.l + er.w, a.x2));
+                    LayoutY2Box.Text = TrimNum(Math.Max(er.t + er.h, a.y2));
+                    LayoutAreaBox.SelectedItem = "custom";
+                }
+                string tail = grown ? " + 프레임 확장" : "";
+                if (_zoneRows.TryGetValue(t, out var zrow))
+                {
+                    zrow.X.Text = TrimNum(a.x1);
+                    zrow.Y.Text = TrimNum(a.y1);
+                    zrow.X2.Text = TrimNum(a.x2);
+                    zrow.Y2.Text = TrimNum(a.y2);
+                    zrow.Def.IsChecked = false;
+                    LayoutHoverLbl.Text =
+                        $"고정됨: [{TrimNum(a.x1)},{TrimNum(a.y1)}] ~ [{TrimNum(a.x2)},{TrimNum(a.y2)}] → {t} 입력됨{tail}";
+                }
             }
-            else if (_zoneRows.TryGetValue(t, out var zrow))
-            {
-                zrow.X.Text = TrimNum(a.x1);
-                zrow.Y.Text = TrimNum(a.y1);
-                zrow.X2.Text = TrimNum(a.x2);
-                zrow.Y2.Text = TrimNum(a.y2);
-                zrow.Def.IsChecked = false;
-                LayoutHoverLbl.Text =
-                    $"고정됨: [{TrimNum(a.x1)},{TrimNum(a.y1)}] ~ [{TrimNum(a.x2)},{TrimNum(a.y2)}] → {t} 입력됨";
-            }
+            SaveLayoutTab();
+            UpdateZoneDisplay();
+            _pinArea = null;
+            _pinStart = null;
+            DrawPreview();
         }
         catch { }
     }
@@ -1294,37 +1299,15 @@ public partial class SettingsWindow : Window
         catch { }
     }
 
-    /// <summary>Pad custom zone editors (the zone text readout was
-    /// removed per request; hover + preview carry the numbers).</summary>
+    /// <summary>Per-zone override editors (stored window-DIP ->
+    /// screen DIP display). The pad touch area is always the whole
+    /// frame below the title - no separate pad row.</summary>
     private void UpdateZoneDisplay()
     {
         try
         {
             var (home, r, mode, key, sec) = PreviewGeom();
-            // Pad custom editors: stored window-DIP -> screen DIP display.
             _s.Pads.TryGetValue(key, out var p);
-            bool custom = p != null && p.ZonePadCustom && p.ZonePadW > 0 && p.ZonePadH > 0;
-            PadZoneDef.IsChecked = !custom;
-            if (custom && p != null)
-            {
-                ZoneXBox.Text = TrimNum(r.l + p.ZonePadX);
-                ZoneYBox.Text = TrimNum(r.t + p.ZonePadY);
-                ZoneX2Box.Text = TrimNum(r.l + p.ZonePadX + p.ZonePadW);
-                ZoneY2Box.Text = TrimNum(r.t + p.ZonePadY + p.ZonePadH);
-            }
-            else
-            {
-                var (zx1, zy1, zx2, zy2) = PadZoneScreen();
-                ZoneXBox.Text = TrimNum(zx1);
-                ZoneYBox.Text = TrimNum(zy1);
-                ZoneX2Box.Text = TrimNum(zx2);
-                ZoneY2Box.Text = TrimNum(zy2);
-            }
-            bool en = PadZoneDef.IsChecked != true;
-            ZoneXBox.IsEnabled = en;
-            ZoneYBox.IsEnabled = en;
-            ZoneX2Box.IsEnabled = en;
-            ZoneY2Box.IsEnabled = en;
             // Per-zone rows: stored override -> screen DIP, else the ini
             // tile rect (empty when the section has none).
             foreach (var (zkey, zrow) in _zoneRows)
@@ -1390,24 +1373,6 @@ public partial class SettingsWindow : Window
         return (0, 0, 0, 0);
     }
 
-    /// <summary>Default pad zone in screen DIP: the ini pad tile, or the
-    /// full tile area when the section has none.</summary>
-    private (double x1, double y1, double x2, double y2) PadZoneScreen()
-    {
-        var (home, r, mode, key, sec) = PreviewGeom();
-        if (_presets.TryGetValue(sec, out var lay) && lay != null)
-        {
-            foreach (var t in lay.Tiles)
-            {
-                if ((t.Kind ?? "").ToLowerInvariant() != "pad") continue;
-                double tx = r.l + r.w * t.X / 100.0;
-                double ty = r.t + 30 + (r.h - 30) * t.Y / 100.0;
-                return (tx, ty, tx + r.w * t.W / 100.0, ty + (r.h - 30) * t.H / 100.0);
-            }
-        }
-        return (r.l, r.t + 30, r.l + r.w, r.t + r.h);
-    }
-
     private void DrawPreview()
     {
         try
@@ -1465,19 +1430,10 @@ public partial class SettingsWindow : Window
                 }
             }
             catch { }
-            // Pad rect (same math as the app: PadPlacer.Place).
+            // Pad rect (same math as the app: PadPlacer.Place). Drawn
+            // AFTER the tiles below so its border stays on top (the
+            // full-area pad tile used to bury it).
             var (home, r, mode, key, sec) = PreviewGeom();
-            var pr = new System.Windows.Shapes.Rectangle
-            {
-                Width = Math.Max(2, r.w * sc),
-                Height = Math.Max(2, r.h * sc),
-                Fill = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x18, 0x7F, 0xE0, 0xA8)),
-                Stroke = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0x7F, 0xE0, 0xA8)),
-                StrokeThickness = 1.5,
-            };
-            LayoutPreview.Children.Add(pr);
-            System.Windows.Controls.Canvas.SetLeft(pr, X(r.l));
-            System.Windows.Controls.Canvas.SetTop(pr, Y(r.t));
             // Tiles in the pad's REAL zone colors (no more stacked cyan):
             // structural tiles stay quiet, interactive tiles pop.
             System.Windows.Media.Color ZC(string hex)
@@ -1492,9 +1448,26 @@ public partial class SettingsWindow : Window
                 }
             }
             int shown = 0;
+            // Roles with a ZoneRects override: their default tiles are
+            // hidden (same as the pad) so only the custom outline shows.
+            var overPrev = new System.Collections.Generic.HashSet<string>();
+            if (_s.Pads.TryGetValue(key, out var ppz) && ppz?.ZoneRects != null)
+            {
+                foreach (var kv in ppz.ZoneRects)
+                {
+                    var b = kv.Value;
+                    if (b == null || b.Length < 4 || b[2] <= 0 || b[3] <= 0) continue;
+                    if (kv.Key == "left-click") overPrev.Add("left");
+                    else if (kv.Key == "right-click") overPrev.Add("right");
+                    else if (kv.Key == "wheel") overPrev.Add("wheel");
+                }
+            }
             if (_presets.TryGetValue(sec, out var lay) && lay != null)
             {
-                foreach (var t in lay.Tiles)
+                // Backgrounds first (same as the pad): the full-area pad
+                // tile used to cover the buttons and the pad frame border.
+                foreach (var t in lay.Tiles.OrderBy(t =>
+                    (t.Kind ?? "").ToLowerInvariant() is "pad" or "padframe" or "blank" ? 0 : 1))
                 {
                     // Same mapping as the pad (TileArea + 30px title offset).
                     double tx = r.l + r.w * t.X / 100.0;
@@ -1514,6 +1487,13 @@ public partial class SettingsWindow : Window
                             ? _s.EffZoneRight(sec) : _s.EffZoneLeft(sec);
                     else if (kind.Contains("pad")) zhex = _s.EffZonePad(sec);
                     else zhex = _s.EffBackground(sec);
+                    string skipRole = "";
+                    if (kind.Contains("wheel")) skipRole = "wheel";
+                    else if (kind.Contains("lbtn")) skipRole = "left";
+                    else if (kind.Contains("rbtn")) skipRole = "right";
+                    else if (kind.Contains("click") || kind.Contains("drag"))
+                        skipRole = (t.ClickButton ?? "").ToLowerInvariant() == "right" ? "right" : "left";
+                    if (skipRole.Length > 0 && overPrev.Contains(skipRole)) continue;
                     var zc = ZC(zhex);
                     var tr = new System.Windows.Shapes.Rectangle
                     {
@@ -1529,7 +1509,7 @@ public partial class SettingsWindow : Window
                     LayoutPreview.Children.Add(tr);
                     System.Windows.Controls.Canvas.SetLeft(tr, X(tx));
                     System.Windows.Controls.Canvas.SetTop(tr, Y(ty));
-                    if (tw * sc > 44 && th * sc > 12 && !string.IsNullOrWhiteSpace(t.Kind))
+                    if (tw * sc > 44 && th * sc > 12 && !structural && !string.IsNullOrWhiteSpace(t.Kind))
                     {
                         var tl = new TextBlock
                         {
@@ -1544,6 +1524,17 @@ public partial class SettingsWindow : Window
                     shown++;
                 }
             }
+            var pr = new System.Windows.Shapes.Rectangle
+            {
+                Width = Math.Max(2, r.w * sc),
+                Height = Math.Max(2, r.h * sc),
+                Fill = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x18, 0x7F, 0xE0, 0xA8)),
+                Stroke = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0x7F, 0xE0, 0xA8)),
+                StrokeThickness = 1.5,
+            };
+            LayoutPreview.Children.Add(pr);
+            System.Windows.Controls.Canvas.SetLeft(pr, X(r.l));
+            System.Windows.Controls.Canvas.SetTop(pr, Y(r.t));
             double cov = home.w * home.h > 0 ? r.w * r.h / (home.w * home.h) * 100.0 : 0;
             string homeName = (homeDev ?? "").Replace(@"\\.\", "");
             if (string.IsNullOrEmpty(homeName)) homeName = "주 모니터";
@@ -2049,25 +2040,32 @@ public partial class SettingsWindow : Window
         catch { return false; }
     }
 
-    /// <summary>Registers/unregisters this exe for Windows logon.</summary>
+    /// <summary>Registers/unregisters this exe for Windows logon.
+    /// Failures are logged (they used to vanish into catch-all).</summary>
     internal static void SetAutoStart(bool on)
     {
         try
         {
             using var k = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(RunSubkey, true);
-            if (k == null) return;
+            if (k == null) { Core.Log.Write("AUTOSTART registry open failed"); return; }
             if (on)
             {
                 string exe = System.Diagnostics.Process.GetCurrentProcess()
                     .MainModule?.FileName ?? "";
-                if (exe.Length > 0) k.SetValue(AutoStartKey, "\"" + exe + "\"");
+                if (exe.Length > 0)
+                {
+                    k.SetValue(AutoStartKey, "\"" + exe + "\"");
+                    Core.Log.Write($"AUTOSTART on ({exe})");
+                }
+                else Core.Log.Write("AUTOSTART exe path empty");
             }
             else
             {
                 try { k.DeleteValue(AutoStartKey, false); } catch { }
+                Core.Log.Write("AUTOSTART off");
             }
         }
-        catch { }
+        catch (Exception ex) { Core.Log.Write($"AUTOSTART error: {ex.Message}"); }
     }
 
     private static void SelBox(WComboBox c, string v)

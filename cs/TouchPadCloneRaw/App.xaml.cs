@@ -229,7 +229,28 @@ public partial class App : WApplication
         string mode = cfg.AreaMode;
         if (_settings.Layout.StartsWith("fullscreen",
             StringComparison.OrdinalIgnoreCase)) mode = "full";
-        if (mode != "default" && (fresh || mode != _placedMode || !_pad.IsVisible))
+        if (mode == "custom" && cfg.RectW > 0 && cfg.RectH > 0)
+        {
+            // Custom rect is the user's explicit numbers: re-place when
+            // they differ (RectFor above knows only full/half, so custom
+            // used to never move the window at all).
+            var home = HomeRect();
+            var r = Core.PadPlacer.Place("custom", home,
+                (_settings.PadWidth, _settings.PadHeight),
+                (cfg.RectX, cfg.RectY, cfg.RectW, cfg.RectH));
+            bool same = Math.Abs(_pad.Left - r.l) <= 0.5
+                && Math.Abs(_pad.Top - r.t) <= 0.5
+                && Math.Abs(_pad.Width - r.w) <= 0.5
+                && Math.Abs(_pad.Height - r.h) <= 0.5;
+            if (fresh || mode != _placedMode || !_pad.IsVisible || !same)
+            {
+                _pad.Left = r.l; _pad.Top = r.t;
+                _pad.Width = r.w; _pad.Height = r.h;
+            }
+            _placedMode = mode;
+        }
+        else if (mode != "default" && mode != "custom"
+            && (fresh || mode != _placedMode || !_pad.IsVisible))
         {
             var home = HomeRect();
             var (l, t, w, h) = Core.PadPlacer.RectFor(mode,

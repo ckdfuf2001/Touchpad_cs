@@ -455,8 +455,10 @@ public partial class TouchPadWindow : Window
         catch { return Core.ZonePalette.For(role); }
     }
 
-    /// <summary>Draws the active preset tiles (visual linkage).</summary>
-    private void RenderTiles()
+    /// <summary>Draws the active preset tiles (visual linkage).
+    /// Roles with a ZoneRects override are skipped here - the override
+    /// rect is drawn instead (what you see is what you hit).</summary>
+    private void RenderTiles(System.Collections.Generic.HashSet<string>? skipRoles = null)
     {        try
         {
             if (_layout == null) return;
@@ -482,6 +484,7 @@ public partial class TouchPadWindow : Window
                     || t.Kind.Length == 1) role = "key";
                 else if (t.Kind is "pad" or "padframe") role = "pad";
                 else role = "other";
+                if (skipRoles != null && skipRoles.Contains(role)) continue;
                 color = RoleColor(role);
                 var r = new Rectangle
                 {
@@ -817,9 +820,11 @@ public partial class TouchPadWindow : Window
             if (_heldLeft) { Out.Up("left"); _heldLeft = false; }
             if (fx == int.MinValue) return false;
             // Recorded gestures (user templates) win over tap/swipe/scroll
-            // when they match - except after a lock-fired swipe (one action
-            // per session). Short trails fall through to tap below.
-            if (!_twoSwipeFired)
+            // when they match - except after a lock-fired swipe or inside
+            // a lock-declared swipe (one action per session: the lock
+            // already claimed this stroke, it fires below). Short trails
+            // fall through to tap below.
+            if (!_twoSwipeFired && !_twoLock)
             {
                 var rec = Core.GestureMatch.MatchTwo(_s.RecordedGestures, _twoTrail, _twoMaxN);
                 if (rec != null)
@@ -966,18 +971,31 @@ public partial class TouchPadWindow : Window
     {
         var (w, h) = TileArea();
         if (w <= 0 || h <= 0) return "pad";
+        // Roles with an override hide their ini tiles too (rendering
+        // already does): otherwise the old button area keeps firing.
+        var over = new System.Collections.Generic.HashSet<string>();
+        var zr = _s.Pad(_layoutName).ZoneRects;
+        if (zr != null)
+        {
+            foreach (var kv in zr)
+            {
+                var b = kv.Value;
+                if (b == null || b.Length < 4 || b[2] <= 0 || b[3] <= 0) continue;
+                if (kv.Key == "left-click" || kv.Key == "right-click" || kv.Key == "wheel")
+                    over.Add(kv.Key);
+            }
+        }
         // Explicit per-zone rects win over tiles (resizer corner exempt
         // so the grips stay usable).
         if (!IsResizerCorner(p.X, p.Y - ChromeH, w, h))
         {
-            var zr = _s.Pad(_layoutName).ZoneRects;
             if (zr != null)
             {
                 foreach (var kv in zr)
                 {
                     var a = kv.Value;
                     if (a == null || a.Length < 4 || a[2] <= 0 || a[3] <= 0) continue;
-                    if (kv.Key != "left-click" && kv.Key != "right-click" && kv.Key != "wheel")
+                    if (!over.Contains(kv.Key))
                         continue;
                     if (p.X >= a[0] && p.Y >= a[1] && p.X <= a[0] + a[2] && p.Y <= a[1] + a[3])
                         return kv.Key;
@@ -994,19 +1012,26 @@ public partial class TouchPadWindow : Window
             {
                 if (fx < t.X / 100 || fx > (t.X + t.W) / 100
                     || fy < t.Y / 100 || fy > (t.Y + t.H) / 100) continue;
+                string? roleHit = null;
                 if (t.Kind == "lbtn"
                     || (t.Kind == "click"
                         && t.ClickButton.Equals("left", StringComparison.OrdinalIgnoreCase)))
-                    hit = "left-click";
+                    roleHit = "left-click";
                 else if (t.Kind == "rbtn"
                     || (t.Kind == "click"
                         && t.ClickButton.Equals("right", StringComparison.OrdinalIgnoreCase)))
-                    hit = "right-click";
-                else if (t.Kind == "wheel") hit = "wheel";
+                    roleHit = "right-click";
+                else if (t.Kind == "wheel") roleHit = "wheel";
+                if (roleHit != null && !over.Contains(roleHit)) hit = roleHit;
             }
             if (hit != null) return hit;
         }
-        return ZoneAt(p.X, p.Y - ChromeH, w, h);
+        // Overridden roles must not resurrect via the proportional
+        // fallback either (the old button band would keep firing).
+        string fb = ZoneAt(p.X, p.Y - ChromeH, w, h);
+        if ((fb == "left-click" || fb == "right-click" || fb == "wheel") && over.Contains(fb))
+            return "pad";
+        return fb;
     }
 
     private void RenderZones()
@@ -1046,7 +1071,27 @@ public partial class TouchPadWindow : Window
                 // (no double-draw). Hit-testing stays cs2 zones. Missing
                 // button/wheel tiles get their zone guides drawn, so
                 // layouts like fullscreen still show left/right/wheel.
-                RenderTiles();
+                // ZoneRects overrides replace their role's tiles (and
+                // guides) so the visual matches ZoneOf hit-testing.
+                var zr = _s.Pad(_layoutName).ZoneRects;
+                var over = new System.Collections.Generic.HashSet<string>();
+                if (zr != null)
+                {
+                    foreach (var kv in zr)
+                    {
+                        var b = kv.Value;
+                        if (b == null || b.Length < 4 || b[2] <= 0 || b[3] <= 0) continue;
+                        string? orole = kv.Key switch
+                        {
+                            "left-click" => "left",
+                            "right-click" => "right",
+                            "wheel" => "wheel",
+                            _ => null,
+                        };
+                        if (orole != null) over.Add(orole);
+                    }
+                }
+                RenderTiles(over);
                 bool hasL = false, hasR = false, hasW = false;
                 foreach (var t in _layout.Tiles)
                 {
@@ -1056,9 +1101,54 @@ public partial class TouchPadWindow : Window
                         || (t.Kind == "click" && t.ClickButton == "right")) hasR = true;
                     else if (t.Kind == "wheel") hasW = true;
                 }
-                if (!hasL) rect(0, 0, w * 0.5, h * 0.2, RoleColor("left"), "left");
-                if (!hasR) rect(w * 0.5, 0, w * 0.5, h * 0.2, RoleColor("right"), "right");
-                if (!hasW) rect(w * 0.8, h * 0.2, w * 0.2, h * 0.8, RoleColor("wheel"), "wheel");
+                if (!hasL && !over.Contains("left")) rect(0, 0, w * 0.5, h * 0.2, RoleColor("left"), "left");
+                if (!hasR && !over.Contains("right")) rect(w * 0.5, 0, w * 0.5, h * 0.2, RoleColor("right"), "right");
+                if (!hasW && !over.Contains("wheel")) rect(w * 0.8, h * 0.2, w * 0.2, h * 0.8, RoleColor("wheel"), "wheel");
+                // Override rects are window-space (title included), unlike
+                // the tile-space rect() above - no ChromeH shift.
+                if (zr != null)
+                {
+                    foreach (var kv in zr)
+                    {
+                        var b = kv.Value;
+                        if (b == null || b.Length < 4 || b[2] <= 0 || b[3] <= 0) continue;
+                        string? orole = kv.Key switch
+                        {
+                            "left-click" => "left",
+                            "right-click" => "right",
+                            "wheel" => "wheel",
+                            _ => null,
+                        };
+                        if (orole == null) continue;
+                        string olabel = orole switch
+                        {
+                            "left" => "L",
+                            "right" => "R",
+                            _ => "Wheel",
+                        };
+                        var or_ = new Rectangle
+                        {
+                            Width = System.Math.Max(0, b[2]),
+                            Height = System.Math.Max(0, b[3]),
+                            Fill = new SolidColorBrush(
+                                (Color)ColorConverter.ConvertFromString(RoleColor(orole))),
+                            Stroke = Brushes.Gray,
+                            StrokeThickness = 1,
+                        };
+                        Canvas.SetLeft(or_, b[0]);
+                        Canvas.SetTop(or_, b[1]);
+                        Zones.Children.Add(or_);
+                        var ot = new TextBlock
+                        {
+                            Text = olabel,
+                            Foreground = Brushes.WhiteSmoke,
+                            FontSize = 10,
+                        };
+                        Canvas.SetLeft(ot, b[0] + 4);
+                        Canvas.SetTop(ot, b[1] + 4);
+                        Zones.Children.Add(ot);
+                    }
+                }
             }
             else
             {
@@ -1142,22 +1232,8 @@ public partial class TouchPadWindow : Window
                 e.Handled = true;
                 return;
             }
-            // Custom active touch area (per-pad): outside it touches do
-            // nothing. Placed after resizer so the corners stay usable.
-            {
-                var pc = _s.Pad(_layoutName);
-                if (pc.ZonePadCustom && pc.ZonePadW > 0 && pc.ZonePadH > 0)
-                {
-                    if (p.X < pc.ZonePadX || p.Y < pc.ZonePadY
-                        || p.X > pc.ZonePadX + pc.ZonePadW
-                        || p.Y > pc.ZonePadY + pc.ZonePadH)
-                    {
-                        Log.Write($"TOUCHDOWN outside custom pad area (ignored) @{p.X:0},{p.Y:0}");
-                        e.Handled = true;
-                        return;
-                    }
-                }
-            }
+            // Pad touch area is always the whole frame below the title
+            // (no separate pad zone): every touch inside the window acts.
             var f = new Finger
             {
                 Start = p,
@@ -1904,8 +1980,29 @@ public partial class TouchPadWindow : Window
             _s.Save();
         }
         catch { }
+        WriteBackRect();
         UpdateChrome();
         RenderZones();
+    }
+
+    /// <summary>Manual move/resize writes the window rect back into the
+    /// active layout's custom rect (custom mode only): otherwise the
+    /// settings numbers - and the ZoneRects stored against them - point
+    /// at the old spot while the window sits elsewhere.</summary>
+    private void WriteBackRect()
+    {
+        try
+        {
+            string key = Core.AppSettings.PadFamilyKey(_layoutName);
+            if (!_s.Pads.TryGetValue(key, out var pc))
+            { pc = new Core.PadConfig(); _s.Pads[key] = pc; }
+            if ((pc.AreaMode ?? "default") != "custom") return;
+            if (Width <= 0 || Height <= 0) return;
+            pc.RectX = Left; pc.RectY = Top;
+            pc.RectW = Width; pc.RectH = Height;
+            _s.Save();
+        }
+        catch { }
     }
 
     /// <summary>True when the point (Surface coords) is on the gear.</summary>
@@ -1991,6 +2088,7 @@ public partial class TouchPadWindow : Window
         _chromeTouch = false;
         _chromeTouchId = -1;
         TitleBar.ReleaseTouchCapture(e.TouchDevice);
+        WriteBackRect();
         UpdateChrome();
         e.Handled = true;
     }
@@ -2033,6 +2131,7 @@ public partial class TouchPadWindow : Window
         if (!_chromeMouse) return;
         _chromeMouse = false;
         TitleBar.ReleaseMouseCapture();
+        WriteBackRect();
         UpdateChrome();
         e.Handled = true;
     }
