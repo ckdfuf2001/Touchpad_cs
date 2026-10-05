@@ -128,15 +128,38 @@ public static class ActionRunner
         ("win_media_play", "재생/일시정지", "PLAYPAUSE"),
         ("win_media_next", "다음 트랙", "NEXT"),
         ("win_media_prev", "이전 트랙", "PREV"),
+        ("win_clipboard", "클립보드 기록", "Win+V"),
+        ("win_project", "프로젝션", "Win+P"),
+        ("win_cast", "무선 디스플레이", "Win+K"),
+        ("win_quicklink", "빠른 연결 메뉴", "Win+X"),
+        ("win_osk", "화면 키보드", "osk.exe"),
+        ("win_access", "접근성 설정", "Win+U"),
+        ("win_magnifier", "돋보기", "Win+Plus"),
     ];
 
     /// <summary>Fires a Windows feature by pad gesture id. False when
     /// the id is not a window action (caller falls through).</summary>
     public static bool RunWinAction(string id)
     {
+        // osk ignores injected keys (measured: Win+Ctrl+O via keybd_event
+        // does nothing) - launch it directly instead.
+        if (id == "win_osk") return LaunchOsk();
         foreach (var (i, _, spec) in WinActions)
             if (i == id) return RunShortcut(spec);
         return false;
+    }
+
+    /// <summary>On-screen keyboard, launched directly (see RunWinAction).</summary>
+    public static bool LaunchOsk()
+    {
+        try
+        {
+            string exe = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.System), "osk.exe");
+            Process.Start(new ProcessStartInfo { FileName = exe, UseShellExecute = true });
+            return true;
+        }
+        catch { return false; }
     }
 
     /// <summary>Window ops that must not depend on focus (Win+Down on
@@ -260,13 +283,10 @@ public static class ActionRunner
         public static void Fire(StripCell cell, AppSettings s,
             Action<string> onLayout, Action<string> onAux, Action<string> onAction)
         {
-            if (cell.Kind != "기능")
-            {
-                if (cell.Kind == "cmd") onAction("cmd:" + cell.Value);
-                else if (cell.Kind == "프로그램") onAction("program:" + cell.Value);
-                else onAction("shortcut:" + cell.Value);   // 단축키
-                return;
-            }
+            if (cell.Kind == "cmd") { onAction("cmd:" + cell.Value); return; }
+            if (cell.Kind == "프로그램") { onAction("program:" + cell.Value); return; }
+            if (cell.Kind == "단축키") { onAction("shortcut:" + cell.Value); return; }
+            // Func kinds (Pad/윈도우/legacy 기능): value carries its prefix.
             if (cell.Value.StartsWith("layout:", StringComparison.OrdinalIgnoreCase))
             {
                 string name = cell.Value.Substring(7);
@@ -398,6 +418,10 @@ public static class ActionRunner
             "RIGHT" => 0x27,
             "DOWN" => 0x28,
             "PERIOD" or "." => 0xBE,
+            "PLUS" or "+" => 0xBB,
+            "MINUS" or "-" => 0xBD,
+            "COMMA" or "," => 0xBC,
+            "SLASH" or "/" => 0xBF,
             "VOLMUTE" or "MUTE" => 0xAD,
             "VOLDOWN" or "VOL_DOWN" => 0xAE,
             "VOLUP" or "VOL_UP" => 0xAF,

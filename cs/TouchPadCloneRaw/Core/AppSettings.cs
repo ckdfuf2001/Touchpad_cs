@@ -61,6 +61,8 @@ public sealed class GestureMap
     "win_alt_tab", "win_print", "win_menu",
     "win_vol_mute", "win_vol_up", "win_vol_down",
     "win_media_play", "win_media_next", "win_media_prev",
+    "win_clipboard", "win_project", "win_cast", "win_quicklink",
+    "win_osk", "win_access", "win_magnifier",
     ];
 }
 
@@ -104,9 +106,9 @@ public sealed class PadColorSet
 }
 
 /// <summary>One strip menu cell. Serialized as
-/// Label|Kind|Value|Color|Image|TextColor|W|H. Kind: 기능 | cmd |
-/// 프로그램 | 단축키. Empty color = none, empty text color = gray,
-/// 0 size = auto-fit to text.</summary>
+/// Label|Kind|Value|Color|Image|TextColor|W|H. Kind: Pad 기능 | 윈도우 기능
+/// (legacy 기능) | cmd | 프로그램 | 단축키. Empty color = none, empty text
+/// color = gray, 0 size = auto-fit to text.</summary>
 public sealed class StripCell
 {
     public string Label = "";
@@ -581,7 +583,7 @@ public sealed class AppSettings
                             var c = StripCell.Parse(r.Cells[i]);
                             if (c.IsEmpty) continue;
                             bool ch = false;
-                            if (c.Kind == "layout") { c.Kind = "기능"; c.Value = "layout:" + c.Value; ch = true; }
+                            if (c.Kind == "layout") { c.Kind = "Pad 기능"; c.Value = "layout:" + c.Value; ch = true; }
                             else if (c.Kind == "hotkey") { c.Kind = "단축키"; ch = true; }
                             else if (c.Kind == "run") { c.Kind = "프로그램"; ch = true; }
                             if (ch) r.Cells[i] = c.ToString();

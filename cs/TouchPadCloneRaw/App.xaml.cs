@@ -517,44 +517,24 @@ public partial class App : WApplication
                     ToggleStrip();
             });
         _picker.Closed += (_, _) => _picker = null;
-        // The mode panel always opens docked to the strip, wherever the
-        // strip is: below/above it for top/bottom edges, beside it for
-        // left/right edges. Measured before showing (no jump).
+        // The mode menu is centered on the home monitor (same content
+        // as the top-edge view). Measured before showing (no jump).
         try
         {
             if (_strip != null)
             {
                 _picker.UpdateLayout();
-                string edge = (_settings.StripEdge ?? "top").ToLowerInvariant();
                 var home = _strip.MonitorRect();
                 double ox = home.l, oy = home.t, pw = home.w, ph = home.h;
                 // Auto width: measured, fallback 380.
                 double pwid = _picker.ActualWidth > 0 ? _picker.ActualWidth : 380;
                 double phei = _picker.ActualHeight > 0 ? _picker.ActualHeight : 300;
-                double cx = _strip.Left + (_strip.Width - pwid) / 2;
-                cx = Math.Max(ox, Math.Min(ox + pw - pwid, cx));
-                double cy = _strip.Top + (_strip.Height - phei) / 2;
-                cy = Math.Max(oy, Math.Min(oy + ph - phei, cy));
-                if (edge == "left")
-                {
-                    _picker.Left = Math.Min(_strip.Left + _strip.Width + 4, ox + pw - pwid);
-                    _picker.Top = cy;
-                }
-                else if (edge == "right")
-                {
-                    _picker.Left = Math.Max(ox, _strip.Left - pwid - 4);
-                    _picker.Top = cy;
-                }
-                else if (edge == "bottom")
-                {
-                    _picker.Left = cx;
-                    _picker.Top = Math.Max(oy, _strip.Top - phei - 4);
-                }
-                else
-                {
-                    _picker.Left = cx;
-                    _picker.Top = _strip.Top + _strip.Height + 4;
-                }
+                _picker.Left = ox + (pw - pwid) / 2;
+                _picker.Top = oy + (ph - phei) / 2;
+                if (_picker.Left < ox) _picker.Left = ox;
+                if (_picker.Top < oy) _picker.Top = oy;
+                if (_picker.Left + pwid > ox + pw) _picker.Left = ox + pw - pwid;
+                if (_picker.Top + phei > oy + ph) _picker.Top = oy + ph - phei;
             }
         }
         catch { }
@@ -616,6 +596,8 @@ public partial class App : WApplication
             Core.ActionRunner.RunShortcut(action.Substring(9));
         else if (action.StartsWith("window:", StringComparison.OrdinalIgnoreCase))
             Core.ActionRunner.WindowOps.RunOp(action);
+        else if (action.StartsWith("win_", StringComparison.OrdinalIgnoreCase))
+            Core.ActionRunner.RunWinAction(action);
         else if (_settings.Actions != null
             && _settings.Actions.TryGetValue(action, out var def))
             Core.ActionRunner.Run(def);

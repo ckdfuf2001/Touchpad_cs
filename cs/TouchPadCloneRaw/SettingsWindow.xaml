@@ -113,12 +113,12 @@
                     <TextBox x:Name="StripHBox" Width="60" Margin="4,0,0,0" VerticalContentAlignment="Center"/>
                     <TextBlock Text="가로 x 세로" FontSize="11" Foreground="Gray" VerticalAlignment="Center" Margin="4,0,0,0"/>
                 </StackPanel>
-                <TextBlock Text="레이아웃" FontWeight="Bold" Foreground="#35C4FF" Margin="0,12,0,0"/>
+                <TextBlock Text="스트립 메뉴" FontWeight="Bold" Foreground="#35C4FF" Margin="0,12,0,0"/>
                 <StackPanel x:Name="StripRows" Margin="0,4,0,0"/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                     <Button x:Name="StripRowAdd2" Content="행 추가" Width="80"/>
                 </StackPanel>
-                <TextBlock Text="레이아웃 상세 (위 메뉴 클릭 시)" FontWeight="Bold" Foreground="#35C4FF" Margin="0,8,0,0"/>
+                <TextBlock Text="스트립 메뉴 상세 (위 메뉴 클릭 시)" FontWeight="Bold" Foreground="#35C4FF" Margin="0,8,0,0"/>
                 <Border BorderBrush="#335C6C7D" BorderThickness="1" CornerRadius="6" Background="#155C6C7D" Margin="0,4,0,0" Padding="6">
                 <Grid Margin="0,4,0,0">
                     <Grid.ColumnDefinitions>
@@ -135,11 +135,15 @@
                     <TextBlock Text="구분" Grid.Row="3" VerticalAlignment="Center"/>
                     <ComboBox x:Name="CellKindBox" Grid.Row="3" Grid.Column="1" Margin="4,2,0,2"/>
                     <TextBlock Text="값 입력" Grid.Row="4" VerticalAlignment="Center"/>
-                    <TextBox x:Name="CellValueBox" Grid.Row="4" Grid.Column="1" Margin="4,2,0,2"/>
-                    <StackPanel x:Name="CellFuncPanel" Grid.Row="4" Grid.Column="1" Margin="4,2,0,2" Orientation="Horizontal">
-                        <ComboBox x:Name="CellFuncGroupBox" Width="86"/>
-                        <ComboBox x:Name="CellFuncBox" Width="230" Margin="4,0,0,0"/>
-                    </StackPanel>
+                    <Grid Grid.Row="4" Grid.Column="1" Margin="4,2,0,2">
+                        <Grid.ColumnDefinitions><ColumnDefinition/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+                        <TextBox x:Name="CellValueBox"/>
+                        <Button x:Name="CellKeyBtn" Content="키 입력" Width="64" Margin="4,0,0,0" Grid.Column="1" Visibility="Collapsed" ToolTip="누르는 키를 그대로 입력 (Esc 취소)"/>
+                        <StackPanel x:Name="CellFuncPanel" Grid.ColumnSpan="2" Orientation="Horizontal">
+                            <ComboBox x:Name="CellFuncGroupBox" Width="86"/>
+                            <ComboBox x:Name="CellFuncBox" Width="230" Margin="4,0,0,0"/>
+                        </StackPanel>
+                    </Grid>
                     <TextBlock Text="크기 (0=자동)" Grid.Row="5" VerticalAlignment="Center"/>
                     <StackPanel Orientation="Horizontal" Grid.Row="5" Grid.Column="1" Margin="4,2,0,2">
                         <TextBox x:Name="CellWBox" Width="60" ToolTip="너비"/>

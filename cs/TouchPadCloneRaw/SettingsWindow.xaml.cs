@@ -239,8 +239,23 @@ public partial class SettingsWindow : Window
             if (items != null && items.Contains(keep)) CellFuncBox.SelectedItem = keep;
             else if (items != null && items.Count > 0) CellFuncBox.SelectedItem = items[0];
         };
-        CellKindBox.SelectionChanged += (_, _) => { SyncCellValueInput(); CommitDetail(); };
+        CellKindBox.SelectionChanged += (_, _) =>
+        {
+            // Func kinds jump straight to their group (still changeable).
+            string k = CellKindBox.SelectedItem as string ?? "Pad 기능";
+            if (k == "Pad 기능" || k == "윈도우 기능")
+            {
+                string g = k == "윈도우 기능" ? "윈도우" : "패드";
+                CellFuncGroupBox.SelectedItem = g;
+                RefilterFuncBox(g);
+                var items = CellFuncBox.ItemsSource as System.Collections.IList;
+                if (items != null && items.Count > 0) CellFuncBox.SelectedItem = items[0];
+            }
+            SyncCellValueInput(); CommitDetail();
+        };
         CellFuncBox.SelectionChanged += (_, _) => CommitDetail();
+        CellKeyBtn.Click += (_, _) => ToggleKeyCapture();
+        PreviewKeyDown += SettingsWindow_PreviewKeyDown;
         CellLabelBox.LostFocus += (_, _) => CommitDetail();
         CellValueBox.LostFocus += (_, _) => CommitDetail();
         CellIconPicker.BasePalette = ColorPalettes.Zones;
@@ -475,7 +490,11 @@ public partial class SettingsWindow : Window
         FireApply();
     }
 
-    private static readonly string[] KindItems = ["기능", "cmd", "프로그램", "단축키"];
+    private static readonly string[] KindItems = ["Pad 기능", "윈도우 기능", "프로그램", "cmd", "단축키"];
+
+    /// <summary>Func-panel kinds (legacy plain "기능" counts as Pad).</summary>
+    private static bool IsFuncKind(string? kind) =>
+        kind == "Pad 기능" || kind == "윈도우 기능" || kind == "기능";
 
     private static readonly string[] FuncGroups = ["전체", "레이아웃", "패드", "윈도우"];
 
@@ -526,6 +545,13 @@ public partial class SettingsWindow : Window
         ("윈도우", "재생/일시정지", "shortcut:PLAYPAUSE"),
         ("윈도우", "다음 트랙", "shortcut:NEXT"),
         ("윈도우", "이전 트랙", "shortcut:PREV"),
+        ("윈도우", "클립보드 기록", "shortcut:Win+V"),
+        ("윈도우", "프로젝션", "shortcut:Win+P"),
+        ("윈도우", "무선 디스플레이", "shortcut:Win+K"),
+        ("윈도우", "빠른 연결 메뉴", "shortcut:Win+X"),
+        ("윈도우", "화면 키보드", "program:osk.exe"),
+        ("윈도우", "접근성 설정", "shortcut:Win+U"),
+        ("윈도우", "돋보기", "shortcut:Win+Plus"),
     ];
 
     private static string FuncGroupOf(string v) =>
@@ -547,9 +573,118 @@ public partial class SettingsWindow : Window
 
     private void SyncCellValueInput()
     {
-        bool fn = (CellKindBox.SelectedItem as string ?? "기능") == "기능";
+        string kind = CellKindBox.SelectedItem as string ?? "Pad 기능";
+        bool fn = IsFuncKind(kind);
+        bool sc = kind == "단축키";
         CellFuncPanel.Visibility = fn ? Visibility.Visible : Visibility.Collapsed;
         CellValueBox.Visibility = fn ? Visibility.Collapsed : Visibility.Visible;
+        CellKeyBtn.Visibility = sc ? Visibility.Visible : Visibility.Collapsed;
+        if (!sc) DisarmKeyCapture();
+    }
+
+    /// <summary>Shortcut key capture: the button arms it, the next key
+    /// chord lands in the value box as "Win+Ctrl+X" (Esc cancels).</summary>
+    private bool _capturingKeys;
+
+    private void ToggleKeyCapture()
+    {
+        if (_capturingKeys) { DisarmKeyCapture(); return; }
+        _capturingKeys = true;
+        CellKeyBtn.Content = "입력 중...";
+        CellKeyBtn.Focus();
+    }
+
+    private void DisarmKeyCapture()
+    {
+        _capturingKeys = false;
+        if (CellKeyBtn != null) CellKeyBtn.Content = "키 입력";
+    }
+
+    private void SettingsWindow_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (!_capturingKeys) return;
+        e.Handled = true;
+        Key k = e.Key == Key.System ? e.SystemKey : e.Key;
+        var mods = Keyboard.Modifiers;
+        bool win = Keyboard.IsKeyDown(Key.LWin) || Keyboard.IsKeyDown(Key.RWin);
+        bool ctrl = (mods & ModifierKeys.Control) != 0;
+        bool alt = (mods & ModifierKeys.Alt) != 0;
+        bool shift = (mods & ModifierKeys.Shift) != 0;
+        if (IsCaptureModifier(k))
+        {
+            // Live chord feedback: the box shows what is held so far.
+            var held = new System.Collections.Generic.List<string>();
+            if (win) held.Add("Win");
+            if (ctrl) held.Add("Ctrl");
+            if (alt) held.Add("Alt");
+            if (shift) held.Add("Shift");
+            held.Add("...");
+            CellValueBox.Text = string.Join("+", held);
+            return;
+        }
+        if (k == Key.Escape && !win && !ctrl && !alt && !shift)
+        { DisarmKeyCapture(); return; }
+        string? main = KeyCaptureName(k);
+        if (main == null)
+        {
+            CellKeyBtn.Content = "지원 안 함";
+            return;
+        }
+        var parts = new System.Collections.Generic.List<string>();
+        if (win) parts.Add("Win");
+        if (ctrl) parts.Add("Ctrl");
+        if (alt) parts.Add("Alt");
+        if (shift) parts.Add("Shift");
+        parts.Add(main);
+        CellValueBox.Text = string.Join("+", parts);
+        DisarmKeyCapture();
+        CommitDetail();
+    }
+
+    private static bool IsCaptureModifier(Key k) => k is Key.LeftCtrl or Key.RightCtrl
+        or Key.LeftShift or Key.RightShift or Key.LeftAlt or Key.RightAlt
+        or Key.LWin or Key.RWin;
+
+    /// <summary>WPF key to RunShortcut main-key name (see ParseKey).
+    /// Null = unsupported (stays armed).</summary>
+    private static string? KeyCaptureName(Key k)
+    {
+        if (k >= Key.A && k <= Key.Z) return k.ToString();
+        if (k >= Key.D0 && k <= Key.D9) return ((char)('0' + (k - Key.D0))).ToString();
+        if (k >= Key.F1 && k <= Key.F24) return k.ToString().ToUpperInvariant();
+        switch (k)
+        {
+            case Key.Left:
+            case Key.Right:
+            case Key.Up:
+            case Key.Down:
+            case Key.Home:
+            case Key.End:
+                return k.ToString();
+            case Key.Escape: return "Esc";
+            case Key.Tab: return "Tab";
+            case Key.Space: return "Space";
+            case Key.Enter: return "Enter";
+            case Key.Back: return "Back";
+            case Key.Delete: return "Del";
+            case Key.Insert: return "Ins";
+            case Key.PageUp: return "PgUp";
+            case Key.PageDown: return "PgDn";
+            case Key.PrintScreen: return "PRTSCN";
+            case Key.Apps: return "APPS";
+            case Key.OemPeriod: return "Period";
+            case Key.OemPlus: return "Plus";
+            case Key.OemMinus: return "Minus";
+            case Key.OemComma: return "Comma";
+            case Key.OemQuestion: return "Slash";
+            case Key.VolumeMute: return "VOLMUTE";
+            case Key.VolumeUp: return "VOLUP";
+            case Key.VolumeDown: return "VOLDOWN";
+            case Key.MediaPlayPause: return "PLAYPAUSE";
+            case Key.MediaNextTrack: return "NEXT";
+            case Key.MediaPreviousTrack: return "PREV";
+            default: return null;
+        }
     }
 
     private void RebuildStripRows()
@@ -601,7 +736,10 @@ public partial class SettingsWindow : Window
             CellTextPicker.Selected = cell.TextColor;
             CellWBox.Text = cell.CellW > 0 ? cell.CellW.ToString() : "";
             CellHBox.Text = cell.CellH > 0 ? cell.CellH.ToString() : "";
-            CellKindBox.SelectedItem = KindItems.Contains(cell.Kind) ? cell.Kind : "기능";
+            string ck = cell.Kind;
+            if (ck == "기능" || !KindItems.Contains(ck))
+                ck = FuncGroupOf(cell.Value) == "윈도우" ? "윈도우 기능" : "Pad 기능";
+            CellKindBox.SelectedItem = ck;
             SyncCellValueInput();
             CellValueBox.Text = cell.Value;
             CellValueBox.ToolTip = (CellKindBox.SelectedItem as string) == "cmd" ? "명령줄 (백그라운드 실행)" : ((CellKindBox.SelectedItem as string) == "프로그램" ? "exe 경로" : "예: Ctrl+C");
@@ -622,8 +760,8 @@ public partial class SettingsWindow : Window
             if (_selRow < 0 || _selCol < 0 || _selRow >= _s.StripLayout.Count) return;
             var row = _s.StripLayout[_selRow];
             if (_selCol >= row.Cells.Count) return;
-            string kind = CellKindBox.SelectedItem as string ?? "기능";
-            string val = kind == "기능" ? FuncValue(CellFuncBox.SelectedItem as string) : (CellValueBox.Text ?? "").Trim();
+            string kind = CellKindBox.SelectedItem as string ?? "Pad 기능";
+            string val = IsFuncKind(kind) ? FuncValue(CellFuncBox.SelectedItem as string) : (CellValueBox.Text ?? "").Trim();
             string col = (CellIconPicker.Selected ?? "").Trim();
             if (ColorPalettes.IsHex(col)) RememberCustom(col);
             string tcol = (CellTextPicker.Selected ?? "").Trim();
@@ -673,7 +811,7 @@ public partial class SettingsWindow : Window
         catch { }
     }
 
-    private static readonly string[] EmojiItems = ["\U0001F600", "\U0001F601", "\U0001F602", "\U0001F923", "\U0001F60A", "\U0001F60D", "\U0001F60E", "\U0001F914", "\U0001F44D", "\U0001F44E", "\U0001F44F", "\U0001F64F", "\U0001F4AA", "\U0001F525", "\U00002B50", "\U0001F319", "\U00002600", "\U0001F308", "\U0001F389", "\U0001F381", "\U000026BD", "\U0001F3E0", "\U0001F697", "\U00002708", "\U000026FA", "\U0001F338", "\U0001F355", "\U00002615", "\U0001F4A1", "\U0001F514", "\U0001F50B", "\U0001F4CC", "\U0001F4C1", "\U0001F4BE", "\U00002764", "\U0001F494", "\U00002705", "\U0000274C", "\U00002753", "\U00002757", "\U0001F4AF", "\U0001F512", "\U0001F513", "\U0001F3B5", "\U0001F4F7"];
+    private static readonly string[] EmojiItems = ["\U0001F600", "\U0001F601", "\U0001F602", "\U0001F923", "\U0001F60A", "\U0001F60D", "\U0001F60E", "\U0001F914", "\U0001F44D", "\U0001F44E", "\U0001F44F", "\U0001F64F", "\U0001F4AA", "\U0001F525", "\U00002B50", "\U0001F319", "\U00002600", "\U0001F308", "\U0001F389", "\U0001F381", "\U000026BD", "\U0001F3E0", "\U0001F697", "\U00002708", "\U000026FA", "\U0001F338", "\U0001F355", "\U00002615", "\U0001F4A1", "\U0001F514", "\U0001F50B", "\U0001F4CC", "\U0001F4C1", "\U0001F4BE", "\U00002764", "\U0001F494", "\U00002705", "\U0000274C", "\U00002753", "\U00002757", "\U0001F4AF", "\U0001F512", "\U0001F513", "\U0001F3B5", "\U0001F4F7", "\U00002328", "\U0001F5B1", "\U0001F5B2", "\U0001F5A5", "\U0001F4BB", "\U0001F5A8", "\U0001F579", "\U0001F3AE", "\U0001F4BF", "\U0001F4C0", "\U0001F4BD", "\U0001F50C", "\U0001FAAB", "\U0001F526", "\U0001F4E1", "\U0001F4F6", "\U0001F50A", "\U0001F509", "\U0001F507", "\U0001F515", "\U0001F3A7", "\U0001F3A4", "\U0001F4F9", "\U0001F3A5", "\U0001F4FD", "\U0001F4FA", "\U0001F4FB", "\U0000231A", "\U000023F0", "\U0001F9EE", "\U0001F4C5", "\U0001F4CB", "\U0001F4CD", "\U0001F4CE", "\U0001F587", "\U0001F5D1", "\U0001F511", "\U00002699", "\U0001F527", "\U0001F528", "\U0001F6E0", "\U0001FA9B", "\U0001F50D", "\U0001F50E", "\U0001F4CA", "\U0001F4C8", "\U0001F4C9", "\U0001F5C4", "\U0001F4F0", "\U0001F4DA", "\U0001F516", "\U00002709", "\U0001F4E7", "\U0001F4E6", "\U000023CF", "\U000023EF", "\U000023AD", "\U000023AE", "\U0001F500", "\U0001F501", "\U0001F39A", "\U0001F39B", "\U0001F4F1", "\U0000260E", "\U0001F6F0", "\U0001F916", "\U0001F1F1", "\U0001F1F7", "\U00002B05", "\U000027A1", "\U00002B06", "\U00002B07", "\U000021E6", "\U000021E8", "\U000021E7", "\U000021E9", "\U000025C0", "\U000025B6", "\U000023F8", "\U000023F9", "\U000023EA", "\U000023EB", "\U000023EC", "\U0001F53C", "\U0001F53D", "\U0001F448", "\U0001F449", "\U0001F446", "\U0001F447", "\U0001F44B", "\U0001F590", "\U0000270B", "\U0001F44C", "\U0000270C", "\U0000261D", "\U0001F596", "\U0001F90F", "\U0001FAF1", "\U0001FAF2", "\U0001F388", "\U0001FAE7", "\U0001F6DF", "\U000026F5", "\U0001F199", "\U0001F532", "\U0001F533", "\U000025FD", "\U000025FE", "\U00002795", "\U00002796", "\U00002716", "\U00002B55", "\U000026D4", "\U0001F6AB", "\U000026A0", "\U0001F6D1", "\U0001F521", "\U0001F520", "\U0001F522", "\U0001F523", "\u0023\uFE0F\u20E3", "\u002A\uFE0F\u20E3", "\U0001F3B9", "\U0001F3AF", "\U0001F9F2", "\U0001F9ED", "\U0001F310", "\U0001F9F0", "\U000026A1", "\U0001F4C2", "\U0001F5C2", "\U0001F4DD", "\U0001F4C4", "\U00002702", "\U0001F58A", "\U0001F58B", "\U0000270F", "\U00002712", "\U0001F5DD", "\U0000231B", "\U000023F3", "\U0001F4E3", "\U0001F508", "\U0001F441", "\U0001F3B2", "\u2139"];
 
     private static readonly string[] SymItems = ["\u2605", "\u2606", "\u25CF", "\u25CB", "\u25C6", "\u25C7", "\u25B2", "\u25B3", "\u25BC", "\u25BD", "\u25A0", "\u25A1", "\u25AA", "\u25AB", "\u2190", "\u2191", "\u2192", "\u2193", "\u2194", "\u2195", "\u2715", "\u2713", "\u2714", "\u2766", "\u25B6", "\u25B7", "\u2665", "\u2666", "\u2663", "\u2660", "\u266A", "\u266B", "\u00A9", "\u00AE", "\u2122", "\u00A7", "\u00B6", "\u00B0", "\u00B1", "\u00D7", "\u00F7", "\u2260", "\u2248", "\u221E", "\u03C0", "\u03A9", "\u03B1", "\u2026", "\u2014", "\u2500", "\u2502", "\u250C", "\u2510", "\u2514", "\u2518", "\u2550", "\u203C", "\u2049"];
 

@@ -463,11 +463,15 @@ public partial class ModeStripWindow : Window
             double sh = vertical ? _s.StripWidth : _s.StripHeight;
             Width = Math.Min(Math.Max(sw, 40), pw);
             Height = Math.Min(Math.Max(sh, 12), ph);
-            // Tall bar: lay the mode label along it instead of clipping.
+            // Tall bar: lay the mode label along it instead of clipping
+            // (the header takes the full height after positioning below).
+            // Right dock runs the whole chrome 180: text goes +90.
+            // Bottom dock: text stays readable (chrome only is flipped).
             try
             {
-                Label.LayoutTransform = vertical
-                    ? new System.Windows.Media.RotateTransform(-90) : null;
+                Label.LayoutTransform = !vertical
+                    ? null
+                    : new System.Windows.Media.RotateTransform(edge == "right" ? 90 : -90);
             }
             catch { }
             string align = (_s.StripSide ?? "left").ToLowerInvariant();
@@ -499,13 +503,19 @@ public partial class ModeStripWindow : Window
                 else if (align == "center") Top = oy + (ph - Height) / 2 + px;
                 else Top = oy + px;
                 Top = Math.Max(oy, Math.Min(oy + ph - Height, Top));
-                // Corner fans sit beside the TOP corners: keep the
-                // horizontal buffer on both sides instead.
-                if (Left < ox + Chrome) Left = ox + Chrome;
-                if (Left + Width + Chrome > ox + pw)
-                    Width = Math.Max(40, ox + pw - Chrome - Left);
-                if (Left < ox + Chrome) Left = ox + Chrome;
+                // Top/bottom fans: keep the vertical buffer on both
+                // ends instead, then shrink so they never overlap.
+                Top = Math.Max(oy + Chrome, Math.Min(oy + ph - Height - Chrome, Top));
+                if (Top + Height + Chrome > oy + ph)
+                    Height = Math.Max(40, oy + ph - Chrome - Top);
+                if (Top < oy + Chrome) Top = oy + Chrome;
+                // Top/bottom fans need no horizontal room (same width,
+                // centered): hug the monitor edge instead of floating off.
+                Left = ox + (edge == "right" ? pw - Width : 0);
             }
+            // Final size known: the vertical header fills the bar.
+            try { BarHeader.Height = vertical ? Height : 26; }
+            catch { }
             Visibility = _s.StripVisible ? Visibility.Visible : Visibility.Hidden;
             ApplyStripStyle();
             PositionChrome();
@@ -563,7 +573,7 @@ public partial class ModeStripWindow : Window
             }
             if (_modeWin == null)
             {
-                _modeWin = MakeChromeBtn("모드 변경", false);
+                _modeWin = MakeChromeBtn("실행", false);
                 _modeWin.PreviewTouchDown += (_, e) =>
                 {
                     ModePressed?.Invoke(); e.Handled = true;
@@ -583,19 +593,20 @@ public partial class ModeStripWindow : Window
     /// top-right), 90-degree arc bulging down-outward. 10 samples
     /// approximate the arc.</summary>
     private static System.Windows.Media.PointCollection WedgePoints(
-        bool grip, double r)
+        bool grip, double r, bool flipX = false, bool flipY = false)
     {
         var pts = new System.Windows.Media.PointCollection();
         try
         {
             double cx = grip ? r : 0, cy = 0;
             double sx = grip ? -1 : 1;
-            pts.Add(new Point(cx, cy));
+            pts.Add(new Point(flipX ? r - cx : cx, flipY ? r - cy : cy));
             for (int i = 0; i <= 10; i++)
             {
                 // Straight-down sweeping sideways (screen Y down).
                 double t = (90.0 * i / 10) * Math.PI / 180.0;
-                pts.Add(new Point(cx + sx * Math.Sin(t) * r, cy + Math.Cos(t) * r));
+                double px = cx + sx * Math.Sin(t) * r, py = cy + Math.Cos(t) * r;
+                pts.Add(new Point(flipX ? r - px : px, flipY ? r - py : py));
             }
         }
         catch { }
@@ -612,6 +623,9 @@ public partial class ModeStripWindow : Window
                 System.Windows.Media.Color.FromArgb(0xAA, 0x9A, 0xA6, 0xBD)),
             Stroke = System.Windows.Media.Brushes.Gray,
             StrokeThickness = 1,
+            // Tooltip on the fan shape itself: window-level tooltips
+            // also fire over the transparent corners (weird).
+            ToolTip = tip,
         };
         var w = new Window
         {
@@ -619,7 +633,7 @@ public partial class ModeStripWindow : Window
             Background = System.Windows.Media.Brushes.Transparent,
             Topmost = true, ShowInTaskbar = false, ShowActivated = false,
             ResizeMode = ResizeMode.NoResize, Width = 20, Height = 20,
-            Content = poly, ToolTip = tip, Cursor = System.Windows.Input.Cursors.Hand,
+            Content = poly, Cursor = System.Windows.Input.Cursors.Hand,
         };
         Core.NoActivate.Apply(w);
         Core.TabletTweaks.DisableSystemGestures(w);
@@ -689,17 +703,54 @@ public partial class ModeStripWindow : Window
             EnsureChrome();
             if (_gripWin == null || _modeWin == null) return;
             bool show = Visibility == Visibility.Visible;
-            // Fan radius = bar short side: R(x)R boxes on the top
-            // corners (centers ARE the corners).
+            // Fan radius = bar short side. Horizontal bar: R(x)R boxes
+            // on the top corners; vertical bar: mode above the top end,
+            // grip below the bottom end (buttons stack top-to-bottom).
             double r = Math.Max(12, Math.Min(Width, Height));
             _gripWin.Width = r; _gripWin.Height = r;
             _modeWin.Width = r; _modeWin.Height = r;
+            string edge = (_s.StripEdge ?? "top").ToLowerInvariant();
+            bool vertical = edge is "left" or "right";
+            // Fan center sits ON the strip corner (like the horizontal
+            // top corners). Left dock: mode top + grip bottom on the
+            // left corners. Right dock: the whole chrome rotated 180
+            // (grip top + mode bottom on the right corners). Bottom
+            // dock: 180 of top (both flipped at the bottom corners).
+            bool leftDock = edge == "left";
+            bool bottomDock = edge == "bottom";
+            bool mFlipX = (vertical && !leftDock) || (!vertical && bottomDock);
+            bool mFlipY = (vertical && leftDock) || (!vertical && bottomDock);
+            bool gFlipX = (vertical && leftDock) || (!vertical && bottomDock);
+            bool gFlipY = (vertical && !leftDock) || (!vertical && bottomDock);
             if (_gripPoly != null)
-                _gripPoly.Points = WedgePoints(true, r);
+                _gripPoly.Points = WedgePoints(true, r, gFlipX, gFlipY);
             if (_modePoly != null)
-                _modePoly.Points = WedgePoints(false, r);
-            _gripWin.Left = Left - r; _gripWin.Top = Top;
-            _modeWin.Left = Left + Width; _modeWin.Top = Top;
+                _modePoly.Points = WedgePoints(false, r, mFlipX, mFlipY);
+            if (!vertical)
+            {
+                double wy = bottomDock ? Top + Height - r : Top;
+                _gripWin.Left = bottomDock ? Left + Width : Left - r;
+                _gripWin.Top = wy;
+                _modeWin.Left = bottomDock ? Left - r : Left + Width;
+                _modeWin.Top = wy;
+            }
+            else if (leftDock)
+            {
+                var home = MonitorRect();
+                _modeWin.Left = Left;
+                _modeWin.Top = Math.Max(home.t, Top - r);
+                _gripWin.Left = Left;
+                _gripWin.Top = Math.Min(home.t + home.h - r, Top + Height);
+            }
+            else
+            {
+                var home = MonitorRect();
+                double bx = Left + Width - r;
+                _gripWin.Left = bx;
+                _gripWin.Top = Math.Max(home.t, Top - r);
+                _modeWin.Left = bx;
+                _modeWin.Top = Math.Min(home.t + home.h - r, Top + Height);
+            }
             var gv = show ? Visibility.Visible : Visibility.Hidden;
             _gripWin.Visibility = gv;
             _modeWin.Visibility = gv;

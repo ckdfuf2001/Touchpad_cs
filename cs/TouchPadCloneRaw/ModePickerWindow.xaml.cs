@@ -30,6 +30,21 @@ public partial class ModePickerWindow : Window
     {
         InitializeComponent();
         _ps = s;
+        // Menu background follows the strip (same color math).
+        try
+        {
+            string raw = (s.StripColor ?? "#10131A").Trim();
+            if (ColorPalettes.IsNone(raw)) Background = Brushes.Transparent;
+            else
+            {
+                var c = (Color)ColorConverter.ConvertFromString(raw);
+                double op = s.StripOpacity;
+                if (op < 0.05) op = 0.05;
+                if (op > 1) op = 1;
+                Background = new SolidColorBrush(Color.FromArgb((byte)(op * 255), c.R, c.G, c.B));
+            }
+        }
+        catch { }
         _onLayout = onLayout; _onAux = onAux; _onAction = onAction;
         _onSettings = onSettings;
         _onStripClose = onStripClose;
@@ -75,7 +90,8 @@ public partial class ModePickerWindow : Window
         foreach (var row in s.StripLayout)
         {
             // One config row = one visual row (never wraps: a 4-cell
-            // row stays 4 across, the window grows to fit).
+            // row stays 4 across, the window grows to fit) - same as the
+            // top-edge view, only the popup position follows the strip.
             var panel = new StackPanel
             {
                 Orientation = Orientation.Horizontal,

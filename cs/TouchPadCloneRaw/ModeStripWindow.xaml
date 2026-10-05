@@ -7,7 +7,7 @@
     <Border x:Name="Surface" Background="Transparent"
             Stylus.IsPressAndHoldEnabled="False">
         <StackPanel Orientation="Vertical">
-            <Grid Height="26">
+            <Grid x:Name="BarHeader" Height="26">
                 <TextBlock x:Name="Label" Text="◀  mode  ▶" Foreground="#9AA6BD"
                            FontSize="11" HorizontalAlignment="Center"
                            VerticalAlignment="Center" IsHitTestVisible="False"/>
