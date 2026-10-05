@@ -709,15 +709,12 @@ public partial class SettingsWindow : Window
         PresetSelBox.SelectionChanged += (_, _) => { if (!_loading) SwitchPresetFile(); };
         LayoutAreaBox.SelectionChanged += (_, _) =>
         {
-            if (!_loading && !_layoutSync) { SaveLayoutTab(); DrawPreview(); }
+            if (!_loading && !_layoutSync) { SaveLayoutTab(); DrawPreview(); SyncValueBoxes(); }
         };
         foreach (var b in new[] { LayoutXBox, LayoutYBox, LayoutWBox, LayoutHBox })
             b.LostFocus += (_, _) =>
             {
                 if (_loading) return;
-                // Editing the rect means custom: adopt it, then save.
-                if ((LayoutAreaBox.SelectedItem as string) != "custom")
-                    LayoutAreaBox.SelectedItem = "custom";
                 SaveLayoutTab();
                 DrawPreview();
             };
@@ -731,13 +728,6 @@ public partial class SettingsWindow : Window
         PadZoneDef.Checked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
         PadZoneDef.Unchecked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
         BuildZoneRows();
-        // Live mouse dot: polled while settings is open.
-        _mouseTimer = new System.Windows.Threading.DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(500),
-        };
-        _mouseTimer.Tick += MouseTick;
-        _mouseTimer.Start();
         // Display change: redraw the preview on the new topology (the
         // strip repositions the same way). Unhook on close (SystemEvents
         // holds strong refs).
@@ -752,7 +742,6 @@ public partial class SettingsWindow : Window
                     Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= _onLayoutDisplayChanged;
             }
             catch { }
-            try { _mouseTimer?.Stop(); _mouseTimer = null; } catch { }
         };
         if (LayoutSelBox.Items.Contains(_s.Layout)) LayoutSelBox.SelectedItem = _s.Layout;
         else if (LayoutSelBox.Items.Count > 0) LayoutSelBox.SelectedIndex = 0;
@@ -889,13 +878,13 @@ public partial class SettingsWindow : Window
             string mode = p?.AreaMode ?? "default";
             if (!LayoutAreaBox.Items.Contains(mode)) mode = "default";
             LayoutAreaBox.SelectedItem = mode;
-            // Boxes always show the EFFECTIVE placed rect (any mode);
-            // editing them switches to custom (see LostFocus above).
+            // Boxes always show the EFFECTIVE placed rect (any mode).
             var (home, r, m0, k0, s0) = PreviewGeom();
             LayoutXBox.Text = TrimNum(r.l);
             LayoutYBox.Text = TrimNum(r.t);
             LayoutWBox.Text = TrimNum(r.w);
             LayoutHBox.Text = TrimNum(r.h);
+            SyncValueBoxes();
         }
         catch { }
         finally { _layoutSync = false; }
@@ -913,8 +902,32 @@ public partial class SettingsWindow : Window
     }
 
     private readonly Dictionary<string, ZoneRow> _zoneRows = new();
-    private System.Windows.Threading.DispatcherTimer? _mouseTimer;
-    private System.Windows.Shapes.Ellipse? _mouseDot;
+
+    /// <summary>Value editing is custom-mode only: boxes, checkboxes and
+    /// screen-pick buttons all follow the area mode.</summary>
+    private void SyncValueBoxes()
+    {
+        try
+        {
+            bool custom = (LayoutAreaBox.SelectedItem as string) == "custom";
+            foreach (var b in new[] { LayoutXBox, LayoutYBox, LayoutWBox, LayoutHBox,
+                ZoneXBox, ZoneYBox, ZoneX2Box, ZoneY2Box })
+                b.IsEnabled = custom;
+            PadZoneDef.IsEnabled = custom;
+            CustomPickBtn.IsEnabled = custom;
+            PadZonePickBtn.IsEnabled = custom;
+            foreach (var (_, zrow) in _zoneRows)
+            {
+                zrow.Def.IsEnabled = custom;
+                zrow.X.IsEnabled = custom;
+                zrow.Y.IsEnabled = custom;
+                zrow.X2.IsEnabled = custom;
+                zrow.Y2.IsEnabled = custom;
+                zrow.Pick.IsEnabled = custom;
+            }
+        }
+        catch { }
+    }
 
     /// <summary>Per-zone custom rows (Left/Right/wheel): checkbox =
     /// default, unchecked = editable override. Built once.</summary>
@@ -955,42 +968,6 @@ public partial class SettingsWindow : Window
                 ZoneRows.Children.Add(line);
                 _zoneRows[key] = new ZoneRow { Key = key, Def = def, X = xb, Y = yb, X2 = x2b, Y2 = y2b, Pick = pick };
             }
-        }
-        catch { }
-    }
-
-    /// <summary>Live mouse dot on the preview (physical cursor, blue),
-    /// polled while settings is open.</summary>
-    private void MouseTick(object? sender, EventArgs e)
-    {
-        try
-        {
-            if (_mouseDot == null)
-            {
-                _mouseDot = new System.Windows.Shapes.Ellipse
-                {
-                    Width = 10,
-                    Height = 10,
-                    Fill = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0x35, 0xC4, 0xFF)),
-                    Stroke = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF)),
-                    StrokeThickness = 1,
-                    Visibility = Visibility.Collapsed,
-                };
-            }
-            if (_mouseDot.Parent == null) LayoutPreview.Children.Add(_mouseDot);
-            if (_pvSc < 1e-9) return;
-            var mp = System.Windows.Forms.Cursor.Position;
-            double d = WinDpi();
-            double mx = mp.X / d, my = mp.Y / d;
-            double cx = _pvOx + mx * _pvSc, cy = _pvOy + my * _pvSc;
-            if (cx < 0 || cy < 0 || cx > LayoutPreview.ActualWidth || cy > LayoutPreview.ActualHeight)
-            {
-                _mouseDot.Visibility = Visibility.Collapsed;
-                return;
-            }
-            _mouseDot.Visibility = Visibility.Visible;
-            Canvas.SetLeft(_mouseDot, cx - 5);
-            Canvas.SetTop(_mouseDot, cy - 5);
         }
         catch { }
     }
