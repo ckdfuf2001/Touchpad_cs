@@ -718,6 +718,14 @@ public partial class SettingsWindow : Window
         LayoutShowBtn.Click += (_, _) => ShowLayoutPad();
         LayoutPreview.MouseMove += LayoutPreview_MouseMove;
         LayoutPreview.MouseLeftButtonDown += LayoutPreview_MouseDown;
+        LayoutPreview.SizeChanged += (_, _) => { try { DrawPreview(); } catch { } };
+        PinModeBtn.Click += (_, _) => TogglePinMode();
+        PinClearBtn.Click += (_, _) =>
+        {
+            _pinAreas.Clear();
+            _pinStart = null;
+            DrawPreview();
+        };
         PadZoneDef.Checked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
         PadZoneDef.Unchecked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
         // Display change: redraw the preview on the new topology (the
@@ -986,6 +994,11 @@ public partial class SettingsWindow : Window
     private bool _hoverLock;
     private string _hoverText = "";
     private EventHandler? _onLayoutDisplayChanged;
+    // Click-pinned areas (max 2): area 1 -> custom rect boxes, area 2 ->
+    // pad zone boxes. Monitor DIP, drawn as dots + rects on the preview.
+    private bool _pinMode;
+    private readonly List<(double x1, double y1, double x2, double y2)> _pinAreas = new();
+    private (double x, double y)? _pinStart;
 
     private void LayoutPreview_MouseMove(object sender, MouseEventArgs e)
     {
@@ -1006,8 +1019,152 @@ public partial class SettingsWindow : Window
     {
         try
         {
+            if (_pinMode)
+            {
+                PinClick(e);
+                return;
+            }
             _hoverLock = !_hoverLock;
             LayoutHoverLbl.Text = _hoverText + (_hoverLock ? " (고정됨)" : "");
+        }
+        catch { }
+    }
+
+    private void TogglePinMode()
+    {
+        _pinMode = !_pinMode;
+        if (_pinMode)
+        {
+            _pinAreas.Clear();
+            _pinStart = null;
+            PinModeBtn.Content = "영역 찍기 (0/2)";
+            LayoutHoverLbl.Text = "영역 찍기: 시작점을 클릭";
+        }
+        else
+        {
+            PinModeBtn.Content = "영역 찍기";
+        }
+        DrawPreview();
+    }
+
+    /// <summary>Pin clicks: odd clicks set the start dot, even clicks
+    /// close the area (1st -> custom rect boxes, 2nd -> pad zone boxes).
+    /// Auto-exits after 2 fixed areas.</summary>
+    private void PinClick(MouseEventArgs e)
+    {
+        try
+        {
+            if (_pvSc < 1e-9) return;
+            var pp = e.GetPosition(LayoutPreview);
+            double mx = _pvVl + (pp.X - _pvOx) / _pvSc;
+            double my = _pvVt + (pp.Y - _pvOy) / _pvSc;
+            if (_pinStart == null)
+            {
+                _pinStart = (mx, my);
+                LayoutHoverLbl.Text = $"시작점: X={mx:0} Y={my:0} — 끝점을 클릭";
+            }
+            else
+            {
+                var (sx, sy) = _pinStart.Value;
+                _pinStart = null;
+                _pinAreas.Add((Math.Min(sx, mx), Math.Min(sy, my),
+                    Math.Max(sx, mx), Math.Max(sy, my)));
+                if (_pinAreas.Count == 1) ApplyPinToCustom();
+                else
+                {
+                    ApplyPinToZone();
+                    _pinMode = false;
+                    PinModeBtn.Content = "영역 찍기";
+                    LayoutHoverLbl.Text = "영역 2개 고정됨 (해제됨)";
+                }
+                if (_pinMode) PinModeBtn.Content = $"영역 찍기 ({_pinAreas.Count}/2)";
+            }
+            DrawPreview();
+        }
+        catch { }
+    }
+
+    private void ApplyPinToCustom()
+    {
+        try
+        {
+            var a = _pinAreas[0];
+            LayoutXBox.Text = TrimNum(a.x1);
+            LayoutYBox.Text = TrimNum(a.y1);
+            LayoutWBox.Text = TrimNum(a.x2 - a.x1);
+            LayoutHBox.Text = TrimNum(a.y2 - a.y1);
+            LayoutAreaBox.SelectedItem = "custom";
+            LayoutHoverLbl.Text = "영역1 → custom 입력됨, 영역2 시작점을 클릭";
+        }
+        catch { }
+    }
+
+    private void ApplyPinToZone()
+    {
+        try
+        {
+            var a = _pinAreas[1];
+            ZoneXBox.Text = TrimNum(a.x1);
+            ZoneYBox.Text = TrimNum(a.y1);
+            ZoneX2Box.Text = TrimNum(a.x2);
+            ZoneY2Box.Text = TrimNum(a.y2);
+            PadZoneDef.IsChecked = false;
+        }
+        catch { }
+    }
+
+    /// <summary>Pinned dots + area rects on top of the preview.</summary>
+    private void DrawPins()
+    {
+        try
+        {
+            if (_pvSc < 1e-9) return;
+            int idx = 0;
+            foreach (var a in _pinAreas)
+            {
+                var col = idx == 0
+                    ? System.Windows.Media.Color.FromArgb(0xFF, 0x7F, 0xE0, 0xA8)
+                    : System.Windows.Media.Color.FromArgb(0xFF, 0xFF, 0xB3, 0x5C);
+                var rr = new System.Windows.Shapes.Rectangle
+                {
+                    Width = Math.Max(2, (a.x2 - a.x1) * _pvSc),
+                    Height = Math.Max(2, (a.y2 - a.y1) * _pvSc),
+                    Fill = System.Windows.Media.Brushes.Transparent,
+                    Stroke = new SolidColorBrush(col),
+                    StrokeThickness = 1.25,
+                };
+                LayoutPreview.Children.Add(rr);
+                Canvas.SetLeft(rr, _pvOx + a.x1 * _pvSc);
+                Canvas.SetTop(rr, _pvOy + a.y1 * _pvSc);
+                foreach (var (px, py, dot) in new[] {
+                    (a.x1, a.y1, System.Windows.Media.Color.FromArgb(0xFF, 0x7F, 0xE0, 0xA8)),
+                    (a.x2, a.y2, System.Windows.Media.Color.FromArgb(0xFF, 0xFF, 0x7F, 0x7F)) })
+                {
+                    var d = new System.Windows.Shapes.Ellipse
+                    {
+                        Width = 7,
+                        Height = 7,
+                        Fill = new SolidColorBrush(dot),
+                    };
+                    LayoutPreview.Children.Add(d);
+                    Canvas.SetLeft(d, _pvOx + px * _pvSc - 3.5);
+                    Canvas.SetTop(d, _pvOy + py * _pvSc - 3.5);
+                }
+                idx++;
+            }
+            if (_pinStart != null)
+            {
+                var (sx, sy) = _pinStart.Value;
+                var d = new System.Windows.Shapes.Ellipse
+                {
+                    Width = 7,
+                    Height = 7,
+                    Fill = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0x7F, 0xE0, 0xA8)),
+                };
+                LayoutPreview.Children.Add(d);
+                Canvas.SetLeft(d, _pvOx + sx * _pvSc - 3.5);
+                Canvas.SetTop(d, _pvOy + sy * _pvSc - 3.5);
+            }
         }
         catch { }
     }
@@ -1102,7 +1259,9 @@ public partial class SettingsWindow : Window
         try
         {
             LayoutPreview.Children.Clear();
-            double cw = LayoutPreview.Width, ch = LayoutPreview.Height;
+            double cw = LayoutPreview.ActualWidth > 50 ? LayoutPreview.ActualWidth : 460;
+            double ch = LayoutPreview.Height;
+            if (ch < 50) ch = 250;
             double vl = SystemParameters.VirtualScreenLeft, vt = SystemParameters.VirtualScreenTop;
             double vw = SystemParameters.VirtualScreenWidth, vh = SystemParameters.VirtualScreenHeight;
             if (vw < 100 || vh < 100 || cw < 50 || ch < 50) return;
@@ -1238,6 +1397,7 @@ public partial class SettingsWindow : Window
             LayoutInfoLbl.Text = $"모니터: {homeName} {home.w:0}x{home.h:0} | " +
                 $"패드: {r.l:0},{r.t:0} {r.w:0}x{r.h:0} (모니터의 {cov:0}%) | " +
                 $"모드 {mode} | 타일 {shown}개";
+            DrawPins();
             UpdateZoneDisplay();
         }
         catch { }
