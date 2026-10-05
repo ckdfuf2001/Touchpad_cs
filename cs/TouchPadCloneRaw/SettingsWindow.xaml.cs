@@ -728,6 +728,14 @@ public partial class SettingsWindow : Window
         LayoutPreview.SizeChanged += (_, _) => { try { DrawPreview(); } catch { } };
         PadZoneDef.Checked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
         PadZoneDef.Unchecked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
+        BuildZoneRows();
+        // Live mouse dot: polled while settings is open.
+        _mouseTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(500),
+        };
+        _mouseTimer.Tick += MouseTick;
+        _mouseTimer.Start();
         // Display change: redraw the preview on the new topology (the
         // strip repositions the same way). Unhook on close (SystemEvents
         // holds strong refs).
@@ -742,6 +750,7 @@ public partial class SettingsWindow : Window
                     Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= _onLayoutDisplayChanged;
             }
             catch { }
+            try { _mouseTimer?.Stop(); _mouseTimer = null; } catch { }
         };
         if (LayoutSelBox.Items.Contains(_s.Layout)) LayoutSelBox.SelectedItem = _s.Layout;
         else if (LayoutSelBox.Items.Count > 0) LayoutSelBox.SelectedIndex = 0;
@@ -893,6 +902,157 @@ public partial class SettingsWindow : Window
     /// <summary>Suppresses save-backs while LoadLayoutEditors fills.</summary>
     private bool _layoutSync;
 
+    private sealed class ZoneRow
+    {
+        public string Key = "";
+        public CheckBox Def = null!;
+        public TextBox X = null!, Y = null!, X2 = null!, Y2 = null!;
+    }
+
+    private readonly Dictionary<string, ZoneRow> _zoneRows = new();
+    private System.Windows.Threading.DispatcherTimer? _mouseTimer;
+    private System.Windows.Shapes.Ellipse? _mouseDot;
+
+    /// <summary>Per-zone custom rows (Left/Right/wheel): checkbox =
+    /// default, unchecked = editable override. Built once.</summary>
+    private void BuildZoneRows()
+    {
+        try
+        {
+            ZoneRows.Children.Clear();
+            _zoneRows.Clear();
+            foreach (var (key, label) in new[]
+                { ("left-click", "Left"), ("right-click", "Right"), ("wheel", "wheel") })
+            {
+                var line = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 4) };
+                var def = new CheckBox
+                {
+                    Content = label + " 기본값 사용",
+                    Width = 150,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                var xb = new TextBox { Width = 56, Margin = new Thickness(4, 0, 4, 0) };
+                var yb = new TextBox { Width = 56, Margin = new Thickness(0, 0, 4, 0) };
+                var sep = new TextBlock { Text = "~", VerticalAlignment = VerticalAlignment.Center };
+                var x2b = new TextBox { Width = 56, Margin = new Thickness(4, 0, 4, 0) };
+                var y2b = new TextBox { Width = 56 };
+                def.Checked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
+                def.Unchecked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
+                foreach (var b in new[] { xb, yb, x2b, y2b })
+                    b.LostFocus += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
+                line.Children.Add(def);
+                line.Children.Add(xb);
+                line.Children.Add(yb);
+                line.Children.Add(sep);
+                line.Children.Add(x2b);
+                line.Children.Add(y2b);
+                ZoneRows.Children.Add(line);
+                _zoneRows[key] = new ZoneRow { Key = key, Def = def, X = xb, Y = yb, X2 = x2b, Y2 = y2b };
+            }
+        }
+        catch { }
+    }
+
+    /// <summary>Live mouse dot on the preview (physical cursor, blue),
+    /// polled while settings is open.</summary>
+    private void MouseTick(object? sender, EventArgs e)
+    {
+        try
+        {
+            if (_mouseDot == null)
+            {
+                _mouseDot = new System.Windows.Shapes.Ellipse
+                {
+                    Width = 10,
+                    Height = 10,
+                    Fill = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0x35, 0xC4, 0xFF)),
+                    Stroke = new SolidColorBrush(System.Windows.Media.Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF)),
+                    StrokeThickness = 1,
+                    Visibility = Visibility.Collapsed,
+                };
+            }
+            if (_mouseDot.Parent == null) LayoutPreview.Children.Add(_mouseDot);
+            if (_pvSc < 1e-9) return;
+            var mp = System.Windows.Forms.Cursor.Position;
+            double d = WinDpi();
+            double mx = mp.X / d, my = mp.Y / d;
+            double cx = _pvOx + mx * _pvSc, cy = _pvOy + my * _pvSc;
+            if (cx < 0 || cy < 0 || cx > LayoutPreview.ActualWidth || cy > LayoutPreview.ActualHeight)
+            {
+                _mouseDot.Visibility = Visibility.Collapsed;
+                return;
+            }
+            _mouseDot.Visibility = Visibility.Visible;
+            Canvas.SetLeft(_mouseDot, cx - 5);
+            Canvas.SetTop(_mouseDot, cy - 5);
+        }
+        catch { }
+    }
+
+    /// <summary>Fixed-value areas on the preview: pad zone + per-zone
+    /// overrides, drawn in their zone colors.</summary>
+    private void DrawCustomZones(
+        (double l, double t, double w, double h) r, string sec, string key)
+    {
+        try
+        {
+            System.Windows.Media.Color ZC(string hex)
+            {
+                try
+                {
+                    return (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex);
+                }
+                catch
+                {
+                    return System.Windows.Media.Color.FromArgb(0xFF, 0xAA, 0xAA, 0xAA);
+                }
+            }
+            void Box(double x1, double y1, double x2, double y2, System.Windows.Media.Color c)
+            {
+                var rr = new System.Windows.Shapes.Rectangle
+                {
+                    Width = Math.Max(2, (x2 - x1) * _pvSc),
+                    Height = Math.Max(2, (y2 - y1) * _pvSc),
+                    Fill = System.Windows.Media.Brushes.Transparent,
+                    Stroke = new SolidColorBrush(c),
+                    StrokeThickness = 1.5,
+                };
+                LayoutPreview.Children.Add(rr);
+                Canvas.SetLeft(rr, _pvOx + x1 * _pvSc);
+                Canvas.SetTop(rr, _pvOy + y1 * _pvSc);
+            }
+            _s.Pads.TryGetValue(key, out var p);
+            if (p != null)
+            {
+                if (p.ZonePadCustom && p.ZonePadW > 0 && p.ZonePadH > 0)
+                {
+                    var c = ZC(_s.EffZonePad(sec));
+                    Box(r.l + p.ZonePadX, r.t + p.ZonePadY,
+                        r.l + p.ZonePadX + p.ZonePadW, r.t + p.ZonePadY + p.ZonePadH,
+                        System.Windows.Media.Color.FromArgb(0xFF, c.R, c.G, c.B));
+                }
+                if (p.ZoneRects != null)
+                {
+                    foreach (var kv in p.ZoneRects)
+                    {
+                        var a = kv.Value;
+                        if (a == null || a.Length < 4 || a[2] <= 0 || a[3] <= 0) continue;
+                        System.Windows.Media.Color c = kv.Key switch
+                        {
+                            "left-click" => ZC(_s.EffZoneLeft(sec)),
+                            "right-click" => ZC(_s.EffZoneRight(sec)),
+                            "wheel" => ZC(_s.EffZoneWheel(sec)),
+                            _ => ZC(_s.EffZonePad(sec)),
+                        };
+                        Box(r.l + a[0], r.t + a[1], r.l + a[0] + a[2], r.t + a[1] + a[3],
+                            System.Windows.Media.Color.FromArgb(0xFF, c.R, c.G, c.B));
+                    }
+                }
+            }
+        }
+        catch { }
+    }
+
     private void SaveLayoutTab()
     {
         try
@@ -929,6 +1089,25 @@ public partial class SettingsWindow : Window
                 p.ZonePadW = zx2 - zx1; p.ZonePadH = zy2 - zy1;
             }
             else p.ZonePadCustom = false;
+            // Per-zone overrides (screen DIP boxes -> window DIP).
+            foreach (var (zkey, zrow) in _zoneRows)
+            {
+                if (zrow.Def.IsChecked != true)
+                {
+                    if (!double.TryParse(zrow.X.Text, out double ax1)
+                        || !double.TryParse(zrow.Y.Text, out double ay1)
+                        || !double.TryParse(zrow.X2.Text, out double ax2)
+                        || !double.TryParse(zrow.Y2.Text, out double ay2)
+                        || ax2 <= ax1 || ay2 <= ay1)
+                    {
+                        UpdateZoneDisplay();
+                        return;
+                    }
+                    if (p.ZoneRects == null) p.ZoneRects = new Dictionary<string, double[]>();
+                    p.ZoneRects[zkey] = new[] { ax1 - zr.l, ay1 - zr.t, ax2 - ax1, ay2 - ay1 };
+                }
+                else if (p.ZoneRects != null) p.ZoneRects.Remove(zkey);
+            }
             _s.Save();
             FireApply();
         }
@@ -1136,8 +1315,69 @@ public partial class SettingsWindow : Window
             ZoneYBox.IsEnabled = en;
             ZoneX2Box.IsEnabled = en;
             ZoneY2Box.IsEnabled = en;
+            // Per-zone rows: stored override -> screen DIP, else the ini
+            // tile rect (empty when the section has none).
+            foreach (var (zkey, zrow) in _zoneRows)
+            {
+                double sx1 = 0, sy1 = 0, sx2 = 0, sy2 = 0;
+                bool show = false;
+                if (p != null && p.ZoneRects != null
+                    && p.ZoneRects.TryGetValue(zkey, out var a)
+                    && a != null && a.Length >= 4 && a[2] > 0 && a[3] > 0)
+                {
+                    sx1 = r.l + a[0]; sy1 = r.t + a[1];
+                    sx2 = sx1 + a[2]; sy2 = sy1 + a[3];
+                    show = true;
+                    zrow.Def.IsChecked = false;
+                }
+                else
+                {
+                    zrow.Def.IsChecked = true;
+                    var (tx1, ty1, tx2, ty2) = ZoneTileScreen(
+                        zkey == "left-click" ? "lbtn" : zkey == "right-click" ? "rbtn" : "wheel",
+                        r, sec, out bool found);
+                    if (found) { sx1 = tx1; sy1 = ty1; sx2 = tx2; sy2 = ty2; show = true; }
+                }
+                zrow.X.Text = show ? TrimNum(sx1) : "";
+                zrow.Y.Text = show ? TrimNum(sy1) : "";
+                zrow.X2.Text = show ? TrimNum(sx2) : "";
+                zrow.Y2.Text = show ? TrimNum(sy2) : "";
+                bool zen = zrow.Def.IsChecked != true;
+                zrow.X.IsEnabled = zen;
+                zrow.Y.IsEnabled = zen;
+                zrow.X2.IsEnabled = zen;
+                zrow.Y2.IsEnabled = zen;
+            }
         }
         catch { }
+    }
+
+    /// <summary>An ini tile rect in screen DIP (ChromeH mapping like the
+    /// pad): role is lbtn/rbtn/wheel/pad. found=false when the section
+    /// has no such tile.</summary>
+    private (double x1, double y1, double x2, double y2) ZoneTileScreen(
+        string role,
+        (double l, double t, double w, double h) r, string sec, out bool found)
+    {
+        found = false;
+        if (_presets.TryGetValue(sec, out var lay) && lay != null)
+        {
+            foreach (var t in lay.Tiles)
+            {
+                string k = (t.Kind ?? "").ToLowerInvariant();
+                string btn = (t.ClickButton ?? "").ToLowerInvariant();
+                bool hit = role == "pad" ? k == "pad"
+                    : role == "wheel" ? k.Contains("wheel")
+                    : role == "lbtn" ? (k.Contains("lbtn") || (k.Contains("click") && btn != "right"))
+                    : (k.Contains("rbtn") || (k.Contains("click") && btn == "right"));
+                if (!hit) continue;
+                double tx = r.l + r.w * t.X / 100.0;
+                double ty = r.t + 30 + (r.h - 30) * t.Y / 100.0;
+                found = true;
+                return (tx, ty, tx + r.w * t.W / 100.0, ty + (r.h - 30) * t.H / 100.0);
+            }
+        }
+        return (0, 0, 0, 0);
     }
 
     /// <summary>Default pad zone in screen DIP: the ini pad tile, or the
@@ -1300,6 +1540,7 @@ public partial class SettingsWindow : Window
             LayoutInfoLbl.Text = $"모니터: {homeName} {home.w:0}x{home.h:0} | " +
                 $"패드: {r.l:0},{r.t:0} {r.w:0}x{r.h:0} (모니터의 {cov:0}%) | " +
                 $"모드 {mode} | 타일 {shown}개";
+            DrawCustomZones(r, sec, key);
             DrawPins();
             UpdateZoneDisplay();
         }

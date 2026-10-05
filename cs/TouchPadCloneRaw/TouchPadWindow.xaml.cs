@@ -958,10 +958,32 @@ public partial class TouchPadWindow : Window
         return "pad";
     }
 
+    private static bool IsResizerCorner(double x, double y, double w, double h) =>
+        y > h - GripHit
+        && (x + (h - y) < GripHit || (w - x) + (h - y) < GripHit);
+
     private string ZoneOf(Point p)
     {
         var (w, h) = TileArea();
         if (w <= 0 || h <= 0) return "pad";
+        // Explicit per-zone rects win over tiles (resizer corner exempt
+        // so the grips stay usable).
+        if (!IsResizerCorner(p.X, p.Y - ChromeH, w, h))
+        {
+            var zr = _s.Pad(_layoutName).ZoneRects;
+            if (zr != null)
+            {
+                foreach (var kv in zr)
+                {
+                    var a = kv.Value;
+                    if (a == null || a.Length < 4 || a[2] <= 0 || a[3] <= 0) continue;
+                    if (kv.Key != "left-click" && kv.Key != "right-click" && kv.Key != "wheel")
+                        continue;
+                    if (p.X >= a[0] && p.Y >= a[1] && p.X <= a[0] + a[2] && p.Y <= a[1] + a[3])
+                        return kv.Key;
+                }
+            }
+        }
         // Layout tiles first (what you see is what you hit): last button
         // tile wins in file order, mirroring PresetParser.HitTest.
         if (_layout != null)

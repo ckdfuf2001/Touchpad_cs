@@ -172,6 +172,10 @@ public sealed class PadConfig
     public double ZonePadY { get; set; }
     public double ZonePadW { get; set; }
     public double ZonePadH { get; set; }
+    /// <summary>Per-zone custom rects (window DIP [x,y,w,h]) for
+    /// left-click / right-click / wheel. Absent or non-positive =
+    /// follow tiles. The pad zone keeps its own fields above.</summary>
+    public Dictionary<string, double[]> ZoneRects { get; set; } = new();
     /// <summary>Per-pad gesture override (null = follow the family map).
     /// This is how one mode (pad) gets different gestures from another.</summary>
     public GestureMap? Gestures { get; set; }
