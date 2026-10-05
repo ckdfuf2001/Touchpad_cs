@@ -1120,6 +1120,22 @@ public partial class TouchPadWindow : Window
                 e.Handled = true;
                 return;
             }
+            // Custom active touch area (per-pad): outside it touches do
+            // nothing. Placed after resizer so the corners stay usable.
+            {
+                var pc = _s.Pad(_layoutName);
+                if (pc.ZonePadCustom && pc.ZonePadW > 0 && pc.ZonePadH > 0)
+                {
+                    if (p.X < pc.ZonePadX || p.Y < pc.ZonePadY
+                        || p.X > pc.ZonePadX + pc.ZonePadW
+                        || p.Y > pc.ZonePadY + pc.ZonePadH)
+                    {
+                        Log.Write($"TOUCHDOWN outside custom pad area (ignored) @{p.X:0},{p.Y:0}");
+                        e.Handled = true;
+                        return;
+                    }
+                }
+            }
             var f = new Finger
             {
                 Start = p,

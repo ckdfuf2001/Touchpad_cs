@@ -163,6 +163,14 @@ public sealed class PadConfig
     public double RectY { get; set; }
     public double RectW { get; set; }
     public double RectH { get; set; }
+    /// <summary>Custom active touch area (window DIP). When true with
+    /// positive size, touches outside it are ignored. Default (false)
+    /// = whole pad per tiles/fallback.</summary>
+    public bool ZonePadCustom { get; set; }
+    public double ZonePadX { get; set; }
+    public double ZonePadY { get; set; }
+    public double ZonePadW { get; set; }
+    public double ZonePadH { get; set; }
     /// <summary>Per-pad gesture override (null = follow the family map).
     /// This is how one mode (pad) gets different gestures from another.</summary>
     public GestureMap? Gestures { get; set; }

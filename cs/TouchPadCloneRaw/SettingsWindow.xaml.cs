@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using Microsoft.Win32;
@@ -715,6 +716,10 @@ public partial class SettingsWindow : Window
             b.LostFocus += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
         LayoutSaveBtn.Click += (_, _) => { SaveLayoutTab(); DrawPreview(); };
         LayoutShowBtn.Click += (_, _) => ShowLayoutPad();
+        LayoutPreview.MouseMove += LayoutPreview_MouseMove;
+        LayoutPreview.MouseLeftButtonDown += LayoutPreview_MouseDown;
+        PadZoneDef.Checked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
+        PadZoneDef.Unchecked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
         if (LayoutSelBox.Items.Contains(_s.Layout)) LayoutSelBox.SelectedItem = _s.Layout;
         else if (LayoutSelBox.Items.Count > 0) LayoutSelBox.SelectedIndex = 0;
         LoadLayoutEditors();
@@ -902,6 +907,24 @@ public partial class SettingsWindow : Window
                 return;
             }
             p.RectX = x; p.RectY = y; p.RectW = w; p.RectH = h;
+            // Pad zone override (screen DIP boxes -> window DIP).
+            var (zh, zr, zm, zk, zs) = PreviewGeom();
+            if (PadZoneDef.IsChecked != true)
+            {
+                if (!double.TryParse(ZoneXBox.Text, out double zx1)
+                    || !double.TryParse(ZoneYBox.Text, out double zy1)
+                    || !double.TryParse(ZoneX2Box.Text, out double zx2)
+                    || !double.TryParse(ZoneY2Box.Text, out double zy2)
+                    || zx2 <= zx1 || zy2 <= zy1)
+                {
+                    UpdateZoneDisplay();
+                    return;
+                }
+                p.ZonePadCustom = true;
+                p.ZonePadX = zx1 - zr.l; p.ZonePadY = zy1 - zr.t;
+                p.ZonePadW = zx2 - zx1; p.ZonePadH = zy2 - zy1;
+            }
+            else p.ZonePadCustom = false;
             _s.Save();
             FireApply();
         }
@@ -922,6 +945,142 @@ public partial class SettingsWindow : Window
         catch { }
     }
 
+    /// <summary>Shared preview geometry: home monitor, placed pad rect,
+    /// area mode, pads key and ini section. Draw, hover and zone display
+    /// all read this so the numbers always agree.</summary>
+    private ((double l, double t, double w, double h) home,
+        (double l, double t, double w, double h) r,
+        string mode, string key, string sec) PreviewGeom()
+    {
+        var home = LayoutHome();
+        string sec = LayoutKey();
+        string key = AppSettings.PadFamilyKey(sec);
+        _s.Pads.TryGetValue(key, out var p);
+        string mode = p?.AreaMode ?? "default";
+        if (sec.StartsWith("fullscreen", StringComparison.OrdinalIgnoreCase))
+            mode = "full";
+        double pw = _s.PadWidth > 0 ? _s.PadWidth : 340;
+        double ph = _s.PadHeight > 0 ? _s.PadHeight : 260;
+        var r = Core.PadPlacer.Place(mode, home, (pw, ph),
+            (p?.RectX ?? 0, p?.RectY ?? 0, p?.RectW ?? 0, p?.RectH ?? 0));
+        return (home, r, mode, key, sec);
+    }
+
+    // Preview mapping (hover readout): canvas px -> monitor DIP.
+    private double _pvOx, _pvOy, _pvSc = 1, _pvVl, _pvVt;
+    private bool _hoverLock;
+    private string _hoverText = "";
+
+    private void LayoutPreview_MouseMove(object sender, MouseEventArgs e)
+    {
+        try
+        {
+            if (_hoverLock) return;
+            var pp = e.GetPosition(LayoutPreview);
+            if (_pvSc < 1e-9) return;
+            double mx = _pvVl + (pp.X - _pvOx) / _pvSc;
+            double my = _pvVt + (pp.Y - _pvOy) / _pvSc;
+            _hoverText = $"X={mx:0} Y={my:0}";
+            LayoutHoverLbl.Text = _hoverText;
+        }
+        catch { }
+    }
+
+    private void LayoutPreview_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        try
+        {
+            _hoverLock = !_hoverLock;
+            LayoutHoverLbl.Text = _hoverText + (_hoverLock ? " (고정됨)" : "");
+        }
+        catch { }
+    }
+
+    /// <summary>Zone rects in screen DIP + pad custom editors. Display and
+    /// editors always derive from the same geometry.</summary>
+    private void UpdateZoneDisplay()
+    {
+        try
+        {
+            var (home, r, mode, key, sec) = PreviewGeom();
+            string F(double x1, double y1, double x2, double y2) =>
+                $"[{x1:0},{y1:0}] ~ [{x2:0},{y2:0}]";
+            var lines = new List<string>
+            {
+                $"위치: {F(r.l, r.t, r.l + r.w, r.t + r.h)}",
+            };
+            string[] roles = { "lbtn", "rbtn", "wheel", "pad" };
+            string[] names = { "Left", "Right", "wheel", "pad" };
+            for (int i = 0; i < roles.Length; i++)
+            {
+                string line = $"{names[i]}: 없음";
+                if (_presets.TryGetValue(sec, out var lay) && lay != null)
+                {
+                    foreach (var t in lay.Tiles)
+                    {
+                        string k = (t.Kind ?? "").ToLowerInvariant();
+                        string btn = (t.ClickButton ?? "").ToLowerInvariant();
+                        bool hit = roles[i] == "pad" ? k == "pad"
+                            : roles[i] == "wheel" ? k.Contains("wheel")
+                            : roles[i] == "lbtn" ? (k.Contains("lbtn") || (k.Contains("click") && btn != "right"))
+                            : (k.Contains("rbtn") || (k.Contains("click") && btn == "right"));
+                        if (!hit) continue;
+                        double tx = r.l + r.w * t.X / 100.0;
+                        double ty = r.t + 30 + (r.h - 30) * t.Y / 100.0;
+                        double tw = r.w * t.W / 100.0, th = (r.h - 30) * t.H / 100.0;
+                        line = $"{names[i]}: {F(tx, ty, tx + tw, ty + th)}";
+                        break;
+                    }
+                }
+                lines.Add(line);
+            }
+            ZoneRectsLbl.Text = string.Join("\n", lines);
+            // Pad custom editors: stored window-DIP -> screen DIP display.
+            _s.Pads.TryGetValue(key, out var p);
+            bool custom = p != null && p.ZonePadCustom && p.ZonePadW > 0 && p.ZonePadH > 0;
+            PadZoneDef.IsChecked = !custom;
+            if (custom && p != null)
+            {
+                ZoneXBox.Text = TrimNum(r.l + p.ZonePadX);
+                ZoneYBox.Text = TrimNum(r.t + p.ZonePadY);
+                ZoneX2Box.Text = TrimNum(r.l + p.ZonePadX + p.ZonePadW);
+                ZoneY2Box.Text = TrimNum(r.t + p.ZonePadY + p.ZonePadH);
+            }
+            else
+            {
+                var (zx1, zy1, zx2, zy2) = PadZoneScreen();
+                ZoneXBox.Text = TrimNum(zx1);
+                ZoneYBox.Text = TrimNum(zy1);
+                ZoneX2Box.Text = TrimNum(zx2);
+                ZoneY2Box.Text = TrimNum(zy2);
+            }
+            bool en = PadZoneDef.IsChecked != true;
+            ZoneXBox.IsEnabled = en;
+            ZoneYBox.IsEnabled = en;
+            ZoneX2Box.IsEnabled = en;
+            ZoneY2Box.IsEnabled = en;
+        }
+        catch { }
+    }
+
+    /// <summary>Default pad zone in screen DIP: the ini pad tile, or the
+    /// full tile area when the section has none.</summary>
+    private (double x1, double y1, double x2, double y2) PadZoneScreen()
+    {
+        var (home, r, mode, key, sec) = PreviewGeom();
+        if (_presets.TryGetValue(sec, out var lay) && lay != null)
+        {
+            foreach (var t in lay.Tiles)
+            {
+                if ((t.Kind ?? "").ToLowerInvariant() != "pad") continue;
+                double tx = r.l + r.w * t.X / 100.0;
+                double ty = r.t + 30 + (r.h - 30) * t.Y / 100.0;
+                return (tx, ty, tx + r.w * t.W / 100.0, ty + (r.h - 30) * t.H / 100.0);
+            }
+        }
+        return (r.l, r.t + 30, r.l + r.w, r.t + r.h);
+    }
+
     private void DrawPreview()
     {
         try
@@ -934,6 +1093,8 @@ public partial class SettingsWindow : Window
             double sc = Math.Min(cw / vw, ch / vh);
             double ox = (cw - vw * sc) / 2 - vl * sc;
             double oy = (ch - vh * sc) / 2 - vt * sc;
+            _pvOx = ox; _pvOy = oy; _pvSc = sc; _pvVl = vl; _pvVt = vt;
+            if (!_hoverLock) LayoutHoverLbl.Text = "X - Y -";
             double X(double v) => ox + v * sc;
             double Y(double v) => oy + v * sc;
             // Monitors (bounds are physical px: divide into DIPs first so
@@ -977,17 +1138,7 @@ public partial class SettingsWindow : Window
             }
             catch { }
             // Pad rect (same math as the app: PadPlacer.Place).
-            var home = LayoutHome();
-            string sec = LayoutKey();
-            string key = AppSettings.PadFamilyKey(sec);
-            _s.Pads.TryGetValue(key, out var p);
-            string mode = p?.AreaMode ?? "default";
-            if (sec.StartsWith("fullscreen", StringComparison.OrdinalIgnoreCase))
-                mode = "full";
-            double pw = _s.PadWidth > 0 ? _s.PadWidth : 340;
-            double ph = _s.PadHeight > 0 ? _s.PadHeight : 260;
-            var r = Core.PadPlacer.Place(mode, home, (pw, ph),
-                (p?.RectX ?? 0, p?.RectY ?? 0, p?.RectW ?? 0, p?.RectH ?? 0));
+            var (home, r, mode, key, sec) = PreviewGeom();
             var pr = new System.Windows.Shapes.Rectangle
             {
                 Width = Math.Max(2, r.w * sc),
@@ -1071,6 +1222,7 @@ public partial class SettingsWindow : Window
             LayoutInfoLbl.Text = $"모니터: {homeName} {home.w:0}x{home.h:0} | " +
                 $"패드: {r.l:0},{r.t:0} {r.w:0}x{r.h:0} (모니터의 {cov:0}%) | " +
                 $"모드 {mode} | 타일 {shown}개";
+            UpdateZoneDisplay();
         }
         catch { }
     }
