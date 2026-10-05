@@ -134,12 +134,16 @@ public partial class TouchPadWindow : Window
     private int _downOrigX = int.MinValue, _downOrigY = int.MinValue;
 
     /// <summary>Event position law: anchor cursor + finger travel (scaled).
-    /// Never reads the live cursor (yanked/failing reads).</summary>
+    /// Never reads the live cursor (yanked/failing reads). Dragging
+    /// sessions run 1:1 (_gainOverride) so the grab stays put.</summary>
+    private double _gainOverride = -1;
+
     private (int X, int Y) EventAt(Finger f, Point now)
     {
         if (_downOrigX == int.MinValue) return (int.MinValue, int.MinValue);
-        double tx = (now.X - f.Start.X) * _dpi * _s.Speed;
-        double ty = (now.Y - f.Start.Y) * _dpi * _s.Speed;
+        double gain = _gainOverride > 0 ? _gainOverride : _s.Speed;
+        double tx = (now.X - f.Start.X) * _dpi * gain;
+        double ty = (now.Y - f.Start.Y) * _dpi * gain;
         return (_downOrigX + (int)tx, _downOrigY + (int)ty);
     }
     private bool _heldLeft;
@@ -204,6 +208,11 @@ public partial class TouchPadWindow : Window
     {
         _s = s;
         InitializeComponent();
+        // OS tablet gestures (press-and-hold et al.) pull the cursor to
+        // the contact and synthesize their own clicks at the touch point:
+        // on a long hold the mouse visibly jumps to the finger. Off here
+        // (our own hold timer does the right-click); other windows keep it.
+        Core.TabletTweaks.DisableSystemGestures(this);
         var src = PresentationSource.FromVisual(this);
         _dpi = src?.CompositionTarget?.TransformToDevice.M11 ?? 1;
 
@@ -1283,6 +1292,8 @@ public partial class TouchPadWindow : Window
                     Fx().Flash(_downOrigX / _dpi, _downOrigY / _dpi);
                     Status($"triplehold @({_downOrigX},{_downOrigY})");
                     _lastWhat = "triplehold";
+                    _gainOverride = -1;
+                    StartHoldGuard();
                 }
                 else if (second)
                 {
@@ -1296,6 +1307,8 @@ public partial class TouchPadWindow : Window
                     Fx().Flash(_downOrigX / _dpi, _downOrigY / _dpi);
                     Status($"taphold @({_downOrigX},{_downOrigY})");
                     _lastWhat = "taphold";
+                    _gainOverride = -1;
+                    StartHoldGuard();
                 }
                 else
                 {
@@ -1327,6 +1340,8 @@ public partial class TouchPadWindow : Window
                     _g = G.Pending;
                     Status($"pending @({_downOrigX},{_downOrigY})");
                     _lastWhat = "pending";
+                    _gainOverride = -1;
+                    StartHoldGuard();
                 }
                 // Hold arms right-click (pad/left-click zones): still held
                 // LongPressMs with no real movement -> R down+up at press pos.
@@ -1614,9 +1629,20 @@ public partial class TouchPadWindow : Window
                 {
                     // Drag starts now: "drag" presses and holds (no extra
                     // click), "drag_hold" clicks first, then holds.
-                    // Rebase travel so the deadzone doesn't jump it.
+                    // Grab semantics: snap the cursor to the finger and
+                    // run 1:1, so the grabbed point stays under it (no
+                    // overshoot from a far anchor). The press goes out
+                    // real through momentary transparency, so system
+                    // modals (title move, resize) and client grabs engage
+                    // natively at the finger. Rebase travel so the
+                    // deadzone doesn't jump it.
                     string sh = ActiveMap().SecondHold;
                     string dbtn = _s.SwapButtons ? "right" : "left";
+                    int gx = (int)((Left + p.X) * _dpi), gy = (int)((Top + p.Y) * _dpi);
+                    Out.PlaceAtReal(gx, gy);
+                    _downOrigX = gx; _downOrigY = gy;
+                    Out.SetAnchor(gx, gy);
+                    _gainOverride = 1.0;
                     if (sh == "drag_hold")
                     {
                         Out.DownAt(_downOrigX, _downOrigY, dbtn);
@@ -1624,7 +1650,11 @@ public partial class TouchPadWindow : Window
                     }
                     if (sh == "drag" || sh == "drag_hold")
                     {
-                        Out.DownAt(_downOrigX, _downOrigY, dbtn);
+                        if (_selfHwnd == IntPtr.Zero)
+                            _selfHwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+                        NativeWin.SetClickThrough(_selfHwnd, true);
+                        StartThruFailsafe();
+                        Core.Out.DownAtReal(gx, gy, dbtn);
                         _heldLeft = true;
                     }
                     f.Start = p;
@@ -1638,12 +1668,19 @@ public partial class TouchPadWindow : Window
                     {
                         // Skip no-op placements (stationary jitter): fewer
                         // inputs, no flicker. Self-heals when something else
-                        // moved the cursor (target != live).
+                        // moved the cursor (target != live) - except the
+                        // physical mouse, which wins: adopt it instead of
+                        // fighting (no flip-flop between the two drivers).
                         var (lx, ly) = Out.Cursor();
                         if (Math.Abs(mx2 - lx) + Math.Abs(my2 - ly) > 2)
                         {
-                            Out.PlaceAt(mx2, my2);   // held button => drag
-                            Fx().Spin(mx2 / _dpi, my2 / _dpi);
+                            if (Environment.TickCount64 - Core.MouseTap.LastExtTick < 400)
+                            { _downOrigX = lx; _downOrigY = ly; Out.SetAnchor(lx, ly); }
+                            else
+                            {
+                                Out.PlaceAt(mx2, my2);   // held button => drag
+                                Fx().Spin(mx2 / _dpi, my2 / _dpi);
+                            }
                         }
                         _lastWhat = _g == G.Dragging ? "drag-move" : "move";
                     }
@@ -1819,13 +1856,17 @@ public partial class TouchPadWindow : Window
                             _lastWhat = "third-tap";
                             break;
                         case G.Dragging:                      // drag-drop
-                            Out.UpAt(fx, fy, "left");
+                            // Same button as the grab (swapped configs
+                            // held right, not left).
+                            Out.UpAt(fx, fy, _s.SwapButtons ? "right" : "left");
+                            StopThruFailsafe();
                             Fx().Flash(fx / _dpi, fy / _dpi);
                             _lastTapTick = 0;
                             _tapChain = 0;
                             _lastWhat = "drag-drop";
                             // Real drops land through our topmost window.
                             _throughUntil = Environment.TickCount64 + 300;
+                            _gainOverride = -1;
                             break;
                         default:
                             _lastTapTick = 0;
@@ -1848,8 +1889,10 @@ public partial class TouchPadWindow : Window
                         _pollBlockUntil = now + 400;
                     }
                 // Yank window: the OS pulls to the contact up to a few
-                // hundred ms AFTER lift; hold the release point briefly
-                // (stop early when stable or a new touch lands).
+                // hundred ms AFTER lift; hold the release point for the
+                // whole window (an early quiet tick does NOT end it - the
+                // yank usually lands after the first stable ticks).
+                // Stands down for the physical mouse (its own input).
                 if (fx != int.MinValue)
                 {
                     // Defend where the cursor really is (snapshot now):
@@ -1858,10 +1901,10 @@ public partial class TouchPadWindow : Window
                     var (sx0, sy0) = Out.Cursor();
                     int hx = (sx0 != 0 || sy0 != 0) ? sx0 : fx;
                     int hy = (sx0 != 0 || sy0 != 0) ? sy0 : fy;
-                    int tries = 5;
+                    int tries = 12;
                     var holdT = new System.Windows.Threading.DispatcherTimer
                     {
-                        Interval = TimeSpan.FromMilliseconds(40),
+                        Interval = TimeSpan.FromMilliseconds(50),
                     };
                     holdT.Tick += (_, _) =>
                     {
@@ -1869,13 +1912,11 @@ public partial class TouchPadWindow : Window
                         {
                             if (--tries <= 0) { holdT.Stop(); return; }
                             if (_fingers.Count > 0) { holdT.Stop(); return; }
+                            if (Environment.TickCount64 - Core.MouseTap.LastExtTick < 400) return;
                             var (hx2, hy2) = Out.Logical();
-                            if (Math.Abs(hx2 - hx) + Math.Abs(hy2 - hy) <= 4)
-                            {
-                                holdT.Stop();
-                                return;
-                            }
-                            Out.PlaceAt(hx, hy);
+                            if (Math.Abs(hx2 - hx) + Math.Abs(hy2 - hy) <= 4) return;
+                            // Real placement (not thru): see hold-guard.
+                            Out.PlaceAtReal(hx, hy);
                             _lastWhat = "yank-hold";
                         }
                         catch { holdT.Stop(); }
@@ -1965,6 +2006,113 @@ public partial class TouchPadWindow : Window
             double nh = Math.Max(200, _rsH + dy);
             if (Math.Abs(nh - Height) >= 1) Height = nh;
         }
+    }
+
+    private System.Windows.Threading.DispatcherTimer? _holdGuard;
+    private long _vetoLogTick;
+
+    /// <summary>Still-hold cursor guard: with no moves our engine outputs
+    /// nothing, so drift is the OS yank (the physical mouse vetoes via
+    /// its own input tick). Heals toward the anchor; the touch-point
+    /// signature keeps it from fighting real input.</summary>
+    private void StartHoldGuard()
+    {
+        try
+        {
+            if (_holdGuard != null) return;
+            _holdGuard = new System.Windows.Threading.DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(25),
+            };
+            _holdGuard.Tick += (_, _) =>
+            {
+                try
+                {
+                    var hg = _holdGuard;
+                    if (_fingers.Count == 0) { hg?.Stop(); _holdGuard = null; return; }
+                    // Every still single press, including AFTER our own
+                    // hold fired (it leaves Pending but the finger is down
+                    // and the OS keeps pulling for the rest of the hold).
+                    if (_fingers.Count != 1 || _twoSeen) return;
+                    Finger? ff = null;
+                    foreach (var kv in _fingers) { ff = kv.Value; break; }
+                    if (ff == null || ff.Moved) return;
+                    if (_downOrigX == int.MinValue) return;
+                    if (Environment.TickCount64 - Core.MouseTap.LastExtTick < 400)
+                    {
+                        // Throttled veto note: proves whether the guard
+                        // ever stands down (physical input wins).
+                        long nowV = Environment.TickCount64;
+                        if (_holdId != -1 && nowV - _vetoLogTick > 1000)
+                        {
+                            _vetoLogTick = nowV;
+                            var (vx, vy) = Out.Cursor();
+                            Log.Write($"hold-guard veto ext @({vx},{vy})");
+                        }
+                        return;
+                    }
+                    var (lx, ly) = Out.Cursor();
+                    // Diagnostic watch (hold armed only, drifted only).
+                    if (_holdId != -1
+                        && Math.Abs(lx - _downOrigX) + Math.Abs(ly - _downOrigY) > 4)
+                    {
+                        double tx0 = (Left + ff.Last.X) * _dpi, ty0 = (Top + ff.Last.Y) * _dpi;
+                        Log.Write($"hold-watch live=({lx},{ly}) anchor=({_downOrigX},{_downOrigY}) touch=({tx0:0},{ty0:0}) cur=0x{CursorFlags():X}");
+                    }
+                    if (Math.Abs(lx - _downOrigX) + Math.Abs(ly - _downOrigY) <= 12) return;
+                    double tx = (Left + ff.Last.X) * _dpi, ty = (Top + ff.Last.Y) * _dpi;
+                    if (Math.Abs(lx - tx) + Math.Abs(ly - ty) > 60) return;
+                    // Real placement (not thru): Below would swallow a
+                    // heal aimed over our own window.
+                    Out.PlaceAtReal(_downOrigX, _downOrigY);
+                    Log.Write($"hold-guard yank back @({lx},{ly})");
+                    _lastWhat = "hold-guard";
+                }
+                catch { }
+            };
+            _holdGuard.Start();
+        }
+        catch { }
+    }
+
+    private System.Windows.Threading.DispatcherTimer? _thruFailsafe;
+
+    /// <summary>Drag transparency failsafe: a lost lift must never leave
+    /// the pad untouchable (drags always end at lift too).</summary>
+    private void StartThruFailsafe()
+    {
+        try
+        {
+            if (_thruFailsafe == null)
+            {
+                _thruFailsafe = new System.Windows.Threading.DispatcherTimer
+                { Interval = TimeSpan.FromSeconds(30) };
+                _thruFailsafe.Tick += (_, _) =>
+                {
+                    try
+                    {
+                        _thruFailsafe?.Stop();
+                        if (_selfHwnd != IntPtr.Zero)
+                            NativeWin.SetClickThrough(_selfHwnd, false);
+                    }
+                    catch { }
+                };
+            }
+            _thruFailsafe.Stop();
+            _thruFailsafe.Start();
+        }
+        catch { }
+    }
+
+    private void StopThruFailsafe()
+    {
+        try
+        {
+            _thruFailsafe?.Stop();
+            if (_selfHwnd != IntPtr.Zero)
+                NativeWin.SetClickThrough(_selfHwnd, false);
+        }
+        catch { }
     }
 
     private void EndResize()
@@ -2179,6 +2327,10 @@ public partial class TouchPadWindow : Window
     [DllImport("user32.dll")]
     private static extern uint GetDoubleClickTime();
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg,
+        UIntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
+
     [DllImport("user32.dll", EntryPoint = "GetSystemMetrics")]
     private static extern int GetSystemMetrics2(int nIndex);
 
@@ -2206,6 +2358,31 @@ public partial class TouchPadWindow : Window
     [DllImport("user32.dll")]
     private static extern IntPtr SetFocus(IntPtr hWnd);
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct CURSORINFO
+    {
+        public int cbSize;
+        public int flags;
+        public IntPtr hCursor;
+        public POINT ptScreenPos;
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorInfo(ref CURSORINFO pci);
+
+    /// <summary>Cursor visibility flags (0x1 showing, 0x2 suppressed).</summary>
+    private static int CursorFlags()
+    {
+        try
+        {
+            var ci = new CURSORINFO { cbSize = Marshal.SizeOf(typeof(CURSORINFO)) };
+            if (GetCursorInfo(ref ci)) return ci.flags;
+        }
+        catch { }
+        return -1;
+    }
+
     private const uint GA_ROOT = 2;
 
     /// <summary>Real-click parity for posted pass-through downs: posted
@@ -2228,8 +2405,10 @@ public partial class TouchPadWindow : Window
             try
             {
                 attached = AttachThreadInput(ours, tid, true);
-                try { SetForegroundWindow(root); } catch { }
+                bool fgOk = false;
+                try { fgOk = SetForegroundWindow(root); } catch { }
                 try { SetFocus(hwnd); } catch { }
+                if (!fgOk) Core.Log.Write($"FWD focus failed root=0x{root.ToInt64():X}");
             }
             finally
             {
@@ -2409,6 +2588,10 @@ public partial class TouchPadWindow : Window
                 wParam = (UIntPtr)(uint)buttons;
                 // Drag capture: moves during a hold follow the down-window,
                 // so crossing windows mid-drag doesn't strand the target.
+                // (No NC skip: when no system modal owns the drag -
+                // maximized/custom windows - these posts are the only
+                // thing that moves it. A live modal captures the real
+                // mouse itself, so we never double-drive it.)
                 if (buttons != 0)
                 {
                     foreach (var b in new[] { "left", "right", "middle" })
@@ -2417,6 +2600,20 @@ public partial class TouchPadWindow : Window
                     if (ScreenToClient(target, ref cpt))
                         lParam = Pack(cpt.X, cpt.Y);
                 }
+                // Throttle: uncoalesced posted moves flood the target
+                // queue and the button-up behind them lands late
+                // (drag release lag). Held (drag) moves keep full
+                // fidelity at 250Hz; hover moves sip at 60Hz.
+                long nowMv = Environment.TickCount64;
+                int gap = buttons != 0 ? 4 : 16;
+                if ((sx == _lastFwdMoveX && sy == _lastFwdMoveY)
+                    || nowMv - _lastFwdMoveTick < gap)
+                {
+                    e.Handled = true;
+                    return;
+                }
+                _lastFwdMoveTick = nowMv;
+                _lastFwdMoveX = sx; _lastFwdMoveY = sy;
             }
             if (msg != 0) PostMessage(target, msg, wParam, lParam);
             _lastWhat = "mouse-fwd";
@@ -2430,6 +2627,8 @@ public partial class TouchPadWindow : Window
     // Buttons capture like real input: down remembers its window, moves
     // and ups during the hold go there even if the cursor wandered off.
     private readonly Dictionary<string, IntPtr> _fwdCap = new();
+    private long _lastFwdMoveTick;
+    private int _lastFwdMoveX = int.MinValue, _lastFwdMoveY = int.MinValue;
 
     /// <summary>MK_* button flag for a pressed button (posted downs).</summary>
     private static uint BtnMask(string button) => button switch
@@ -2449,9 +2648,47 @@ public partial class TouchPadWindow : Window
     private static uint BtnUpMsg(string button) => button switch
     {
         "right" => 0x0205u,
-        "middle" => 0x0208u,
+        "middle" => 0x0207u,
         _ => 0x0202u,
     };
+
+    private static uint BtnDownNclMsg(string button) => button switch
+    {
+        "right" => 0x00A4u,
+        "middle" => 0x00A7u,
+        _ => 0x00A1u,
+    };
+
+    private static uint BtnDblNclMsg(string button) => button switch
+    {
+        "right" => 0x00A6u,
+        "middle" => 0x00A9u,
+        _ => 0x00A3u,
+    };
+
+    private static uint BtnUpNclMsg(string button) => button switch
+    {
+        "right" => 0x00A5u,
+        "middle" => 0x00A8u,
+        _ => 0x00A2u,
+    };
+
+    /// <summary>Non-client hit-test at a screen point (HTCLIENT = 1).
+    /// Title bars need NCL messages: client downs there do nothing.</summary>
+    private static int NcHit(IntPtr top, int sx, int sy)
+    {
+        try
+        {
+            IntPtr lParam = (IntPtr)((sy << 16) | (sx & 0xFFFF));
+            SendMessageTimeout(top, 0x0084u, UIntPtr.Zero, lParam, 0, 50, out IntPtr r);
+            return r.ToInt32();
+        }
+        catch { return 1; }
+    }
+
+    /// <summary>Per-button NC hit code from its down (1 = client).
+    /// Ups must match their down kind.</summary>
+    private readonly Dictionary<string, int> _fwdNc = new();
 
     private static IntPtr Pack(int x, int y) => (IntPtr)((y << 16) | (x & 0xFFFF));
 
@@ -2467,22 +2704,33 @@ public partial class TouchPadWindow : Window
         {
             IntPtr target = BelowAt(sx, sy);
             if (target == IntPtr.Zero) return;
-            target = DeepestChild(target, sx, sy);
             // Real-click parity: posted downs don't activate, so bring
             // the target forward + focus it (else clicks land dead and
-            // keys go nowhere).
-            ActivateTarget(target);
+            // keys go nowhere). Skipped when already foreground: the
+            // refocus churn per click flickers activation and breaks
+            // double-clicks (title maximize never worked that way).
+            IntPtr root = GetAncestor(target, GA_ROOT);
+            if (root == IntPtr.Zero) root = target;
+            bool needFocus = true;
+            try { needFocus = GetForegroundWindow() != root; } catch { }
+            target = DeepestChild(target, sx, sy);
+            if (needFocus) ActivateTarget(target);
+            // Non-client (title bar!): NCL messages with the hit code;
+            // client downs there do nothing. lParam stays screen coords.
+            int ht = NcHit(root, sx, sy);
             // Manual double pairing: consecutive downs within the OS
             // time+box on the same window alternate single/double.
             // Windows rule: only the 2nd (even) down becomes DBLCLK,
             // and only for CS_DBLCLKS windows.
             long nowMs = Environment.TickCount64;
-            int cx = GetSystemMetrics2(36) / 2;
-            int cy = GetSystemMetrics2(37) / 2;
+            // OS double-click box (full metric, not quarter): shaky
+            // second presses must still pair, like native input.
+            int cx = GetSystemMetrics2(36);
+            int cy = GetSystemMetrics2(37);
             if (button == _lastDownBtn
-                && nowMs - _lastDownMs < GetDoubleClickTime()
-                && Math.Abs(sx - _lastDownX) * 2 <= cx
-                && Math.Abs(sy - _lastDownY) * 2 <= cy
+                && nowMs - _lastDownMs <= GetDoubleClickTime()
+                && Math.Abs(sx - _lastDownX) <= cx
+                && Math.Abs(sy - _lastDownY) <= cy
                 && target == _lastDownHwnd)
                 _downParity++;
             else
@@ -2495,6 +2743,19 @@ public partial class TouchPadWindow : Window
             _lastDownX = sx; _lastDownY = sy;
             _lastDownHwnd = target;
             _lastDownBtn = button;
+            bool nc = ht != 1 && ht != 0;
+            _fwdCap[button] = nc ? root : target;
+            _fwdNc[button] = nc ? ht : 1;
+            if (nc)
+            {
+                // NC double needs no style gate (system-driven).
+                bool ndbl = _downParity % 2 == 0;
+                uint nmsg = ndbl ? BtnDblNclMsg(button) : BtnDownNclMsg(button);
+                PostMessage(root, nmsg, (UIntPtr)ht, Pack(sx, sy));
+                Core.Log.Write($"FWD {button} nc{(ndbl ? "dblclk" : "down")} ht={ht} @({sx},{sy})");
+                _lastWhat = $"fwd-{button}-ncdown";
+                return;
+            }
             uint msg = BtnDownMsg(button);
             bool dbl = (_downParity % 2 == 0) && WantsDblClk(target);
             if (dbl)
@@ -2523,6 +2784,16 @@ public partial class TouchPadWindow : Window
                 target = BelowAt(sx, sy);
             _fwdCap.Remove(button);
             if (target == IntPtr.Zero) return;
+            int ncht = 1;
+            _fwdNc.TryGetValue(button, out ncht);
+            _fwdNc.Remove(button);
+            if (ncht != 1 && ncht != 0)
+            {
+                PostMessage(target, BtnUpNclMsg(button), (UIntPtr)ncht, Pack(sx, sy));
+                Core.Log.Write($"FWD {button} ncup ht={ncht} @({sx},{sy})");
+                _lastWhat = $"fwd-{button}-ncup";
+                return;
+            }
             var pt = new POINT { X = sx, Y = sy };
             if (!ScreenToClient(target, ref pt)) return;
             PostMessage(target, BtnUpMsg(button), UIntPtr.Zero, Pack(pt.X, pt.Y));

@@ -54,6 +54,10 @@ public static class MouseTap
     private static long _lastMoveLog;
     private static long _lastSwallowLog;
 
+    /// <summary>Last real (untagged) mouse input tick: cursor guards
+    /// stand down while the physical mouse may be driving.</summary>
+    public static long LastExtTick;
+
     /// <summary>Our pad rect, physical px (set by MainWindow tick).
     /// Used to keep pad coords out of the next-touch anchor.</summary>
     public static int PadL, PadT, PadR, PadB;
@@ -93,6 +97,7 @@ public static class MouseTap
                 bool promoted = tagged && (extra & 0x80UL) != 0;
                 string tag = !tagged ? "ext" : (promoted ? "prom" : "ours");
                 long now = Environment.TickCount64;
+                if (!tagged) LastExtTick = now;
                 // Swallow touch-promoted mouse everywhere: the panel maps
                 // 1:1 to the screen, so touches outside our window drive
                 // the real desktop (phantom clicks, cursor yank, double-

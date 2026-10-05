@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
 namespace TouchPadCloneV2.Core;
@@ -243,24 +244,42 @@ public static class Out
 
     /// <summary>Press (at given coords). One SendInput: move+button
     /// atomically, so no touch-promoted move can slip between them.
-    /// Tagged.</summary>
+    /// Tagged. The route (real vs below-forwarded) is recorded so the
+    /// matching release takes the same route (paired integrity).</summary>
+    public static readonly Dictionary<string, bool> DownReal = new();
+
     public static void DownAt(int x, int y, string button = "left")
     {
-        if (Below?.Invoke("down", button, x, y) == true)
-        { Log.Write($"BTN down {button} @({x},{y}) thru"); return; }
+        bool fwd = Below?.Invoke("down", button, x, y) == true;
+        DownReal[button] = !fwd;
+        if (fwd) { Log.Write($"BTN down {button} @({x},{y}) thru"); return; }
         if (_quiet == 0) InputSim.NoteInjected("down", button, x, y);
         Forward(MOUSEEVENTF_MOVE | DownFlag(button), x, y, 0);
         Log.Write($"BTN down {button} @({x},{y})");
     }
 
-    /// <summary>Release (at given coords). One SendInput. Tagged.</summary>
+    /// <summary>Release (at given coords). One SendInput. Tagged.
+    /// Follows its down's route (a forwarded up would leave a real
+    /// button stuck, a real up to a forwarded press double-fires).</summary>
     public static void UpAt(int x, int y, string button = "left")
     {
-        if (Below?.Invoke("up", button, x, y) == true)
+        bool wasReal = false;
+        DownReal.TryGetValue(button, out wasReal);
+        DownReal[button] = false;
+        if (!wasReal && Below?.Invoke("up", button, x, y) == true)
         { Log.Write($"BTN up {button} @({x},{y}) thru"); return; }
         if (_quiet == 0) InputSim.NoteInjected("up", button, x, y);
         Forward(MOUSEEVENTF_MOVE | UpFlag(button), x, y, 0);
         Log.Write($"BTN up {button} @({x},{y})");
+    }
+
+    /// <summary>Real press bypassing Below (drag grabs need real button
+    /// state for system modals). Records paired (its release goes real).</summary>
+    public static void DownAtReal(int x, int y, string button = "left")
+    {
+        DownReal[button] = true;
+        InputSim.Down(button);
+        Log.Write($"BTN down {button} @({x},{y}) real");
     }
 
     private static int _quiet;
