@@ -203,7 +203,6 @@
                 </Border>
                 <TextBlock x:Name="LayoutHoverLbl" Foreground="#35C4FF" FontSize="11" Margin="0,0,0,4" Text="X - Y - (클릭: 시작점, 다시 클릭: 끝점 → custom 입력)"/>
                 <TextBlock x:Name="LayoutInfoLbl" Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
-                <TextBlock x:Name="ZoneRectsLbl" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,2" Foreground="#E8ECF4"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
                     <CheckBox x:Name="PadZoneDef" Content="pad 기본값 사용" VerticalAlignment="Center"/>
                 </StackPanel>
@@ -228,7 +227,7 @@
                     <TextBlock Text="H" VerticalAlignment="Center"/>
                     <TextBox x:Name="LayoutHBox" Width="64" Margin="4,0,0,0"/>
                 </StackPanel>
-                <TextBlock Text="X/Y/W/H는 custom 모드에서만 사용 (호버 좌표 그대로 입력)" Foreground="Gray" FontSize="11" Margin="0,0,0,4"/>
+                <TextBlock Text="X/Y/W/H는 현재 배치값 표시, 직접 고치면 custom으로 전환 (호버 좌표 그대로 입력)" Foreground="Gray" FontSize="11" Margin="0,0,0,4"/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                     <Button x:Name="LayoutSaveBtn" Content="적용·저장" Width="100"/>
                     <Button x:Name="LayoutShowBtn" Content="패드 표시" Width="100" Margin="8,0,0,0"/>

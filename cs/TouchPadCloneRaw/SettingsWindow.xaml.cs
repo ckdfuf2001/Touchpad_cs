@@ -709,11 +709,18 @@ public partial class SettingsWindow : Window
         PresetSelBox.SelectionChanged += (_, _) => { if (!_loading) SwitchPresetFile(); };
         LayoutAreaBox.SelectionChanged += (_, _) =>
         {
-            SyncRectBoxes();
-            if (!_loading) { SaveLayoutTab(); DrawPreview(); }
+            if (!_loading && !_layoutSync) { SaveLayoutTab(); DrawPreview(); }
         };
         foreach (var b in new[] { LayoutXBox, LayoutYBox, LayoutWBox, LayoutHBox })
-            b.LostFocus += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
+            b.LostFocus += (_, _) =>
+            {
+                if (_loading) return;
+                // Editing the rect means custom: adopt it, then save.
+                if ((LayoutAreaBox.SelectedItem as string) != "custom")
+                    LayoutAreaBox.SelectedItem = "custom";
+                SaveLayoutTab();
+                DrawPreview();
+            };
         LayoutSaveBtn.Click += (_, _) => { SaveLayoutTab(); DrawPreview(); };
         LayoutShowBtn.Click += (_, _) => ShowLayoutPad();
         LayoutPreview.MouseMove += LayoutPreview_MouseMove;
@@ -862,6 +869,7 @@ public partial class SettingsWindow : Window
 
     private void LoadLayoutEditors()
     {
+        _layoutSync = true;
         try
         {
             string sec = LayoutKey();
@@ -870,40 +878,20 @@ public partial class SettingsWindow : Window
             string mode = p?.AreaMode ?? "default";
             if (!LayoutAreaBox.Items.Contains(mode)) mode = "default";
             LayoutAreaBox.SelectedItem = mode;
-            LayoutXBox.Text = TrimNum(p?.RectX ?? 0);
-            LayoutYBox.Text = TrimNum(p?.RectY ?? 0);
-            LayoutWBox.Text = TrimNum(p?.RectW ?? 0);
-            LayoutHBox.Text = TrimNum(p?.RectH ?? 0);
-            SyncRectBoxes();
+            // Boxes always show the EFFECTIVE placed rect (any mode);
+            // editing them switches to custom (see LostFocus above).
+            var (home, r, m0, k0, s0) = PreviewGeom();
+            LayoutXBox.Text = TrimNum(r.l);
+            LayoutYBox.Text = TrimNum(r.t);
+            LayoutWBox.Text = TrimNum(r.w);
+            LayoutHBox.Text = TrimNum(r.h);
         }
         catch { }
+        finally { _layoutSync = false; }
     }
 
-    private void SyncRectBoxes()
-    {
-        try
-        {
-            bool custom = (LayoutAreaBox.SelectedItem as string) == "custom";
-            LayoutXBox.IsEnabled = custom;
-            LayoutYBox.IsEnabled = custom;
-            LayoutWBox.IsEnabled = custom;
-            LayoutHBox.IsEnabled = custom;
-            if (custom && LayoutXBox.Text == "0" && LayoutYBox.Text == "0"
-                && LayoutWBox.Text == "0" && LayoutHBox.Text == "0")
-            {
-                // Prefill from the default anchor so the fields are valid.
-                var home = LayoutHome();
-                double w = _s.PadWidth > 0 ? _s.PadWidth : 340;
-                double h = _s.PadHeight > 0 ? _s.PadHeight : 260;
-                var (l, t, _, _) = Core.PadPlacer.Place("default", home, (w, h), (0, 0, 0, 0));
-                LayoutXBox.Text = TrimNum(l - home.l);
-                LayoutYBox.Text = TrimNum(t - home.t);
-                LayoutWBox.Text = TrimNum(w);
-                LayoutHBox.Text = TrimNum(h);
-            }
-        }
-        catch { }
-    }
+    /// <summary>Suppresses save-backs while LoadLayoutEditors fills.</summary>
+    private bool _layoutSync;
 
     private void SaveLayoutTab()
     {
@@ -1117,45 +1105,13 @@ public partial class SettingsWindow : Window
         catch { }
     }
 
-    /// <summary>Zone rects in screen DIP + pad custom editors. Display and
-    /// editors always derive from the same geometry.</summary>
+    /// <summary>Pad custom zone editors (the zone text readout was
+    /// removed per request; hover + preview carry the numbers).</summary>
     private void UpdateZoneDisplay()
     {
         try
         {
             var (home, r, mode, key, sec) = PreviewGeom();
-            string F(double x1, double y1, double x2, double y2) =>
-                $"[{x1:0},{y1:0}] ~ [{x2:0},{y2:0}]";
-            var lines = new List<string>
-            {
-                $"위치: {F(r.l, r.t, r.l + r.w, r.t + r.h)}",
-            };
-            string[] roles = { "lbtn", "rbtn", "wheel", "pad" };
-            string[] names = { "Left", "Right", "wheel", "pad" };
-            for (int i = 0; i < roles.Length; i++)
-            {
-                string line = $"{names[i]}: 없음";
-                if (_presets.TryGetValue(sec, out var lay) && lay != null)
-                {
-                    foreach (var t in lay.Tiles)
-                    {
-                        string k = (t.Kind ?? "").ToLowerInvariant();
-                        string btn = (t.ClickButton ?? "").ToLowerInvariant();
-                        bool hit = roles[i] == "pad" ? k == "pad"
-                            : roles[i] == "wheel" ? k.Contains("wheel")
-                            : roles[i] == "lbtn" ? (k.Contains("lbtn") || (k.Contains("click") && btn != "right"))
-                            : (k.Contains("rbtn") || (k.Contains("click") && btn == "right"));
-                        if (!hit) continue;
-                        double tx = r.l + r.w * t.X / 100.0;
-                        double ty = r.t + 30 + (r.h - 30) * t.Y / 100.0;
-                        double tw = r.w * t.W / 100.0, th = (r.h - 30) * t.H / 100.0;
-                        line = $"{names[i]}: {F(tx, ty, tx + tw, ty + th)}";
-                        break;
-                    }
-                }
-                lines.Add(line);
-            }
-            ZoneRectsLbl.Text = string.Join("\n", lines);
             // Pad custom editors: stored window-DIP -> screen DIP display.
             _s.Pads.TryGetValue(key, out var p);
             bool custom = p != null && p.ZonePadCustom && p.ZonePadW > 0 && p.ZonePadH > 0;
