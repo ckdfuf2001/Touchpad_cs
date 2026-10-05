@@ -903,28 +903,16 @@ public partial class SettingsWindow : Window
 
     private readonly Dictionary<string, ZoneRow> _zoneRows = new();
 
-    /// <summary>Value editing is custom-mode only: boxes, checkboxes and
-    /// screen-pick buttons all follow the area mode.</summary>
+    /// <summary>Window-rect editing is custom-mode only. Zone rows keep
+    /// their own checkbox gating (they work in any window mode).</summary>
     private void SyncValueBoxes()
     {
         try
         {
             bool custom = (LayoutAreaBox.SelectedItem as string) == "custom";
-            foreach (var b in new[] { LayoutXBox, LayoutYBox, LayoutWBox, LayoutHBox,
-                ZoneXBox, ZoneYBox, ZoneX2Box, ZoneY2Box })
+            foreach (var b in new[] { LayoutXBox, LayoutYBox, LayoutWBox, LayoutHBox })
                 b.IsEnabled = custom;
-            PadZoneDef.IsEnabled = custom;
             CustomPickBtn.IsEnabled = custom;
-            PadZonePickBtn.IsEnabled = custom;
-            foreach (var (_, zrow) in _zoneRows)
-            {
-                zrow.Def.IsEnabled = custom;
-                zrow.X.IsEnabled = custom;
-                zrow.Y.IsEnabled = custom;
-                zrow.X2.IsEnabled = custom;
-                zrow.Y2.IsEnabled = custom;
-                zrow.Pick.IsEnabled = custom;
-            }
         }
         catch { }
     }

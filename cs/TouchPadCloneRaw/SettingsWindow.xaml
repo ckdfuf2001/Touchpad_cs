@@ -204,6 +204,7 @@
                 <TextBlock x:Name="LayoutHoverLbl" Foreground="#35C4FF" FontSize="11" Margin="0,0,0,4" Text="X - Y -"/>
                 <TextBlock x:Name="LayoutInfoLbl" Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
                 <TextBlock Text="터치 영역" FontWeight="Bold" Margin="0,4,0,0"/>
+                <TextBlock Text="창 안의 실제 입력 범위 (창 크기와 별개)" Foreground="Gray" FontSize="11" Margin="0,0,0,4"/>
                 <TextBlock Text="영역 모드"/>
                 <ComboBox x:Name="LayoutAreaBox" Margin="0,2,0,4"/>
                 <TextBlock Text="창 위치" FontWeight="Bold" Margin="0,4,0,0"/>
