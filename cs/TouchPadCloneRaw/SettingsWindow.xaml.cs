@@ -990,7 +990,9 @@ public partial class SettingsWindow : Window
     }
 
     // Preview mapping (hover readout): canvas px -> monitor DIP.
-    private double _pvOx, _pvOy, _pvSc = 1, _pvVl, _pvVt;
+    // Forward is X(v) = ox + v*sc with ox already holding -vl*sc, so the
+    // inverse is plain (px-ox)/sc - never add the origin again.
+    private double _pvOx, _pvOy, _pvSc = 1;
     private bool _hoverLock;
     private string _hoverText = "";
     private EventHandler? _onLayoutDisplayChanged;
@@ -1007,8 +1009,8 @@ public partial class SettingsWindow : Window
             if (_hoverLock) return;
             var pp = e.GetPosition(LayoutPreview);
             if (_pvSc < 1e-9) return;
-            double mx = _pvVl + (pp.X - _pvOx) / _pvSc;
-            double my = _pvVt + (pp.Y - _pvOy) / _pvSc;
+            double mx = (pp.X - _pvOx) / _pvSc;
+            double my = (pp.Y - _pvOy) / _pvSc;
             _hoverText = $"X={mx:0} Y={my:0}";
             LayoutHoverLbl.Text = _hoverText;
         }
@@ -1056,8 +1058,8 @@ public partial class SettingsWindow : Window
         {
             if (_pvSc < 1e-9) return;
             var pp = e.GetPosition(LayoutPreview);
-            double mx = _pvVl + (pp.X - _pvOx) / _pvSc;
-            double my = _pvVt + (pp.Y - _pvOy) / _pvSc;
+            double mx = (pp.X - _pvOx) / _pvSc;
+            double my = (pp.Y - _pvOy) / _pvSc;
             if (_pinStart == null)
             {
                 _pinStart = (mx, my);
@@ -1268,7 +1270,7 @@ public partial class SettingsWindow : Window
             double sc = Math.Min(cw / vw, ch / vh);
             double ox = (cw - vw * sc) / 2 - vl * sc;
             double oy = (ch - vh * sc) / 2 - vt * sc;
-            _pvOx = ox; _pvOy = oy; _pvSc = sc; _pvVl = vl; _pvVt = vt;
+            _pvOx = ox; _pvOy = oy; _pvSc = sc;
             if (!_hoverLock) LayoutHoverLbl.Text = "X - Y -";
             double X(double v) => ox + v * sc;
             double Y(double v) => oy + v * sc;

@@ -157,8 +157,9 @@ public sealed class PadConfig
     public bool? ScrollInvert { get; set; }       // null = follow global
     public bool? SwapButtons { get; set; }        // null = follow global
     public bool? TapToClick { get; set; }       // null = follow global
-    /// <summary>Custom rect (DIP, home-monitor origin) for AreaMode
-    /// "custom". All zero = unset (falls back to the default anchor).</summary>
+    /// <summary>Custom rect (DIP, virtual-desktop coords: the same numbers
+    /// the hover readout shows) for AreaMode "custom". All zero = unset
+    /// (falls back to the default anchor).</summary>
     public double RectX { get; set; }
     public double RectY { get; set; }
     public double RectW { get; set; }

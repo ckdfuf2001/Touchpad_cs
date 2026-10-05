@@ -19,8 +19,9 @@ public static class PadPlacer
         };
 
     /// <summary>Single shared placement used by the app and the layout
-    /// preview alike: full/half fill the home monitor, custom clamps the
-    /// stored rect into it, default anchors a WxH window bottom-right.</summary>
+    /// preview alike: full/half fill the home monitor, custom takes
+    /// virtual-desktop coords (same numbers the hover readout shows)
+    /// clamped into home, default anchors a WxH window bottom-right.</summary>
     public static (double l, double t, double w, double h) Place(
         string mode,
         (double l, double t, double w, double h) home,
@@ -38,9 +39,9 @@ public static class PadPlacer
                 double w = System.Math.Min(custom.w, home.w);
                 double h = System.Math.Min(custom.h, home.h);
                 double l = System.Math.Max(home.l,
-                    System.Math.Min(home.l + home.w - w, home.l + custom.x));
+                    System.Math.Min(home.l + home.w - w, custom.x));
                 double t = System.Math.Max(home.t,
-                    System.Math.Min(home.t + home.h - h, home.t + custom.y));
+                    System.Math.Min(home.t + home.h - h, custom.y));
                 return (l, t, w, h);
             }
             default:
