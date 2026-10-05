@@ -201,11 +201,7 @@
                 <Border BorderBrush="#335C6C7D" BorderThickness="1" CornerRadius="6" Background="#0A0F14" Margin="0,0,0,4" Padding="4">
                     <Canvas x:Name="LayoutPreview" Height="250" HorizontalAlignment="Stretch" Background="#0A0F14" ClipToBounds="True"/>
                 </Border>
-                <TextBlock x:Name="LayoutHoverLbl" Foreground="#35C4FF" FontSize="11" Margin="0,0,0,4" Text="X - Y -"/>
-                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                    <Button x:Name="PinModeBtn" Content="영역 찍기" Width="100"/>
-                    <Button x:Name="PinClearBtn" Content="핀 지우기" Width="100" Margin="8,0,0,0"/>
-                </StackPanel>
+                <TextBlock x:Name="LayoutHoverLbl" Foreground="#35C4FF" FontSize="11" Margin="0,0,0,4" Text="X - Y - (클릭: 시작점, 다시 클릭: 끝점 → custom 입력)"/>
                 <TextBlock x:Name="LayoutInfoLbl" Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
                 <TextBlock x:Name="ZoneRectsLbl" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,2" Foreground="#E8ECF4"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,2">

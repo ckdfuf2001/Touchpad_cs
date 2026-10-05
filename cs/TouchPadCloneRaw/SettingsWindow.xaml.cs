@@ -719,13 +719,6 @@ public partial class SettingsWindow : Window
         LayoutPreview.MouseMove += LayoutPreview_MouseMove;
         LayoutPreview.MouseLeftButtonDown += LayoutPreview_MouseDown;
         LayoutPreview.SizeChanged += (_, _) => { try { DrawPreview(); } catch { } };
-        PinModeBtn.Click += (_, _) => TogglePinMode();
-        PinClearBtn.Click += (_, _) =>
-        {
-            _pinAreas.Clear();
-            _pinStart = null;
-            DrawPreview();
-        };
         PadZoneDef.Checked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
         PadZoneDef.Unchecked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
         // Display change: redraw the preview on the new topology (the
@@ -993,20 +986,18 @@ public partial class SettingsWindow : Window
     // Forward is X(v) = ox + v*sc with ox already holding -vl*sc, so the
     // inverse is plain (px-ox)/sc - never add the origin again.
     private double _pvOx, _pvOy, _pvSc = 1;
-    private bool _hoverLock;
+    // Click-pinned area (single): odd clicks set the start dot, even
+    // clicks close the rect and fill the custom boxes above. Clicking
+    // replaces hover-lock: every layout click leaves a visible dot.
+    private (double x, double y)? _pinStart;
+    private (double x1, double y1, double x2, double y2)? _pinArea;
     private string _hoverText = "";
     private EventHandler? _onLayoutDisplayChanged;
-    // Click-pinned areas (max 2): area 1 -> custom rect boxes, area 2 ->
-    // pad zone boxes. Monitor DIP, drawn as dots + rects on the preview.
-    private bool _pinMode;
-    private readonly List<(double x1, double y1, double x2, double y2)> _pinAreas = new();
-    private (double x, double y)? _pinStart;
 
     private void LayoutPreview_MouseMove(object sender, MouseEventArgs e)
     {
         try
         {
-            if (_hoverLock) return;
             var pp = e.GetPosition(LayoutPreview);
             if (_pvSc < 1e-9) return;
             double mx = (pp.X - _pvOx) / _pvSc;
@@ -1021,37 +1012,14 @@ public partial class SettingsWindow : Window
     {
         try
         {
-            if (_pinMode)
-            {
-                PinClick(e);
-                return;
-            }
-            _hoverLock = !_hoverLock;
-            LayoutHoverLbl.Text = _hoverText + (_hoverLock ? " (고정됨)" : "");
+            PinClick(e);
         }
         catch { }
     }
 
-    private void TogglePinMode()
-    {
-        _pinMode = !_pinMode;
-        if (_pinMode)
-        {
-            _pinAreas.Clear();
-            _pinStart = null;
-            PinModeBtn.Content = "영역 찍기 (0/2)";
-            LayoutHoverLbl.Text = "영역 찍기: 시작점을 클릭";
-        }
-        else
-        {
-            PinModeBtn.Content = "영역 찍기";
-        }
-        DrawPreview();
-    }
-
     /// <summary>Pin clicks: odd clicks set the start dot, even clicks
-    /// close the area (1st -> custom rect boxes, 2nd -> pad zone boxes).
-    /// Auto-exits after 2 fixed areas.</summary>
+    /// close the single area and fill the custom boxes above with the
+    /// fixed start/end values. Clicking again starts a new area.</summary>
     private void PinClick(MouseEventArgs e)
     {
         try
@@ -1062,6 +1030,7 @@ public partial class SettingsWindow : Window
             double my = (pp.Y - _pvOy) / _pvSc;
             if (_pinStart == null)
             {
+                _pinArea = null;
                 _pinStart = (mx, my);
                 LayoutHoverLbl.Text = $"시작점: X={mx:0} Y={my:0} — 끝점을 클릭";
             }
@@ -1069,17 +1038,9 @@ public partial class SettingsWindow : Window
             {
                 var (sx, sy) = _pinStart.Value;
                 _pinStart = null;
-                _pinAreas.Add((Math.Min(sx, mx), Math.Min(sy, my),
-                    Math.Max(sx, mx), Math.Max(sy, my)));
-                if (_pinAreas.Count == 1) ApplyPinToCustom();
-                else
-                {
-                    ApplyPinToZone();
-                    _pinMode = false;
-                    PinModeBtn.Content = "영역 찍기";
-                    LayoutHoverLbl.Text = "영역 2개 고정됨 (해제됨)";
-                }
-                if (_pinMode) PinModeBtn.Content = $"영역 찍기 ({_pinAreas.Count}/2)";
+                _pinArea = (Math.Min(sx, mx), Math.Min(sy, my),
+                    Math.Max(sx, mx), Math.Max(sy, my));
+                ApplyPinToCustom();
             }
             DrawPreview();
         }
@@ -1090,43 +1051,29 @@ public partial class SettingsWindow : Window
     {
         try
         {
-            var a = _pinAreas[0];
+            if (_pinArea == null) return;
+            var a = _pinArea.Value;
             LayoutXBox.Text = TrimNum(a.x1);
             LayoutYBox.Text = TrimNum(a.y1);
             LayoutWBox.Text = TrimNum(a.x2 - a.x1);
             LayoutHBox.Text = TrimNum(a.y2 - a.y1);
             LayoutAreaBox.SelectedItem = "custom";
-            LayoutHoverLbl.Text = "영역1 → custom 입력됨, 영역2 시작점을 클릭";
+            LayoutHoverLbl.Text =
+                $"고정됨: [{TrimNum(a.x1)},{TrimNum(a.y1)}] ~ [{TrimNum(a.x2)},{TrimNum(a.y2)}] → custom 입력됨";
         }
         catch { }
     }
 
-    private void ApplyPinToZone()
-    {
-        try
-        {
-            var a = _pinAreas[1];
-            ZoneXBox.Text = TrimNum(a.x1);
-            ZoneYBox.Text = TrimNum(a.y1);
-            ZoneX2Box.Text = TrimNum(a.x2);
-            ZoneY2Box.Text = TrimNum(a.y2);
-            PadZoneDef.IsChecked = false;
-        }
-        catch { }
-    }
-
-    /// <summary>Pinned dots + area rects on top of the preview.</summary>
+    /// <summary>Pinned start dot + area rect on top of the preview.</summary>
     private void DrawPins()
     {
         try
         {
             if (_pvSc < 1e-9) return;
-            int idx = 0;
-            foreach (var a in _pinAreas)
+            if (_pinArea != null)
             {
-                var col = idx == 0
-                    ? System.Windows.Media.Color.FromArgb(0xFF, 0x7F, 0xE0, 0xA8)
-                    : System.Windows.Media.Color.FromArgb(0xFF, 0xFF, 0xB3, 0x5C);
+                var a = _pinArea.Value;
+                var col = System.Windows.Media.Color.FromArgb(0xFF, 0x7F, 0xE0, 0xA8);
                 var rr = new System.Windows.Shapes.Rectangle
                 {
                     Width = Math.Max(2, (a.x2 - a.x1) * _pvSc),
@@ -1152,7 +1099,6 @@ public partial class SettingsWindow : Window
                     Canvas.SetLeft(d, _pvOx + px * _pvSc - 3.5);
                     Canvas.SetTop(d, _pvOy + py * _pvSc - 3.5);
                 }
-                idx++;
             }
             if (_pinStart != null)
             {
@@ -1271,7 +1217,6 @@ public partial class SettingsWindow : Window
             double ox = (cw - vw * sc) / 2 - vl * sc;
             double oy = (ch - vh * sc) / 2 - vt * sc;
             _pvOx = ox; _pvOy = oy; _pvSc = sc;
-            if (!_hoverLock) LayoutHoverLbl.Text = "X - Y -";
             double X(double v) => ox + v * sc;
             double Y(double v) => oy + v * sc;
             // Monitors (bounds are physical px: divide into DIPs first so
