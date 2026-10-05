@@ -201,7 +201,7 @@
                 <Border BorderBrush="#335C6C7D" BorderThickness="1" CornerRadius="6" Background="#0A0F14" Margin="0,0,0,4" Padding="4">
                     <Canvas x:Name="LayoutPreview" Height="250" HorizontalAlignment="Stretch" Background="#0A0F14" ClipToBounds="True"/>
                 </Border>
-                <TextBlock x:Name="LayoutHoverLbl" Foreground="#35C4FF" FontSize="11" Margin="0,0,0,4" Text="X - Y - (클릭: 시작점, 다시 클릭: 끝점 → custom 입력)"/>
+                <TextBlock x:Name="LayoutHoverLbl" Foreground="#35C4FF" FontSize="11" Margin="0,0,0,4" Text="X - Y -"/>
                 <TextBlock x:Name="LayoutInfoLbl" Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"/>
                 <StackPanel Orientation="Horizontal" Margin="0,0,0,2">
                     <CheckBox x:Name="PadZoneDef" Content="pad 기본값 사용" VerticalAlignment="Center"/>
@@ -214,6 +214,7 @@
                     <TextBox x:Name="ZoneX2Box" Width="56" Margin="4,0,4,0"/>
                     <TextBox x:Name="ZoneY2Box" Width="56" Margin="0,0,0,0"/>
                     <TextBlock Text="]" VerticalAlignment="Center" Margin="4,0,0,0"/>
+                    <Button x:Name="PadZonePickBtn" Content="화면선택" Width="80" Margin="8,0,0,0"/>
                 </StackPanel>
                 <StackPanel x:Name="ZoneRows" Margin="0,0,0,4"/>
                 <TextBlock Text="영역 모드"/>
@@ -226,7 +227,8 @@
                     <TextBlock Text="W" VerticalAlignment="Center"/>
                     <TextBox x:Name="LayoutWBox" Width="64" Margin="4,0,8,0"/>
                     <TextBlock Text="H" VerticalAlignment="Center"/>
-                    <TextBox x:Name="LayoutHBox" Width="64" Margin="4,0,0,0"/>
+                    <TextBox x:Name="LayoutHBox" Width="64" Margin="4,0,8,0"/>
+                    <Button x:Name="CustomPickBtn" Content="화면선택" Width="80" Margin="4,0,0,0"/>
                 </StackPanel>
                 <TextBlock Text="X/Y/W/H는 현재 배치값 표시, 직접 고치면 custom으로 전환 (호버 좌표 그대로 입력)" Foreground="Gray" FontSize="11" Margin="0,0,0,4"/>
                 <StackPanel Orientation="Horizontal" Margin="0,4,0,0">

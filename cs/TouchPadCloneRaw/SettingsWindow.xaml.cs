@@ -723,6 +723,8 @@ public partial class SettingsWindow : Window
             };
         LayoutSaveBtn.Click += (_, _) => { SaveLayoutTab(); DrawPreview(); };
         LayoutShowBtn.Click += (_, _) => ShowLayoutPad();
+        CustomPickBtn.Click += (_, _) => ArmPick("custom");
+        PadZonePickBtn.Click += (_, _) => ArmPick("pad");
         LayoutPreview.MouseMove += LayoutPreview_MouseMove;
         LayoutPreview.MouseLeftButtonDown += LayoutPreview_MouseDown;
         LayoutPreview.SizeChanged += (_, _) => { try { DrawPreview(); } catch { } };
@@ -907,6 +909,7 @@ public partial class SettingsWindow : Window
         public string Key = "";
         public CheckBox Def = null!;
         public TextBox X = null!, Y = null!, X2 = null!, Y2 = null!;
+        public Button Pick = null!;
     }
 
     private readonly Dictionary<string, ZoneRow> _zoneRows = new();
@@ -936,6 +939,8 @@ public partial class SettingsWindow : Window
                 var sep = new TextBlock { Text = "~", VerticalAlignment = VerticalAlignment.Center };
                 var x2b = new TextBox { Width = 56, Margin = new Thickness(4, 0, 4, 0) };
                 var y2b = new TextBox { Width = 56 };
+                var pick = new Button { Content = "화면선택", Width = 80, Margin = new Thickness(8, 0, 0, 0) };
+                pick.Click += (_, _) => ArmPick(key);
                 def.Checked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
                 def.Unchecked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
                 foreach (var b in new[] { xb, yb, x2b, y2b })
@@ -946,8 +951,9 @@ public partial class SettingsWindow : Window
                 line.Children.Add(sep);
                 line.Children.Add(x2b);
                 line.Children.Add(y2b);
+                line.Children.Add(pick);
                 ZoneRows.Children.Add(line);
-                _zoneRows[key] = new ZoneRow { Key = key, Def = def, X = xb, Y = yb, X2 = x2b, Y2 = y2b };
+                _zoneRows[key] = new ZoneRow { Key = key, Def = def, X = xb, Y = yb, X2 = x2b, Y2 = y2b, Pick = pick };
             }
         }
         catch { }
@@ -1184,20 +1190,34 @@ public partial class SettingsWindow : Window
         catch { }
     }
 
-    /// <summary>Pin clicks: odd clicks set the start dot, even clicks
-    /// close the single area and fill the custom boxes above with the
-    /// fixed start/end values. Clicking again starts a new area.</summary>
+    /// <summary>Pin target: "custom" (window rect), "pad" or a zone key
+    /// (left-click/right-click/wheel). Null = disarmed. One area per
+    /// arming: start dot, end dot + rect, then the target boxes are
+    /// filled and it disarms.</summary>
+    private string? _pinTarget;
+
+    private void ArmPick(string target)
+    {
+        _pinTarget = target;
+        _pinStart = null;
+        _pinArea = null;
+        LayoutHoverLbl.Text = $"영역 찍기({target}): 시작점을 클릭";
+        DrawPreview();
+    }
+
+    /// <summary>Pin clicks: first sets the start dot, second closes the
+    /// rect into the armed target's boxes. Disarms after one area.</summary>
     private void PinClick(MouseEventArgs e)
     {
         try
         {
+            if (_pinTarget == null) return;
             if (_pvSc < 1e-9) return;
             var pp = e.GetPosition(LayoutPreview);
             double mx = (pp.X - _pvOx) / _pvSc;
             double my = (pp.Y - _pvOy) / _pvSc;
             if (_pinStart == null)
             {
-                _pinArea = null;
                 _pinStart = (mx, my);
                 LayoutHoverLbl.Text = $"시작점: X={mx:0} Y={my:0} — 끝점을 클릭";
             }
@@ -1207,26 +1227,51 @@ public partial class SettingsWindow : Window
                 _pinStart = null;
                 _pinArea = (Math.Min(sx, mx), Math.Min(sy, my),
                     Math.Max(sx, mx), Math.Max(sy, my));
-                ApplyPinToCustom();
+                ApplyPinToTarget();
+                _pinTarget = null;
             }
             DrawPreview();
         }
         catch { }
     }
 
-    private void ApplyPinToCustom()
+    private void ApplyPinToTarget()
     {
         try
         {
-            if (_pinArea == null) return;
+            if (_pinArea == null || _pinTarget == null) return;
             var a = _pinArea.Value;
-            LayoutXBox.Text = TrimNum(a.x1);
-            LayoutYBox.Text = TrimNum(a.y1);
-            LayoutWBox.Text = TrimNum(a.x2 - a.x1);
-            LayoutHBox.Text = TrimNum(a.y2 - a.y1);
-            LayoutAreaBox.SelectedItem = "custom";
-            LayoutHoverLbl.Text =
-                $"고정됨: [{TrimNum(a.x1)},{TrimNum(a.y1)}] ~ [{TrimNum(a.x2)},{TrimNum(a.y2)}] → custom 입력됨";
+            string t = _pinTarget;
+            if (t == "custom")
+            {
+                LayoutXBox.Text = TrimNum(a.x1);
+                LayoutYBox.Text = TrimNum(a.y1);
+                LayoutWBox.Text = TrimNum(a.x2 - a.x1);
+                LayoutHBox.Text = TrimNum(a.y2 - a.y1);
+                LayoutAreaBox.SelectedItem = "custom";
+                LayoutHoverLbl.Text =
+                    $"고정됨: [{TrimNum(a.x1)},{TrimNum(a.y1)}] ~ [{TrimNum(a.x2)},{TrimNum(a.y2)}] → custom 입력됨";
+            }
+            else if (t == "pad")
+            {
+                ZoneXBox.Text = TrimNum(a.x1);
+                ZoneYBox.Text = TrimNum(a.y1);
+                ZoneX2Box.Text = TrimNum(a.x2);
+                ZoneY2Box.Text = TrimNum(a.y2);
+                PadZoneDef.IsChecked = false;
+                LayoutHoverLbl.Text =
+                    $"고정됨: [{TrimNum(a.x1)},{TrimNum(a.y1)}] ~ [{TrimNum(a.x2)},{TrimNum(a.y2)}] → pad 입력됨";
+            }
+            else if (_zoneRows.TryGetValue(t, out var zrow))
+            {
+                zrow.X.Text = TrimNum(a.x1);
+                zrow.Y.Text = TrimNum(a.y1);
+                zrow.X2.Text = TrimNum(a.x2);
+                zrow.Y2.Text = TrimNum(a.y2);
+                zrow.Def.IsChecked = false;
+                LayoutHoverLbl.Text =
+                    $"고정됨: [{TrimNum(a.x1)},{TrimNum(a.y1)}] ~ [{TrimNum(a.x2)},{TrimNum(a.y2)}] → {t} 입력됨";
+            }
         }
         catch { }
     }
