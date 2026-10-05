@@ -720,6 +720,21 @@ public partial class SettingsWindow : Window
         LayoutPreview.MouseLeftButtonDown += LayoutPreview_MouseDown;
         PadZoneDef.Checked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
         PadZoneDef.Unchecked += (_, _) => { if (!_loading) { SaveLayoutTab(); DrawPreview(); } };
+        // Display change: redraw the preview on the new topology (the
+        // strip repositions the same way). Unhook on close (SystemEvents
+        // holds strong refs).
+        _onLayoutDisplayChanged = (_, _) =>
+            Dispatcher.InvokeAsync(() => { try { DrawPreview(); } catch { } });
+        Microsoft.Win32.SystemEvents.DisplaySettingsChanged += _onLayoutDisplayChanged;
+        Closed += (_, _) =>
+        {
+            try
+            {
+                if (_onLayoutDisplayChanged != null)
+                    Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= _onLayoutDisplayChanged;
+            }
+            catch { }
+        };
         if (LayoutSelBox.Items.Contains(_s.Layout)) LayoutSelBox.SelectedItem = _s.Layout;
         else if (LayoutSelBox.Items.Count > 0) LayoutSelBox.SelectedIndex = 0;
         LoadLayoutEditors();
@@ -970,6 +985,7 @@ public partial class SettingsWindow : Window
     private double _pvOx, _pvOy, _pvSc = 1, _pvVl, _pvVt;
     private bool _hoverLock;
     private string _hoverText = "";
+    private EventHandler? _onLayoutDisplayChanged;
 
     private void LayoutPreview_MouseMove(object sender, MouseEventArgs e)
     {

@@ -120,9 +120,11 @@ public partial class App : WApplication
         };
         Exit += (_, _) => _pad?.EmergencyRestore();
         // Monitors changed (plug/unplug): re-resolve the strip monitor
-        // (vanished -> next) and re-clamp everything.
+        // (vanished -> next) and re-clamp everything. The pad must
+        // re-place even in the same mode (stale coords stick out of the
+        // new screen), so drop the placed marker first.
         _onDisplayChanged = (_, _) =>
-            Dispatcher.InvokeAsync(() => { try { Apply(); } catch { } });
+            Dispatcher.InvokeAsync(() => { try { _placedMode = ""; Apply(); } catch { } });
         Microsoft.Win32.SystemEvents.DisplaySettingsChanged += _onDisplayChanged;
         Exit += (_, _) =>
         {
