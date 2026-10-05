@@ -45,8 +45,15 @@ public static class PadPlacer
                 return (l, t, w, h);
             }
             default:
-                return (home.l + home.w - size.w - 40,
-                    home.t + home.h - size.h - 120, size.w, size.h);
+            {
+                // Bottom-right anchor, clamped into home: an oversized pad
+                // used to strand off-screen (negative Y in every readout).
+                double l = home.l + home.w - size.w - 40;
+                double t = home.t + home.h - size.h - 120;
+                if (l < home.l) l = home.l;
+                if (t < home.t) t = home.t;
+                return (l, t, size.w, size.h);
+            }
         }
     }
 }
