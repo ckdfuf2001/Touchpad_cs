@@ -293,13 +293,13 @@ public static class InputSim
     /// <summary>
     /// Tag our own injections so they can be told apart from real input, the
     /// way the reference does with GetMessageExtraInfo. The signature is the
-    /// convention: 0xFF515700 | (thread id &amp; 0xFF).
-    /// </summary>
+    /// convention: 0xFF515700 | (thread id &amp; 0x7F). Low byte masked to
+    /// 0x7F so it never sets bit 0x80 - that bit marks touch-promoted mouse,
+    /// which the tap hook tells apart ([prom] vs [ours] in the log). Must
+    /// stay identical to Out.InjectTag; a wider mask gets our own injections
+    /// swallowed as promoted.
     private static readonly IntPtr InjectTag = new(
-        unchecked((int)(0xFF515700 | (uint)(Environment.CurrentManagedThreadId & 0xFF))));
-
-    [DllImport("user32.dll")]
-    private static extern int ShowCursor(bool bShow);
+        unchecked((int)(0xFF515700 | (uint)(Environment.CurrentManagedThreadId & 0x7F))));
 
     [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -311,8 +311,6 @@ public static class InputSim
         public uint cbSize; public uint flags;
         public IntPtr hCursor; public POINT ptScreenPos;
     }
-
-    private const uint CURSOR_SHOWING = 0x00000001;
     /// <summary>
     /// Windows hiding the pointer for a live touch. ShowCursor cannot clear
     /// this - it is not the ShowCursor counter - and the old restore loop kept
@@ -354,24 +352,23 @@ public static class InputSim
         }
     }
 
+    /// ShowCursor counter is shared process-wide: HideCursor is a no-op.
+    /// Touch suppression (CURSOR_SUPPRESSED) is not the ShowCursor counter
+    /// and ShowCursor(true) cannot clear it - the old restore loop called it
+    /// 8..500 times trying and drained the counter so far the pointer could
+    /// never be hidden again. See RestoreCursor/ClearSuppression.
     public static void HideCursor()
     {
-        if (OutputEnabled) ShowCursor(false);
     }
 
-    /// <summary>Emergency restore: force the cursor visible again.</summary>
+    /// <summary>Emergency restore: exactly one net-zero nudge when actually
+    /// suppressed, never a ShowCursor loop. Startup crash recovery calls
+    /// this; stuck suppression (tap with no mouse output, process killed
+    /// mid-touch) needs one injected move, live-touch suppression clears by
+    /// itself while the finger is down.</summary>
     public static void RestoreCursor()
     {
-        if (!OutputEnabled) return;
-        for (int i = 0; i < 8; i++)
-        {
-            var ci = new CURSORINFO { cbSize = (uint)Marshal.SizeOf<CURSORINFO>() };
-            if (GetCursorInfo(out ci) && (ci.flags & CURSOR_SHOWING) != 0)
-                return;
-            if ((ci.flags & CURSOR_SUPPRESSED) != 0)
-                return;   // nothing to do: the system clears it by itself
-            ShowCursor(true);
-        }
+        ClearSuppression();
     }
 
     /// <summary>

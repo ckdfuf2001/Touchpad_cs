@@ -4,9 +4,11 @@ using System.Runtime.InteropServices;
 namespace TouchPadCloneV2.Core;
 
 /// <summary>
-/// System-state reads (cursor, buttons, suppression) for the HUD.
-/// NO output methods yet - gestures arrive per dictation, and every one
-/// goes through here so injections stay tagged and countable.
+/// System-state reads (cursor, buttons, suppression) for the HUD, plus the
+/// single tagged output path: SetPhysicalCursorPos + mouse_event, the same
+/// primitives the reference uses. SendInput absolute moves measured broken
+/// for drags (selected nothing), so nothing here uses SendInput.
+/// Every injection carries InjectTag and is journaled via NoteInjected.
 /// </summary>
 public static class Out
 {
@@ -116,28 +118,6 @@ public static class Out
     private const uint MOUSEEVENTF_HWHEEL = 0x1000;
     private const uint MOUSEEVENTF_XDOWN = 0x0080;
     private const uint MOUSEEVENTF_XUP = 0x0100;
-    private const uint INPUT_MOUSE = 0;
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MOUSEINPUT
-    {
-        public int dx, dy;
-        public uint mouseData;
-        public uint dwFlags;
-        public uint time;
-        public IntPtr dwExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct INPUT
-    {
-        public uint type;
-        public MOUSEINPUT mi;
-    }
-
-    [DllImport("user32.dll")]
-    private static extern uint SendInput(uint nInputs,
-        [MarshalAs(UnmanagedType.LPArray), In] INPUT[] pInputs, int cbSize);
 
     [DllImport("user32.dll")]
     private static extern UIntPtr GetMessageExtraInfo();
@@ -155,31 +135,17 @@ public static class Out
     }
 
     /// <summary>
-    /// Re-emit as REAL input at the same screen point (full fidelity:
+    /// Place then fire at the same screen point (full fidelity:
     /// focus/capture/drag work, unlike posted messages). Tagged.
+    /// Reference way: SetPhysicalCursorPos + relative mouse_event, never
+    /// SendInput absolute (measured: absolute drags select nothing).
     /// Coordinates are physical screen pixels.
     /// </summary>
     public static void Forward(uint flags, int x, int y, uint data)
     {
-        int vx = GetSystemMetrics(76), vy = GetSystemMetrics(77);
-        int vw = GetSystemMetrics(78), vh = GetSystemMetrics(79);
-        if (vw <= 1 || vh <= 1) return;
-        var inp = new INPUT
-        {
-            type = INPUT_MOUSE,
-            mi = new MOUSEINPUT
-            {
-                dx = (int)((x - vx) * 65535.0 / (vw - 1)),
-                dy = (int)((y - vy) * 65535.0 / (vh - 1)),
-                mouseData = data,
-                dwFlags = (uint)(flags | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK),
-                time = 0,
-                dwExtraInfo = InjectTag,
-            },
-        };
-        inp.mi.dx = Math.Clamp(inp.mi.dx, 0, 65535);
-        inp.mi.dy = Math.Clamp(inp.mi.dy, 0, 65535);
-        SendInput(1, new[] { inp }, Marshal.SizeOf<INPUT>());
+        try { SetPhysicalCursorPos(x, y); } catch { }
+        mouse_event(flags & ~(MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK),
+            0, 0, data, InjectTag);
     }
 
     // Our tag: 0xFF515700 | thread id. Low byte masked to 0x7F so it
@@ -241,9 +207,9 @@ public static class Out
         }
     }
 
-    /// <summary>Press (at given coords). One SendInput: move+button
-    /// atomically, so no touch-promoted move can slip between them.
-    /// Tagged.</summary>
+    /// <summary>Press (at given coords). Place then button down via
+    /// mouse_event, the reference way - no SendInput, so no touch-promoted
+    /// move can slip between them. Tagged.</summary>
     public static void DownAt(int x, int y, string button = "left")
     {
         if (Below?.Invoke("down", button, x, y) == true)
@@ -253,7 +219,7 @@ public static class Out
         Log.Write($"BTN down {button} @({x},{y})");
     }
 
-    /// <summary>Release (at given coords). One SendInput. Tagged.</summary>
+    /// <summary>Release (at given coords). mouse_event, tagged.</summary>
     public static void UpAt(int x, int y, string button = "left")
     {
         if (Below?.Invoke("up", button, x, y) == true)
