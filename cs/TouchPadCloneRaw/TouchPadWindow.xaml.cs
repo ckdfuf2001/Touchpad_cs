@@ -2186,6 +2186,9 @@ public partial class TouchPadWindow : Window
     private static extern IntPtr ChildWindowFromPointEx(IntPtr parent, POINT pt, uint flags);
 
     [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(POINT pt);
+
+    [DllImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
 
@@ -2557,13 +2560,20 @@ public partial class TouchPadWindow : Window
     /// <summary>Gesture output landing on our own window goes below
     /// (pass-through), like the physical mouse. The real cursor still
     /// follows the model, so it never strands at the drag start.
-    /// Elsewhere: real input.</summary>
+    /// Elsewhere: real input.
+    /// Z-order gate: divert to posted pass-through ONLY when our own
+    /// window would actually eat the real input. If another app's window
+    /// covers this point, real mouse_event lands there correctly - while
+    /// posted messages can't drag OS windows and Explorer ignores posted
+    /// clicks entirely.</summary>
     private bool BelowDeliver(string kind, string button, int x, int y)
     {
         try
         {
             double pl = Left * _dpi, pt = Top * _dpi;
             if (x < pl || x >= pl + Width * _dpi || y < pt || y >= pt + Height * _dpi)
+                return false;
+            if (!OurWindowOnTop(x, y))
                 return false;
             Core.Out.PlaceAtReal(x, y);
             if (kind == "down") FwdDown(button, x, y);
@@ -2572,6 +2582,24 @@ public partial class TouchPadWindow : Window
             return true;
         }
         catch { return false; }
+    }
+
+    /// <summary>True when our own process owns the hit window at (x,y)
+    /// (physical px). WindowFromPoint already skips invisible and
+    /// click-through windows, matching real-input routing. Unknown or
+    /// lookup failure keeps the old divert behavior (safe side: our
+    /// topmost pad eating real input).</summary>
+    private static bool OurWindowOnTop(int x, int y)
+    {
+        try
+        {
+            IntPtr h = WindowFromPoint(new POINT { X = x, Y = y });
+            if (h == IntPtr.Zero) return true;
+            GetWindowThreadProcessId(h, out uint pid);
+            if (pid == 0) return true;
+            return pid == (uint)Environment.ProcessId;
+        }
+        catch { return true; }
     }
 
     private void FwdClick(string button, int sx, int sy)
